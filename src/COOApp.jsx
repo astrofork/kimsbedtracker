@@ -188,22 +188,24 @@ function Overview({ data, compliance, selDate, history }) {
 function Matrix({ data, selDate, history }) {
   const isLive = selDate === "live";
 
-  // ── Ward filter — persisted per-device in localStorage ────────────────────
-  // hiddenWards is a Set of ward names the COO has unchecked.
-  // New wards that appear from the server are visible by default.
-  const [hiddenWards, setHiddenWards] = useState(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("coo_matrix_hidden") || "[]")); }
-    catch { return new Set(); }
+  // ── Ward filter — ordered array, persisted in localStorage ──────────────
+  // selectedWards is an array of ward names in the order the COO ticked them.
+  // Empty array = no manual selection → show all wards alphabetically.
+  const [selectedWards, setSelectedWards] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coo_matrix_order") || "[]"); }
+    catch { return []; }
   });
   const [filterOpen, setFilterOpen] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem("coo_matrix_hidden", JSON.stringify([...hiddenWards]));
-  }, [hiddenWards]);
+    localStorage.setItem("coo_matrix_order", JSON.stringify(selectedWards));
+  }, [selectedWards]);
 
-  const toggleWard   = (ward) => setHiddenWards((prev) => { const n = new Set(prev); n.has(ward) ? n.delete(ward) : n.add(ward); return n; });
-  const showAllWards = ()     => setHiddenWards(new Set());
-  const hideAllWards = (all)  => setHiddenWards(new Set(all));
+  const toggleWard = (ward) => setSelectedWards((prev) => {
+    if (prev.includes(ward)) return prev.filter((w) => w !== ward); // untick → remove
+    return [...prev, ward];                                          // tick   → append
+  });
+  const showAllWards = () => setSelectedWards([]);                   // clear → back to alphabetical
 
   // ── Data build ────────────────────────────────────────────────────────────
   // For historical view, build a pre→ward→counts map from the day's rounds.
@@ -242,10 +244,14 @@ function Matrix({ data, selDate, history }) {
   });
 
   // Apply the ward filter.
-  const rows = allRows.filter((r) => !hiddenWards.has(r.ward));
+  // If selectedWards is empty → show all alphabetically.
+  // Otherwise → show only the selected wards in the order they were ticked.
+  const isFiltered = selectedWards.length > 0;
+  const rows = isFiltered
+    ? selectedWards.map((ward) => allRows.find((r) => r.ward === ward)).filter(Boolean)
+    : allRows;
 
-  const visibleCount  = wardTypes.length - hiddenWards.size;
-  const isFiltered    = hiddenWards.size > 0;
+  const visibleCount = isFiltered ? selectedWards.length : wardTypes.length;
 
   const grandV = rows.reduce((a, r) => a + r.v, 0);
   const grandR = rows.reduce((a, r) => a + r.r, 0);
@@ -309,28 +315,20 @@ function Matrix({ data, selDate, history }) {
         {/* Checkbox list (collapsible) */}
         {filterOpen && (
           <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)" }}>
-            {/* Select All / None shortcuts */}
-            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-              <button
-                className="chip"
-                style={{ fontSize: 12 }}
-                onClick={showAllWards}
-              >
-                ✓ All
-              </button>
-              <button
-                className="chip"
-                style={{ fontSize: 12, color: "var(--ink-3)" }}
-                onClick={() => hideAllWards(wardTypes)}
-              >
-                ✕ None
-              </button>
-            </div>
+            {/* Show All shortcut */}
+            {isFiltered && (
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <button className="chip" style={{ fontSize: 12 }} onClick={showAllWards}>
+                  ✕ Clear selection — show all
+                </button>
+              </div>
+            )}
 
-            {/* Ward toggle chips */}
+            {/* Ward toggle chips — always alphabetical for easy browsing */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {wardTypes.map((ward) => {
-                const visible = !hiddenWards.has(ward);
+                const idx = selectedWards.indexOf(ward); // -1 if not selected
+                const ticked = idx !== -1;
                 return (
                   <button
                     key={ward}
@@ -338,17 +336,23 @@ function Matrix({ data, selDate, history }) {
                     style={{
                       padding: "6px 12px", borderRadius: 20, fontSize: 12,
                       fontWeight: 600, cursor: "pointer", border: "1px solid",
-                      borderColor: visible ? "var(--teal)" : "var(--line)",
-                      background: visible ? "rgba(0,210,180,.12)" : "var(--panel)",
-                      color: visible ? "var(--teal)" : "var(--ink-3)",
+                      borderColor: ticked ? "var(--teal)" : "var(--line)",
+                      background: ticked ? "rgba(0,210,180,.12)" : "var(--panel)",
+                      color: ticked ? "var(--teal)" : "var(--ink-3)",
                       transition: "all .15s",
                     }}
                   >
-                    {visible ? "✓ " : ""}{ward}
+                    {ticked ? `${idx + 1}. ` : ""}{ward}
                   </button>
                 );
               })}
             </div>
+
+            {isFiltered && (
+              <div className="dim" style={{ fontSize: 11, marginTop: 10 }}>
+                Numbers show the order wards appear in the table.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -367,7 +371,7 @@ function Matrix({ data, selDate, history }) {
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={3} style={{ padding: "24px 16px", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
-                  No wards selected — use the filter above to show wards.
+                  No data available.
                 </td>
               </tr>
             ) : (
