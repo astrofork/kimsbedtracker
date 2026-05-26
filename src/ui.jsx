@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 export const Ic = ({ d, s = 22 }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -21,7 +21,80 @@ export const icons = {
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
   moon: <><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></>,
   alert: <><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></>,
+  // Half-filled circle — universal "appearance / theme" icon
+  palette: <><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none" /></>,
 };
+
+/* ── Theme system ─────────────────────────────────────────────────────────── */
+const THEMES  = ["dark", "light", "purple", "teal"];
+const T_LABEL = { dark: "Dark", light: "Light", purple: "Purple", teal: "Teal" };
+const T_COLOR = { dark: "#2dd4bf", light: "#0EA5E9", purple: "#7C3AED", teal: "#14B8A6" };
+
+function getTheme() {
+  return localStorage.getItem("app_theme") || "dark";
+}
+
+function applyTheme(t) {
+  localStorage.setItem("app_theme", t);
+  if (t === "dark") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+}
+
+/** Call once before React renders to avoid flash-of-wrong-theme. */
+export function initTheme() {
+  applyTheme(getTheme());
+}
+
+/** Drop-in button — place in any topbar right-side row. */
+export function ThemeToggle() {
+  const [theme, setThemeState] = useState(getTheme);
+  const [label, setLabel] = useState("");
+
+  const cycle = () => {
+    const next = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+    applyTheme(next);
+    setThemeState(next);
+    // brief label pop
+    setLabel(T_LABEL[next]);
+    setTimeout(() => setLabel(""), 1400);
+  };
+
+  return (
+    <button
+      className="btn btn-ghost"
+      style={{ padding: 9, position: "relative", overflow: "visible" }}
+      onClick={cycle}
+      title={`Theme: ${T_LABEL[theme]} — tap to cycle`}
+    >
+      <Ic d={icons.palette} s={17} />
+
+      {/* coloured dot = current theme indicator */}
+      <span style={{
+        position: "absolute", bottom: 6, right: 6,
+        width: 6, height: 6, borderRadius: "50%",
+        background: T_COLOR[theme],
+        border: "1.5px solid var(--panel)",
+        pointerEvents: "none",
+      }} />
+
+      {/* theme name pop-up label */}
+      {label && (
+        <span className="theme-pop" style={{
+          position: "absolute", top: -28, left: "50%",
+          transform: "translateX(-50%)",
+          background: "var(--ink)", color: "var(--panel)",
+          fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+          padding: "3px 7px", borderRadius: 6, pointerEvents: "none",
+        }}>
+          {label}
+        </span>
+      )}
+    </button>
+  );
+}
 
 export function StatusBar({ v, o, r, total }) {
   const rest = Math.max(0, total - v - o - r);

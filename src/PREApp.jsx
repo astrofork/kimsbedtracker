@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { api, startAlarm, stopAlarm, fmtTime, fmtClock } from "./lib.js";
-import { Ic, icons, StatusBar } from "./ui.jsx";
+import { Ic, icons, StatusBar, ThemeToggle } from "./ui.jsx";
 
 export default function PREApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("home");
@@ -96,6 +96,7 @@ export default function PREApp({ user, meta, onLogout }) {
               hour12: true
             })}
           </span>
+          <ThemeToggle />
           <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
       </div>

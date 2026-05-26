@@ -3,10 +3,14 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { api, getUser, clearSession, stopAlarm } from "./lib.js";
 import { enablePush } from "./push.js";
+import { initTheme } from "./ui.jsx";
 import Login from "./Login.jsx";
 import PREApp from "./PREApp.jsx";
 import COOApp from "./COOApp.jsx";
 import ManagerApp from "./ManagerApp.jsx";
+
+// Apply saved theme before first paint — prevents flash-of-wrong-theme.
+initTheme();
 
 function App() {
   const [user, setUser] = useState(() => getUser());

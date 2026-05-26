@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { api, fmtTime, fmtClock } from "./lib.js";
-import { Ic, icons, StatusBar } from "./ui.jsx";
+import { Ic, icons, StatusBar, ThemeToggle } from "./ui.jsx";
 
 export default function ManagerApp({ user, onLogout }) {
   const [tab, setTab] = useState("pres");
@@ -16,6 +16,7 @@ export default function ManagerApp({ user, onLogout }) {
         </div>
         <div className="row" style={{ gap: 8 }}>
           <span className="pre-pill"><Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}</span>
+          <ThemeToggle />
           <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
       </div>

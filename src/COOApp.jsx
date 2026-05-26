@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { api, fmtTime } from "./lib.js";
-import { Ic, icons, StatusBar } from "./ui.jsx";
+import { Ic, icons, StatusBar, ThemeToggle } from "./ui.jsx";
 
 function fmtReminderLabel(hhmm) {
   const [h] = hhmm.split(":").map(Number);
@@ -46,6 +46,7 @@ export default function COOApp({ user, meta, onLogout }) {
         </div>
         <div className="row" style={{ gap: 8 }}>
           <span className="pre-pill"><Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}</span>
+          <ThemeToggle />
           <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
       </div>
