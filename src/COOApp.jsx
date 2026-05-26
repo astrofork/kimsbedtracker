@@ -56,7 +56,7 @@ export default function COOApp({ user, meta, onLogout }) {
             <div className="row between">
               <div className="row"><span style={{ color: "var(--blue)" }}><Ic d={icons.bell} s={20} /></span>
                 <div><div style={{ fontWeight: 700, color: "var(--blue)" }}>3-hour review reminder</div>
-                  <div style={{ fontSize: 12, color: "#a9cdf5" }}>Your {fmtReminderLabel(due)} bed-status check</div></div></div>
+                  <div style={{ fontSize: 12, color: "var(--blue)" }}>Your {fmtReminderLabel(due)} bed-status check</div></div></div>
               <button className="chip" onClick={() => setDismissed((d) => ({ ...d, [due]: 1 }))}>Dismiss</button>
             </div>
           </div>
@@ -267,7 +267,7 @@ function Matrix({ data, selDate, history }) {
     textAlign: "center", padding: "10px 16px",
     borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)",
     fontWeight: 700, fontSize: 15, color,
-    background: stripe ? "rgba(255,255,255,.015)" : "transparent",
+    background: stripe ? "rgba(0,0,0,.022)" : "transparent",
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -377,7 +377,7 @@ function Matrix({ data, selDate, history }) {
             ) : (
               rows.map((row, ri) => (
                 <tr key={row.ward}>
-                  <td style={{ padding: "10px 16px", fontWeight: 600, borderTop: "1px solid var(--line)", background: ri % 2 ? "var(--panel)" : "#141c24" }}>{row.ward}</td>
+                  <td style={{ padding: "10px 16px", fontWeight: 600, borderTop: "1px solid var(--line)", background: ri % 2 ? "var(--panel)" : "var(--panel-2)" }}>{row.ward}</td>
                   <td style={tdStyle(row.hasData && row.v > 0 ? "var(--green)" : "var(--ink-3)", ri % 2)}>
                     {row.hasData ? row.v : <span className="dim">–</span>}
                   </td>

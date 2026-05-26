@@ -118,7 +118,7 @@ function Reporting() {
               <div className="card" key={p.pre} style={{ padding: 14, marginBottom: 10 }}>
                 <div className="row between">
                   <div className="row" style={{ gap: 10 }}>
-                    <div className="logo" style={{ width: 34, height: 34, fontSize: 11, background: s.complete ? "linear-gradient(135deg,var(--green),var(--teal))" : "var(--panel-2)", color: s.complete ? "#04201c" : "var(--ink-2)" }}>{p.pre.replace("PRE-", "P")}</div>
+                    <div className="logo" style={{ width: 34, height: 34, fontSize: 11, background: s.complete ? "linear-gradient(135deg,var(--green),var(--teal))" : "var(--panel-2)", color: s.complete ? "#FFFFFF" : "var(--ink-2)" }}>{p.pre.replace("PRE-", "P")}</div>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>{p.pre}</div>
                       <div className="dim" style={{ fontSize: 11 }}>{s.wards > 0 ? `${s.total} beds · ${s.wards} wards` : "no beds mapped"}</div>

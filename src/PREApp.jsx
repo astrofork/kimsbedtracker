@@ -142,14 +142,14 @@ function Home({ data, setTab, alarmActive }) {
           <div className="row">
             <span className="pulse" style={{ color: "var(--red)" }}><Ic d={icons.bell} s={24} /></span>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#ffd7dd" }}>Round update due</div>
-              <div style={{ fontSize: 12, color: "#ffb0bb" }}>Alarm rings until you submit this round</div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--red)" }}>Round update due</div>
+              <div style={{ fontSize: 12, color: "#DC2626" }}>Alarm rings until you submit this round</div>
             </div>
           </div>
           <button className="btn btn-primary btn-block" style={{ marginTop: 14 }} onClick={() => setTab("entry")}>
             Enter bed status now
           </button>
-          <div style={{ fontSize: 11, color: "#ff9aa6", marginTop: 9, textAlign: "center" }}>
+          <div style={{ fontSize: 11, color: "#DC2626", marginTop: 9, textAlign: "center" }}>
             Window {fmtClock(round.startMin)} – {fmtClock(round.endMin)}
           </div>
         </div>
@@ -159,7 +159,7 @@ function Home({ data, setTab, alarmActive }) {
         <div className="card slide-up" style={{ padding: 16, borderColor: "var(--teal-deep)", background: "var(--green-bg)" }}>
           <div className="row"><span style={{ color: "var(--green)" }}><Ic d={icons.check} s={22} /></span>
             <div><div style={{ fontWeight: 700, color: "var(--green)" }}>This round submitted</div>
-              <div style={{ fontSize: 12, color: "#7fd9b6" }}>Next round at {fmtClock(round.endMin)}</div></div></div>
+              <div style={{ fontSize: 12, color: "var(--green)" }}>Next round at {fmtClock(round.endMin)}</div></div></div>
         </div>
       )}
 
