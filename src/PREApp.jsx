@@ -89,7 +89,6 @@ export default function PREApp({ user, meta, onLogout }) {
         </div>
         <div className="row" style={{ gap: 8 }}>
           <span className="pre-pill">
-                //<Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}
             <Ic d={icons.clock} s={13} />
             {new Date().toLocaleTimeString([], {
               hour: "2-digit",
