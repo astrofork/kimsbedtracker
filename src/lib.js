@@ -22,7 +22,20 @@ async function req(path, opts = {}) {
   if (t) headers.Authorization = "Bearer " + t;
   const res = await fetch(BASE_API + "/api" + path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    clearSession();
+
+    alert("Session expired. Please login again.");
+
+    window.location.href = "/login";
+
+    throw new Error("Unauthorized");
+  }
+
   if (!res.ok) throw new Error(data.error || "Request failed");
+
+
   return data;
 }
 
