@@ -66,7 +66,7 @@ export default function COOApp({ user, meta, onLogout }) {
         <DatePicker dates={dates} selDate={selDate} setSelDate={setSelDate} />
 
         {tab === "overview" && <Overview data={data} compliance={compliance} selDate={selDate} history={history} />}
-        {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} onOpen={setSheet} />}
+        {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} />}
       </div>
 
       <div className="navbar">
@@ -185,7 +185,7 @@ function Overview({ data, compliance, selDate, history }) {
   );
 }
 
-function Matrix({ data, selDate, history, onOpen }) {
+function Matrix({ data, selDate, history }) {
   const isLive = selDate === "live";
 
   // For historical view, build a pre→ward→counts map from the day's rounds.
@@ -197,113 +197,96 @@ function Matrix({ data, selDate, history, onOpen }) {
     }
   }
 
-  // Build ward-type × PRE matrix. Rows = unique ward types, cols = PREs with beds.
-  const pres = [];
+  // Collect all unique ward types across all PREs.
   const wardSet = new Set();
+  const allPres = [];
   for (const f of data.floors) for (const p of f.pres) {
     if (p.summary.wards > 0) {
-      pres.push(p);
+      allPres.push(p);
       for (const w of p.wards) wardSet.add(w.ward);
     }
   }
   const wardTypes = [...wardSet].sort();
 
-  // cell lookup honoring date selection
-  const cell = (p, ward) => {
-    if (!isLive) {
-      const h = histMap[p.pre]?.[ward];
-      if (!h) return p.wards.find((x) => x.ward === ward) ? { ...p.wards.find((x) => x.ward === ward), entered: false } : null;
-      return { ...h, entered: true };
+  // For each ward type, sum vacant + reserved across all PREs.
+  const rows = wardTypes.map((ward) => {
+    let totalV = 0, totalR = 0, hasData = false;
+    for (const p of allPres) {
+      if (!isLive) {
+        const h = histMap[p.pre]?.[ward];
+        if (h) { totalV += h.vacant || 0; totalR += h.reserved || 0; hasData = true; }
+      } else {
+        const w = p.wards.find((x) => x.ward === ward);
+        if (w && w.vacant !== null) { totalV += w.vacant || 0; totalR += w.reserved || 0; hasData = true; }
+      }
     }
-    const w = p.wards.find((x) => x.ward === ward);
-    if (!w) return null;
-    return { ...w, entered: w.vacant !== null };
-  };
+    return { ward, v: totalV, r: totalR, hasData };
+  });
 
-  const colW = 74;
+  const grandV = rows.reduce((a, r) => a + r.v, 0);
+  const grandR = rows.reduce((a, r) => a + r.r, 0);
+
+  const thStyle = (color) => ({
+    padding: "11px 16px",
+    fontWeight: 700,
+    fontSize: 13,
+    color: color || "var(--ink-2)",
+    borderLeft: "1px solid var(--line)",
+    textAlign: "center",
+    background: "var(--panel-2)",
+  });
+
+  const tdStyle = (color, stripe) => ({
+    textAlign: "center",
+    padding: "10px 16px",
+    borderTop: "1px solid var(--line)",
+    borderLeft: "1px solid var(--line)",
+    fontWeight: 700,
+    fontSize: 15,
+    color: color,
+    background: stripe ? "rgba(255,255,255,.015)" : "transparent",
+  });
 
   return (
     <div>
-      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Occupancy matrix</div>
+      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Bed matrix</div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-        {isLive ? `Occupied / vacant by ward × PRE. Updated ${fmtTime(Date.now())}.` : `Final data for ${selDate}.`}
+        {isLive ? `Vacant & reserved by ward. Updated ${fmtTime(Date.now())}.` : `Final data for ${selDate}.`}
       </div>
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th style={{ position: "sticky", left: 0, background: "var(--panel-2)", textAlign: "left", padding: "10px 12px", fontWeight: 700, color: "var(--ink-2)", minWidth: 120, zIndex: 2 }}>Ward</th>
-                {pres.map((p) => (
-                  <th key={p.pre} style={{ padding: "10px 6px", fontWeight: 700, color: "var(--ink-2)", minWidth: colW, borderLeft: "1px solid var(--line)", cursor: "pointer" }}
-                    onClick={() => onOpen && onOpen(p)}>
-                    {p.pre.replace("PRE-", "P")}
-                  </th>
-                ))}
-                <th style={{ padding: "10px 8px", fontWeight: 700, color: "var(--teal)", borderLeft: "1px solid var(--line)", background: "var(--panel-2)" }}>Tot</th>
-              </tr>
-              <tr>
-                <th style={{ position: "sticky", left: 0, background: "var(--panel-2)", textAlign: "left", padding: "2px 12px 7px", fontWeight: 500, color: "var(--ink-3)", fontSize: 10, zIndex: 2 }}>occ · vac</th>
-                {pres.map((p) => <th key={p.pre} style={{ borderLeft: "1px solid var(--line)" }} />)}
-                <th style={{ borderLeft: "1px solid var(--line)", background: "var(--panel-2)" }} />
-              </tr>
-            </thead>
-            <tbody>
-              {wardTypes.map((ward, ri) => {
-                let rowOcc = 0, rowVac = 0, rowTot = 0;
-                const cells = pres.map((p) => {
-                  const c = cell(p, ward);
-                  if (c && c.entered) { rowOcc += c.occupied || 0; rowVac += c.vacant || 0; }
-                  if (c) rowTot += c.total;
-                  return c;
-                });
-                return (
-                  <tr key={ward} style={{ background: ri % 2 ? "transparent" : "rgba(255,255,255,.015)" }}>
-                    <td style={{ position: "sticky", left: 0, background: ri % 2 ? "var(--panel)" : "#141c24", padding: "9px 12px", fontWeight: 600, borderTop: "1px solid var(--line)", zIndex: 1 }}>{ward}</td>
-                    {cells.map((c, i) => (
-                      <td key={i} style={{ textAlign: "center", padding: "9px 6px", borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)" }}>
-                        {!c ? <span className="dim">·</span>
-                          : !c.entered ? <span style={{ color: "var(--ink-3)" }}>–</span>
-                            : <span className="mono" style={{ fontWeight: 700, fontSize: 12 }}>
-                                <span style={{ color: c.occupied === c.total ? "var(--red)" : "var(--ink)" }}>{c.occupied}</span>
-                                <span className="dim" style={{ fontWeight: 400 }}> · </span>
-                                <span style={{ color: c.vacant > 0 ? "var(--green)" : "var(--ink-3)" }}>{c.vacant}</span>
-                              </span>}
-                      </td>
-                    ))}
-                    <td style={{ textAlign: "center", padding: "9px 8px", borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)", background: "var(--panel-2)", fontWeight: 700 }} className="mono">
-                      <span style={{ color: "var(--red)" }}>{rowOcc}</span><span className="dim">·</span><span style={{ color: "var(--green)" }}>{rowVac}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {/* totals row */}
-              <tr>
-                <td style={{ position: "sticky", left: 0, background: "var(--panel-2)", padding: "11px 12px", fontWeight: 800, color: "var(--teal)", borderTop: "2px solid var(--line)", zIndex: 1 }}>Total</td>
-                {pres.map((p) => {
-                  const wards = !isLive ? Object.values(histMap[p.pre] || {}) : p.wards.filter((w) => w.vacant !== null);
-                  const o = wards.reduce((a, w) => a + (w.occupied || 0), 0);
-                  const v = wards.reduce((a, w) => a + (w.vacant || 0), 0);
-                  const any = wards.length > 0;
-                  return (
-                    <td key={p.pre} style={{ textAlign: "center", padding: "11px 6px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, background: "var(--panel-2)" }} className="mono">
-                      {any ? <><span style={{ color: "var(--red)" }}>{o}</span><span className="dim">·</span><span style={{ color: "var(--green)" }}>{v}</span></> : "–"}
-                    </td>
-                  );
-                })}
-                <td style={{ textAlign: "center", padding: "11px 8px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", background: "var(--teal)", color: "#04201c", fontWeight: 800 }} className="mono">
-                  {data.totals.o}·{data.totals.v}
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", padding: "11px 16px", fontWeight: 700, fontSize: 13, color: "var(--ink-2)", background: "var(--panel-2)", minWidth: 140 }}>Ward</th>
+              <th style={thStyle("var(--green)")}>Vacant</th>
+              <th style={thStyle("var(--amber)")}>Reserved</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, ri) => (
+              <tr key={row.ward}>
+                <td style={{ padding: "10px 16px", fontWeight: 600, borderTop: "1px solid var(--line)", background: ri % 2 ? "var(--panel)" : "#141c24" }}>{row.ward}</td>
+                <td style={tdStyle(row.hasData && row.v > 0 ? "var(--green)" : "var(--ink-3)", ri % 2)}>
+                  {row.hasData ? row.v : <span className="dim">–</span>}
+                </td>
+                <td style={tdStyle(row.hasData && row.r > 0 ? "var(--amber)" : "var(--ink-3)", ri % 2)}>
+                  {row.hasData ? row.r : <span className="dim">–</span>}
                 </td>
               </tr>
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {/* totals row */}
+            <tr>
+              <td style={{ padding: "12px 16px", fontWeight: 800, color: "var(--teal)", borderTop: "2px solid var(--line)", background: "var(--panel-2)" }}>Total</td>
+              <td style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color: "var(--green)", background: "var(--panel-2)" }} className="mono">{grandV}</td>
+              <td style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color: "var(--amber)", background: "var(--panel-2)" }} className="mono">{grandR}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div className="row" style={{ gap: 14, marginTop: 12, flexWrap: "wrap" }}>
-        <span className="dim" style={{ fontSize: 11 }}>each cell: <span style={{ color: "var(--red)" }}>occupied</span> · <span style={{ color: "var(--green)" }}>vacant</span></span>
-        <span className="dim" style={{ fontSize: 11 }}>– = not entered · · = no ward</span>
+        <span className="dim" style={{ fontSize: 11 }}>– = not yet entered for this round</span>
       </div>
     </div>
   );
