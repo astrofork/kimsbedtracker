@@ -3,15 +3,19 @@ import React, { useState, useEffect, useRef } from "react";
 // ── Shared banner base ────────────────────────────────────────────────────────
 // left:50% + translateX(-50%) + maxWidth keeps banners centred and
 // constrained to the 480px app width on both mobile and wide desktop.
+// Use slideUpCentered (not slideUp) — the centring transform: translateX(-50%) must
+// live INSIDE the keyframe, otherwise the animation's translateY overwrites it and
+// the banner ends up positioned at left:50% with no horizontal correction,
+// rendering off-screen to the right on mobile.
 const bannerBase = {
   position: "fixed",
-  left: "50%", transform: "translateX(-50%)",
+  left: "50%", transform: "translate(-50%, 0)",
   width: "calc(100% - 32px)", maxWidth: 448,
   zIndex: 9999,
   borderRadius: 14, padding: "12px 16px",
   display: "flex", alignItems: "center", gap: 12,
   boxShadow: "0 4px 20px rgba(0,0,0,.15)",
-  animation: "slideUp .3s cubic-bezier(.2,.7,.3,1) both",
+  animation: "slideUpCentered .3s cubic-bezier(.2,.7,.3,1) both",
 };
 
 /* ── 1. Offline Banner ───────────────────────────────────────────────────────
