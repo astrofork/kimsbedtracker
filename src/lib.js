@@ -25,11 +25,12 @@ async function req(path, opts = {}) {
 
   if (res.status === 401) {
     clearSession();
-
-    alert("Session expired. Please login again.");
-
-    window.location.href = "/login";
-
+    // Notify the React app so it can reset its user state and show the Login screen.
+    // We cannot use window.location.href = "/login" here because this is a state-driven
+    // SPA with no real /login route — doing so causes a 404 or infinite reload.
+    window.dispatchEvent(new CustomEvent("session:expired", {
+      detail: { message: data?.error || "Session expired. Please log in again." }
+    }));
     throw new Error("Unauthorized");
   }
 

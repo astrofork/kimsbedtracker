@@ -26,6 +26,22 @@ function App() {
 
   const logout = () => { stopAlarm(); clearSession(); setUser(null); };
 
+  // When any API call gets a 401, lib.js fires this event.
+  // We respond by stopping the alarm, clearing state, and showing the Login screen.
+  useEffect(() => {
+    const handleExpired = (e) => {
+      stopAlarm();
+      clearSession();
+      setUser(null);
+      // Show a toast-style alert after state updates so the login page is visible first.
+      if (e.detail?.message) {
+        setTimeout(() => alert(e.detail.message), 100);
+      }
+    };
+    window.addEventListener("session:expired", handleExpired);
+    return () => window.removeEventListener("session:expired", handleExpired);
+  }, []);
+
   if (!user) return <Login onLogin={onLogin} />;
   if (!meta) return null;
   if (user.role === "COO") return <COOApp user={user} meta={meta} onLogout={logout} />;
