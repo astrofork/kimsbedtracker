@@ -88,7 +88,15 @@ export default function PREApp({ user, meta, onLogout }) {
           </div>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          <span className="pre-pill"><Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}</span>
+          <span className="pre-pill">
+                //<Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}
+            <Ic d={icons.clock} s={13} />
+            {new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true
+            })}
+          </span>
           <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
       </div>
@@ -278,7 +286,7 @@ function Entry({ data, draft, setWardDraft, saveWard, submitRound, alarmActive }
         };
         return (
           <div className="ward-card slide-up" key={w.ward}
-               style={{ animationDelay: i * 0.03 + "s", borderColor: ok ? "var(--teal-deep)" : overflow ? "var(--red)" : "var(--line)" }}>
+            style={{ animationDelay: i * 0.03 + "s", borderColor: ok ? "var(--teal-deep)" : overflow ? "var(--red)" : "var(--line)" }}>
             <div className="row between" style={{ marginBottom: 12 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
@@ -364,7 +372,11 @@ function MyMap({ data }) {
               <div>
                 <div style={{ fontWeight: 700 }}>{w.ward}</div>
                 <div className="dim" style={{ fontSize: 11 }}>
-                  {w.total} beds{entered && w.updatedAt ? ` · updated ${fmtTime(w.updatedAt)}` : ""}
+                  {w.total} beds{entered && w.updatedAt ? ` · updated ${new Date(w.updatedAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    hour12: true
+                  })}` : ""}
                 </div>
               </div>
               {entered

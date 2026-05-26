@@ -95,7 +95,24 @@ export function stopAlarm() { if (alarmTimer) { clearInterval(alarmTimer); alarm
 // ---- time formatting ----
 export function fmtTime(d) { return new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
 export function fmtClock(mins) {
-  const h = Math.floor(mins / 60) % 24, m = mins % 60;
-  const ap = h < 12 ? "AM" : "PM", hh = h % 12 === 0 ? 12 : h % 12;
-  return hh + ":" + String(m).padStart(2, "0") + " " + ap;
+
+  // const h = Math.floor(mins / 60) % 24, m = mins % 60;
+  // const ap = h < 12 ? "AM" : "PM", hh = h % 12 === 0 ? 12 : h % 12;
+  // return hh + ":" + String(m).padStart(2, "0") + " " + ap;
+
+  mins = Number(mins || 0);
+
+  const h24 = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+
+  const ap = h24 >= 12 ? "PM" : "AM";
+
+  const h12 =
+    h24 % 12 === 0
+      ? 12
+      : h24 % 12;
+
+  return `${h12}:${String(m).padStart(2, "0")} ${ap}`;
+
+
 }
