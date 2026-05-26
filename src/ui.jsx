@@ -30,6 +30,14 @@ const THEMES  = ["dark", "light", "purple", "teal"];
 const T_LABEL = { dark: "Dark", light: "Light", purple: "Purple", teal: "Teal" };
 const T_COLOR = { dark: "#2dd4bf", light: "#0EA5E9", purple: "#7C3AED", teal: "#14B8A6" };
 
+// theme-color = the topbar background so Android status bar matches the app UI
+const T_META_COLOR = {
+  dark:   "#0b0f14",   // dark topbar
+  light:  "#FFFFFF",   // white topbar
+  purple: "#F8F4FF",   // light purple topbar
+  teal:   "#F0FAFB",   // light teal topbar
+};
+
 function getTheme() {
   return localStorage.getItem("app_theme") || "light";
 }
@@ -41,6 +49,9 @@ function applyTheme(t) {
   } else {
     document.documentElement.setAttribute("data-theme", t);
   }
+  // Keep the browser/status-bar colour in sync with the active topbar colour
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", T_META_COLOR[t]);
 }
 
 /** Call once before React renders to avoid flash-of-wrong-theme. */

@@ -6,7 +6,7 @@
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "theme_color": "#0EA5E9",
+  "theme_color": "#FFFFFF",
   "background_color": "#F0F4F8",
   "lang": "en",
   "categories": ["medical", "productivity"],

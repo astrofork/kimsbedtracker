@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 
 // ── Shared slide-in style ─────────────────────────────────────────────────────
+// Use left+right inset instead of left:50%+translateX so it never clips on
+// narrow phones regardless of scroll position or parent transforms.
 const bannerBase = {
-  position: "fixed", left: "50%", transform: "translateX(-50%)",
-  zIndex: 9999, maxWidth: 440, width: "calc(100% - 32px)",
+  position: "fixed", left: 16, right: 16,   // inset from both edges
+  zIndex: 9999,
   borderRadius: 14, padding: "12px 16px",
   display: "flex", alignItems: "center", gap: 12,
   boxShadow: "0 4px 20px rgba(0,0,0,.18)",
