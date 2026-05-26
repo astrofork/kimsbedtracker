@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { api, setSession } from "./lib.js";
-import { Ic, icons } from "./ui.jsx";
+import { Ic, icons, ThemeToggle } from "./ui.jsx";
 import { platformAvailable, fingerprintEnrolled, unlockWithFingerprint, enrollFingerprint } from "./passkey.js";
 
 export default function Login({ onLogin }) {
@@ -82,12 +82,15 @@ export default function Login({ onLogin }) {
   return (
     <div className="app">
       <div className="pad" style={{ paddingTop: 64 }}>
-        <div className="slide-up" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div className="logo">B</div>
-          <div>
-            <div className="h1">BedFlow</div>
-            <div className="dim" style={{ fontSize: 12 }}>Live hospital bed management</div>
+        <div className="slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="row" style={{ gap: 12 }}>
+            <div className="logo">B</div>
+            <div>
+              <div className="h1">BedFlow</div>
+              <div className="dim" style={{ fontSize: 12 }}>Live hospital bed management</div>
+            </div>
           </div>
+          <ThemeToggle />
         </div>
 
         {/* live clock */}

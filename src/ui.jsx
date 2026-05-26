@@ -31,7 +31,7 @@ const T_LABEL = { dark: "Dark", light: "Light", purple: "Purple", teal: "Teal" }
 const T_COLOR = { dark: "#2dd4bf", light: "#0EA5E9", purple: "#7C3AED", teal: "#14B8A6" };
 
 function getTheme() {
-  return localStorage.getItem("app_theme") || "dark";
+  return localStorage.getItem("app_theme") || "light";
 }
 
 function applyTheme(t) {
