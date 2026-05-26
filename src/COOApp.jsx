@@ -188,6 +188,24 @@ function Overview({ data, compliance, selDate, history }) {
 function Matrix({ data, selDate, history }) {
   const isLive = selDate === "live";
 
+  // ── Ward filter — persisted per-device in localStorage ────────────────────
+  // hiddenWards is a Set of ward names the COO has unchecked.
+  // New wards that appear from the server are visible by default.
+  const [hiddenWards, setHiddenWards] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("coo_matrix_hidden") || "[]")); }
+    catch { return new Set(); }
+  });
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("coo_matrix_hidden", JSON.stringify([...hiddenWards]));
+  }, [hiddenWards]);
+
+  const toggleWard   = (ward) => setHiddenWards((prev) => { const n = new Set(prev); n.has(ward) ? n.delete(ward) : n.add(ward); return n; });
+  const showAllWards = ()     => setHiddenWards(new Set());
+  const hideAllWards = (all)  => setHiddenWards(new Set(all));
+
+  // ── Data build ────────────────────────────────────────────────────────────
   // For historical view, build a pre→ward→counts map from the day's rounds.
   const histMap = {};
   if (!isLive && history) {
@@ -208,8 +226,8 @@ function Matrix({ data, selDate, history }) {
   }
   const wardTypes = [...wardSet].sort();
 
-  // For each ward type, sum vacant + reserved across all PREs.
-  const rows = wardTypes.map((ward) => {
+  // All rows (unfiltered).
+  const allRows = wardTypes.map((ward) => {
     let totalV = 0, totalR = 0, hasData = false;
     for (const p of allPres) {
       if (!isLive) {
@@ -223,37 +241,119 @@ function Matrix({ data, selDate, history }) {
     return { ward, v: totalV, r: totalR, hasData };
   });
 
+  // Apply the ward filter.
+  const rows = allRows.filter((r) => !hiddenWards.has(r.ward));
+
+  const visibleCount  = wardTypes.length - hiddenWards.size;
+  const isFiltered    = hiddenWards.size > 0;
+
   const grandV = rows.reduce((a, r) => a + r.v, 0);
   const grandR = rows.reduce((a, r) => a + r.r, 0);
 
+  // ── Styles ────────────────────────────────────────────────────────────────
   const thStyle = (color) => ({
-    padding: "11px 16px",
-    fontWeight: 700,
-    fontSize: 13,
-    color: color || "var(--ink-2)",
-    borderLeft: "1px solid var(--line)",
-    textAlign: "center",
-    background: "var(--panel-2)",
+    padding: "11px 16px", fontWeight: 700, fontSize: 13,
+    color: color || "var(--ink-2)", borderLeft: "1px solid var(--line)",
+    textAlign: "center", background: "var(--panel-2)",
   });
 
   const tdStyle = (color, stripe) => ({
-    textAlign: "center",
-    padding: "10px 16px",
-    borderTop: "1px solid var(--line)",
-    borderLeft: "1px solid var(--line)",
-    fontWeight: 700,
-    fontSize: 15,
-    color: color,
+    textAlign: "center", padding: "10px 16px",
+    borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)",
+    fontWeight: 700, fontSize: 15, color,
     background: stripe ? "rgba(255,255,255,.015)" : "transparent",
   });
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div>
       <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Bed matrix</div>
-      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 12 }}>
         {isLive ? `Vacant & reserved by ward. Updated ${fmtTime(Date.now())}.` : `Final data for ${selDate}.`}
       </div>
 
+      {/* ── Ward filter panel ──────────────────────────────────────────────── */}
+      <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 12 }}>
+        {/* Filter header / toggle */}
+        <button
+          onClick={() => setFilterOpen((o) => !o)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center",
+            justifyContent: "space-between", padding: "11px 16px",
+            background: "var(--panel-2)", border: "none", cursor: "pointer", gap: 8,
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink-2)" }}>
+            Filter wards
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isFiltered && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20,
+                background: "rgba(0,210,180,.18)", color: "var(--teal)",
+              }}>
+                {visibleCount}/{wardTypes.length} shown
+              </span>
+            )}
+            {/* chevron rotates based on open state */}
+            <span style={{
+              display: "inline-flex", color: "var(--ink-3)",
+              transform: filterOpen ? "rotate(270deg)" : "rotate(90deg)",
+              transition: "transform .2s",
+            }}>
+              <Ic d={icons.chevron} s={15} />
+            </span>
+          </span>
+        </button>
+
+        {/* Checkbox list (collapsible) */}
+        {filterOpen && (
+          <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)" }}>
+            {/* Select All / None shortcuts */}
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <button
+                className="chip"
+                style={{ fontSize: 12 }}
+                onClick={showAllWards}
+              >
+                ✓ All
+              </button>
+              <button
+                className="chip"
+                style={{ fontSize: 12, color: "var(--ink-3)" }}
+                onClick={() => hideAllWards(wardTypes)}
+              >
+                ✕ None
+              </button>
+            </div>
+
+            {/* Ward toggle chips */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {wardTypes.map((ward) => {
+                const visible = !hiddenWards.has(ward);
+                return (
+                  <button
+                    key={ward}
+                    onClick={() => toggleWard(ward)}
+                    style={{
+                      padding: "6px 12px", borderRadius: 20, fontSize: 12,
+                      fontWeight: 600, cursor: "pointer", border: "1px solid",
+                      borderColor: visible ? "var(--teal)" : "var(--line)",
+                      background: visible ? "rgba(0,210,180,.12)" : "var(--panel)",
+                      color: visible ? "var(--teal)" : "var(--ink-3)",
+                      transition: "all .15s",
+                    }}
+                  >
+                    {visible ? "✓ " : ""}{ward}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Matrix table ──────────────────────────────────────────────────── */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
           <thead>
@@ -264,23 +364,35 @@ function Matrix({ data, selDate, history }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, ri) => (
-              <tr key={row.ward}>
-                <td style={{ padding: "10px 16px", fontWeight: 600, borderTop: "1px solid var(--line)", background: ri % 2 ? "var(--panel)" : "#141c24" }}>{row.ward}</td>
-                <td style={tdStyle(row.hasData && row.v > 0 ? "var(--green)" : "var(--ink-3)", ri % 2)}>
-                  {row.hasData ? row.v : <span className="dim">–</span>}
-                </td>
-                <td style={tdStyle(row.hasData && row.r > 0 ? "var(--amber)" : "var(--ink-3)", ri % 2)}>
-                  {row.hasData ? row.r : <span className="dim">–</span>}
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} style={{ padding: "24px 16px", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
+                  No wards selected — use the filter above to show wards.
                 </td>
               </tr>
-            ))}
-            {/* totals row */}
-            <tr>
-              <td style={{ padding: "12px 16px", fontWeight: 800, color: "var(--teal)", borderTop: "2px solid var(--line)", background: "var(--panel-2)" }}>Total</td>
-              <td style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color: "var(--green)", background: "var(--panel-2)" }} className="mono">{grandV}</td>
-              <td style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color: "var(--amber)", background: "var(--panel-2)" }} className="mono">{grandR}</td>
-            </tr>
+            ) : (
+              rows.map((row, ri) => (
+                <tr key={row.ward}>
+                  <td style={{ padding: "10px 16px", fontWeight: 600, borderTop: "1px solid var(--line)", background: ri % 2 ? "var(--panel)" : "#141c24" }}>{row.ward}</td>
+                  <td style={tdStyle(row.hasData && row.v > 0 ? "var(--green)" : "var(--ink-3)", ri % 2)}>
+                    {row.hasData ? row.v : <span className="dim">–</span>}
+                  </td>
+                  <td style={tdStyle(row.hasData && row.r > 0 ? "var(--amber)" : "var(--ink-3)", ri % 2)}>
+                    {row.hasData ? row.r : <span className="dim">–</span>}
+                  </td>
+                </tr>
+              ))
+            )}
+            {/* Totals row — only counts visible wards */}
+            {rows.length > 0 && (
+              <tr>
+                <td style={{ padding: "12px 16px", fontWeight: 800, color: "var(--teal)", borderTop: "2px solid var(--line)", background: "var(--panel-2)" }}>
+                  Total{isFiltered ? <span style={{ fontWeight: 400, fontSize: 11, color: "var(--ink-3)", marginLeft: 6 }}>(filtered)</span> : null}
+                </td>
+                <td style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color: "var(--green)", background: "var(--panel-2)" }} className="mono">{grandV}</td>
+                <td style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color: "var(--amber)", background: "var(--panel-2)" }} className="mono">{grandR}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
