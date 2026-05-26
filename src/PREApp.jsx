@@ -275,10 +275,23 @@ function Entry({ data, draft, setWardDraft, saveWard, submitRound, alarmActive }
         const ok = entered && !overflow;
         const step = (field) => (delta) => {
           const cur = { v: dw.v || 0, r: dw.r || 0 };
-          let nv = Math.max(0, (cur[field] || 0) + delta);
-          const other = field === "v" ? cur.r : cur.v;
-          if (nv + other > w.total) nv = w.total - other; // clamp so it never exceeds total
-          const next = { ...cur, [field]: nv };
+          let next;
+
+          if (field === "r") {
+            // Reserved takes from / returns to Vacant — Occupied stays unchanged.
+            let newR = cur.r + delta;
+            let newV = cur.v - delta; // mirror: reserved up → vacant down, and vice-versa
+            // clamp: neither can drop below 0
+            if (newR < 0) { newV += newR; newR = 0; }
+            if (newV < 0) { newR += newV; newV = 0; }
+            next = { v: newV, r: newR };
+          } else {
+            // "v": Vacant changes come from / go to Occupied — Reserved stays unchanged.
+            let newV = Math.max(0, cur.v + delta);
+            if (newV + cur.r > w.total) newV = w.total - cur.r; // ceiling: can't exceed total beds
+            next = { v: newV, r: cur.r };
+          }
+
           setWardDraft(w.ward, next);
           // persist vacant + reserved; backend computes occupied
           setTimeout(() => saveWard(w.id, next.v, next.r), 200);
