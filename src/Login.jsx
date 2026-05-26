@@ -141,14 +141,6 @@ export default function Login({ onLogin }) {
             {busy ? "Signing in…" : `Sign in as ${role}`}
           </button>
         </div>
-
-        <div className="card slide-up" style={{ padding: 14, marginTop: 14, animationDelay: ".1s" }}>
-          <div className="label" style={{ marginBottom: 8 }}>Default credentials</div>
-          <div className="dim mono" style={{ fontSize: 12, lineHeight: 1.9 }}>
-            PRE = pre1 ... pre10 / pw: pre1123 ...<br />
-            COO = coo / pw: coo123
-          </div>
-        </div>
       </div>
     </div>
   );
