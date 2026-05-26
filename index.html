@@ -2,11 +2,51 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="theme-color" content="#0b0f14" />
-  <title>BedFlow — Bed Management</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- ── Viewport: portrait + safe areas for notches/home-bars ─────────────── -->
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+  <!-- ── PWA manifest ──────────────────────────────────────────────────────── -->
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- ── Theme colour (matches light theme brand; JS updates it per-theme) ─── -->
+  <meta name="theme-color" content="#0EA5E9" />
+
+  <!-- ── Apple / iOS PWA support ───────────────────────────────────────────── -->
+  <meta name="apple-mobile-web-app-capable"          content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title"            content="BedFlow" />
+  <link rel="apple-touch-icon"                       href="/icons/icon-512.png" />
+  <!-- Splash screen background matches manifest background_color -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+  <!-- ── Microsoft Tiles ───────────────────────────────────────────────────── -->
+  <meta name="msapplication-TileImage" content="/icons/icon-192.png" />
+  <meta name="msapplication-TileColor" content="#0EA5E9" />
+
+  <!-- ── SEO / sharing ─────────────────────────────────────────────────────── -->
+  <meta name="description" content="Live hospital bed tracking for KIMS Hospitals Seethammadhara" />
+  <link rel="icon" type="image/png" href="/icons/icon-192.png" />
+
+  <title>BedFlow — Smart Bed Management</title>
+
+  <!-- ── Fonts ─────────────────────────────────────────────────────────────── -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@400;500;600;700&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- ── Safe-area CSS env vars for notched devices ────────────────────────── -->
+  <style>
+    :root {
+      --sat: env(safe-area-inset-top);
+      --sab: env(safe-area-inset-bottom);
+      --sal: env(safe-area-inset-left);
+      --sar: env(safe-area-inset-right);
+    }
+    html { background: #F0F4F8; }   /* prevents white flash on load */
+    body { padding-bottom: var(--sab); }
+  </style>
 </head>
 <body>
   <div id="root"></div>
