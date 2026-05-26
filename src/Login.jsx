@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { api, setSession } from "./lib.js";
 import { Ic, icons, ThemeToggle } from "./ui.jsx";
+import { InstallBanner } from "./pwa.jsx";
 import { platformAvailable, fingerprintEnrolled, unlockWithFingerprint, enrollFingerprint } from "./passkey.js";
 
 export default function Login({ onLogin }) {
@@ -58,6 +59,7 @@ export default function Login({ onLogin }) {
   if (enrollData) {
     return (
       <div className="app">
+        <InstallBanner />
         <div className="pad" style={{ paddingTop: 90 }}>
           <div className="card slide-up" style={{ padding: 22, textAlign: "center" }}>
             <div style={{ color: "var(--teal)", display: "flex", justifyContent: "center", marginBottom: 14 }}>
@@ -81,6 +83,7 @@ export default function Login({ onLogin }) {
 
   return (
     <div className="app">
+      <InstallBanner />
       <div className="pad" style={{ paddingTop: 64 }}>
         <div className="slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div className="row" style={{ gap: 12 }}>

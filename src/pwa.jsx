@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef } from "react";
 
-// ── Shared slide-in style ─────────────────────────────────────────────────────
-// Use left+right inset instead of left:50%+translateX so it never clips on
-// narrow phones regardless of scroll position or parent transforms.
+// ── Shared banner base ────────────────────────────────────────────────────────
+// left:50% + translateX(-50%) + maxWidth keeps banners centred and
+// constrained to the 480px app width on both mobile and wide desktop.
 const bannerBase = {
-  position: "fixed", left: 16, right: 16,   // inset from both edges
+  position: "fixed",
+  left: "50%", transform: "translateX(-50%)",
+  width: "calc(100% - 32px)", maxWidth: 448,
   zIndex: 9999,
   borderRadius: 14, padding: "12px 16px",
   display: "flex", alignItems: "center", gap: 12,
-  boxShadow: "0 4px 20px rgba(0,0,0,.18)",
+  boxShadow: "0 4px 20px rgba(0,0,0,.15)",
   animation: "slideUp .3s cubic-bezier(.2,.7,.3,1) both",
 };
 
 /* ── 1. Offline Banner ───────────────────────────────────────────────────────
-   Appears at the top whenever navigator.onLine is false.
+   Slides in at the TOP whenever navigator.onLine is false.
    Auto-hides when connection returns.                                         */
 export function OfflineBanner() {
   const [offline, setOffline] = useState(!navigator.onLine);
@@ -23,22 +25,16 @@ export function OfflineBanner() {
     const off = () => setOffline(true);
     window.addEventListener("online",  on);
     window.addEventListener("offline", off);
-    return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+    return () => {
+      window.removeEventListener("online",  on);
+      window.removeEventListener("offline", off);
+    };
   }, []);
 
   if (!offline) return null;
 
   return (
-    <div style={{
-      ...bannerBase,
-      top: 12,
-      background: "#1E293B",
-      color: "#F8FAFC",
-      fontSize: 13,
-      fontWeight: 600,
-      fontFamily: "system-ui, sans-serif",
-    }}>
-      {/* wifi-off icon */}
+    <div style={{ ...bannerBase, top: 12, background: "#1E293B", color: "#F8FAFC", fontSize: 13, fontWeight: 600, fontFamily: "system-ui,sans-serif" }}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb7185"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
         <line x1="1" y1="1" x2="23" y2="23"/>
@@ -53,8 +49,8 @@ export function OfflineBanner() {
 }
 
 /* ── 2. Update Toast ─────────────────────────────────────────────────────────
-   Shown when a new service worker is waiting.
-   "Reload" sends SKIP_WAITING then refreshes.                                */
+   Shown when a new service worker is waiting to activate.
+   "Reload" sends SKIP_WAITING then refreshes the page.                       */
 export function UpdateToast({ registration }) {
   const [show, setShow] = useState(false);
   const regRef = useRef(registration);
@@ -62,11 +58,7 @@ export function UpdateToast({ registration }) {
   useEffect(() => {
     regRef.current = registration;
     if (!registration) return;
-
-    // Already a waiting worker when we mounted
     if (registration.waiting) { setShow(true); return; }
-
-    // Or a new worker arrives later
     const onUpdate = () => { if (registration.waiting) setShow(true); };
     registration.addEventListener("updatefound", () => {
       registration.installing?.addEventListener("statechange", onUpdate);
@@ -75,8 +67,9 @@ export function UpdateToast({ registration }) {
 
   const reload = () => {
     regRef.current?.waiting?.postMessage({ type: "SKIP_WAITING" });
-    // Wait for the new SW to take control, then reload
-    navigator.serviceWorker.addEventListener("controllerchange", () => window.location.reload(), { once: true });
+    navigator.serviceWorker.addEventListener(
+      "controllerchange", () => window.location.reload(), { once: true }
+    );
   };
 
   if (!show) return null;
@@ -84,15 +77,10 @@ export function UpdateToast({ registration }) {
   return (
     <div style={{
       ...bannerBase,
-      bottom: 90,
-      background: "#0F172A",
-      color: "#F8FAFC",
-      fontSize: 13,
-      fontWeight: 600,
-      fontFamily: "system-ui, sans-serif",
-      gap: 10,
+      bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+      background: "#0F172A", color: "#F8FAFC",
+      fontSize: 13, fontWeight: 600, fontFamily: "system-ui,sans-serif", gap: 10,
     }}>
-      {/* refresh icon */}
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2dd4bf"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
         <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
@@ -101,137 +89,116 @@ export function UpdateToast({ registration }) {
         <path d="M3 21v-5h5"/>
       </svg>
       <span style={{ flex: 1 }}>New version available</span>
-      <button
-        onClick={reload}
-        style={{
-          background: "#0EA5E9", color: "#fff", border: "none",
-          padding: "6px 14px", borderRadius: 8, fontSize: 12,
-          fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        Reload
-      </button>
-      <button
-        onClick={() => setShow(false)}
-        style={{ background: "none", border: "none", color: "#64748B", cursor: "pointer", padding: 4, lineHeight: 1 }}
-        aria-label="Dismiss"
-      >✕</button>
+      <button onClick={reload} style={{
+        background: "#0EA5E9", color: "#fff", border: "none",
+        padding: "6px 14px", borderRadius: 8, fontSize: 12,
+        fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+        fontFamily: "system-ui,sans-serif",
+      }}>Reload</button>
+      <button onClick={() => setShow(false)} style={{
+        background: "none", border: "none", color: "#64748B",
+        cursor: "pointer", padding: 4, lineHeight: 1,
+      }} aria-label="Dismiss">✕</button>
     </div>
   );
 }
 
 /* ── 3. Install Banner ───────────────────────────────────────────────────────
-   Android / Desktop: captures beforeinstallprompt, shows "Add to Home Screen".
-   iOS Safari:        shows tap-Share instructions once, dismissible.
-   Stores dismissal so it never nags again.                                   */
-const DISMISS_KEY = "pwa_install_dismissed";
+   Rendered directly inside Login.jsx — NOT in PwaManager.
+   Behaviour:
+     • Android/desktop: captures beforeinstallprompt, shows "Install" button.
+     • iOS Safari: shows "Tap Share → Add to Home Screen" tip.
+     • No localStorage — dismissal is session-only (React state).
+       The banner disappears naturally when the user logs in because the
+       Login component unmounts.
+     • Never shows if already running in standalone (installed) mode.       */
 
 function isIosSafari() {
   const ua = navigator.userAgent;
   return /iphone|ipad|ipod/i.test(ua) && /safari/i.test(ua) && !/chrome|crios|fxios/i.test(ua);
 }
 
-function isInStandalone() {
+function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches
-    || window.navigator.standalone === true;
+      || window.navigator.standalone === true;
 }
 
 export function InstallBanner() {
-  const [promptEvt, setPromptEvt]   = useState(null); // Android/desktop
-  const [showIos,   setShowIos]     = useState(false);
-  const [dismissed, setDismissed]   = useState(() => !!localStorage.getItem(DISMISS_KEY));
+  const [promptEvt, setPromptEvt] = useState(null);
+  const [showIos,   setShowIos]   = useState(false);
+  const [hidden,    setHidden]    = useState(false); // session-only hide via ✕
 
   useEffect(() => {
-    if (dismissed || isInStandalone()) return;
+    if (isStandalone()) return;
 
-    // Android / Chrome desktop
     const handler = (e) => { e.preventDefault(); setPromptEvt(e); };
     window.addEventListener("beforeinstallprompt", handler);
 
-    // iOS Safari — show tip if not yet dismissed
     if (isIosSafari()) setShowIos(true);
 
     return () => window.removeEventListener("beforeinstallprompt", handler);
-  }, [dismissed]);
-
-  const dismiss = () => {
-    localStorage.setItem(DISMISS_KEY, "1");
-    setDismissed(true);
-    setPromptEvt(null);
-    setShowIos(false);
-  };
+  }, []);
 
   const install = async () => {
     if (!promptEvt) return;
     promptEvt.prompt();
     const { outcome } = await promptEvt.userChoice;
-    if (outcome === "accepted") dismiss();
-    else setPromptEvt(null);
+    if (outcome === "accepted") setPromptEvt(null);
+    // if declined, keep banner so user can try again later
   };
 
-  // Nothing to show
-  if (dismissed || isInStandalone()) return null;
-  if (!promptEvt && !showIos)        return null;
+  if (isStandalone() || hidden)       return null;
+  if (!promptEvt && !showIos)         return null;
 
   return (
     <div style={{
       ...bannerBase,
-      bottom: 90,
+      // Login page has no navbar — sit 16px above the safe-area bottom
+      bottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
       background: "var(--panel, #fff)",
       border: "1px solid var(--line, #E2E8F0)",
       color: "var(--ink, #0F172A)",
       fontSize: 13,
-      fontFamily: "system-ui, sans-serif",
+      fontFamily: "system-ui,sans-serif",
       boxShadow: "0 4px 24px rgba(14,165,233,.15)",
     }}>
-      <img
-        src="/icons/icon-192.png"
-        alt=""
-        style={{ width: 42, height: 42, borderRadius: 10, flexShrink: 0 }}
-      />
+      <img src="/icons/icon-192.png" alt=""
+           style={{ width: 42, height: 42, borderRadius: 10, flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>BedFlow</div>
-        {promptEvt ? (
-          <div style={{ color: "var(--ink-2, #64748B)", fontSize: 12 }}>
-            Add to Home Screen for the best experience
-          </div>
-        ) : (
-          <div style={{ color: "var(--ink-2, #64748B)", fontSize: 12 }}>
-            Tap <b>Share</b> → <b>Add to Home Screen</b>
-          </div>
-        )}
+        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>Install BedFlow</div>
+        <div style={{ color: "var(--ink-2, #64748B)", fontSize: 12 }}>
+          {promptEvt
+            ? "Add to Home Screen for the best experience"
+            : <>Tap <b>Share</b> → <b>Add to Home Screen</b></>}
+        </div>
       </div>
       {promptEvt && (
-        <button
-          onClick={install}
-          style={{
-            background: "#0EA5E9", color: "#fff", border: "none",
-            padding: "7px 14px", borderRadius: 9, fontSize: 12,
-            fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-            fontFamily: "system-ui, sans-serif",
-            boxShadow: "0 2px 8px rgba(14,165,233,.35)",
-          }}
-        >
-          Install
-        </button>
+        <button onClick={install} style={{
+          background: "#0EA5E9", color: "#fff", border: "none",
+          padding: "7px 14px", borderRadius: 9, fontSize: 12,
+          fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
+          fontFamily: "system-ui,sans-serif",
+          boxShadow: "0 2px 8px rgba(14,165,233,.30)",
+        }}>Install</button>
       )}
-      <button
-        onClick={dismiss}
-        style={{ background: "none", border: "none", color: "var(--ink-3, #94A3B8)", cursor: "pointer", padding: 4, lineHeight: 1, flexShrink: 0 }}
-        aria-label="Dismiss"
-      >✕</button>
+      {/* ✕ hides for this session only — no localStorage */}
+      <button onClick={() => setHidden(true)} style={{
+        background: "none", border: "none",
+        color: "var(--ink-3, #94A3B8)", cursor: "pointer",
+        padding: 4, lineHeight: 1, flexShrink: 0,
+      }} aria-label="Dismiss">✕</button>
     </div>
   );
 }
 
-/* ── PwaManager — mount once in main.jsx ────────────────────────────────────*/
+/* ── PwaManager — mounted on every app page (NOT login) ─────────────────────
+   Contains only OfflineBanner + UpdateToast.
+   InstallBanner is handled separately inside Login.jsx.                      */
 export function PwaManager() {
   const [reg, setReg] = useState(null);
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
-    // vite-plugin-pwa registers the SW; we just grab the registration for the update toast
     navigator.serviceWorker.ready.then(setReg).catch(() => {});
   }, []);
 
@@ -239,7 +206,6 @@ export function PwaManager() {
     <>
       <OfflineBanner />
       <UpdateToast registration={reg} />
-      <InstallBanner />
     </>
   );
 }
