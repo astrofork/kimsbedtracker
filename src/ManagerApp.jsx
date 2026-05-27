@@ -222,6 +222,15 @@ function PreManager({ showToast }) {
             <div className="row" style={{ gap: 8 }}>
               <span className={"tag " + (u.shift === "night" ? "b" : "v")}>{u.shift === "night" ? "Night" : "Morning"}</span>
               <button className="chip" onClick={() => setEditing(u)}>Edit</button>
+              {/* FIX: PRE delete with guard confirmation */}
+              <button className="chip" style={{ color: "var(--red)" }}
+                onClick={async () => {
+                  if (!window.confirm(`Delete ${u.name} (${u.pre})?\n\nThis is permanent. Remove their wards first if any are assigned.`)) return;
+                  try { await api.mgrDeletePre(u.id); load(); showToast("PRE deleted"); }
+                  catch (e) { showToast(e.message); }
+                }}>
+                Delete
+              </button>
             </div>
           </div>
         </div>
@@ -244,6 +253,7 @@ function PreEditor({ user, floors, onClose, onSaved, showToast }) {
   const [preCode, setPreCode] = useState(user?.pre || "");
   const [password, setPassword] = useState("");
   const [shift, setShift] = useState(user?.shift || "morning");
+  // FIX: floor selector available both on create AND edit
   const [floor, setFloor] = useState(floors[0] || "");
   const [busy, setBusy] = useState(false);
 
@@ -252,12 +262,17 @@ function PreEditor({ user, floors, onClose, onSaved, showToast }) {
     try {
       if (isNew) {
         if (!username || !password || !name || !preCode) { showToast("Fill all fields"); setBusy(false); return; }
-        await api.mgrCreatePre({ username, password, name, preCode, floor, shift });
+        await api.mgrCreatePre({ username, password, name, preCode, floor: floor || undefined, shift });
       } else {
         const data = { name, shift };
         if (password) data.password = password;
         if (preCode) data.preCode = preCode;
         await api.mgrEditPre(user.id, data);
+        // FIX: if floor changed, reassign all wards of this PRE atomically
+        const targetCode = preCode || user.pre;
+        if (targetCode && floor) {
+          await api.mgrSetPreFloor(targetCode, floor || null);
+        }
       }
       onSaved();
     } catch (e) { showToast(e.message); setBusy(false); }
@@ -292,11 +307,12 @@ function PreEditor({ user, floors, onClose, onSaved, showToast }) {
           <input className="field" type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••" />
           <div style={{ height: 12 }} />
 
-          {isNew && floors.length > 0 && <>
-            <label className="label">Floor</label>
+          {/* FIX: floor selector shown for both new and edit */}
+          {floors.length > 0 && <>
+            <label className="label">Floor {!isNew && <span className="dim" style={{ fontSize: 11 }}>(reassigns all wards)</span>}</label>
             <select className="field" value={floor} onChange={(e) => setFloor(e.target.value)}>
+              <option value="">(Unassigned)</option>
               {floors.map((f) => <option key={f} value={f}>{f}</option>)}
-              <option value="">(none)</option>
             </select>
             <div style={{ height: 12 }} />
           </>}

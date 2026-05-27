@@ -62,6 +62,13 @@ export const api = {
   mgrCreateWard: (data) => req("/manager/wards", { method: "POST", body: JSON.stringify(data) }),
   mgrEditWard: (id, data) => req(`/manager/wards/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeleteWard: (id) => req(`/manager/wards/${id}`, { method: "DELETE" }),
+  // FIX: new endpoints for PRE delete and floor reassignment
+  mgrDeletePre: (id) => req(`/manager/pre/${id}`, { method: "DELETE" }),
+  mgrSetPreFloor: (preCode, floor) =>
+    req(`/manager/pre/${encodeURIComponent(preCode)}/floor`, {
+      method: "PUT",
+      body: JSON.stringify({ floor }),
+    }),
   mgrHistoryDates: () => req("/manager/history/dates"),
   mgrHistory: (date, pre) => req(`/manager/history?date=${date}${pre ? "&pre=" + pre : ""}`),
   pushSubscribe: (subscription) =>
