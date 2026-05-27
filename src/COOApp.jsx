@@ -46,6 +46,7 @@ export default function COOApp({ user, meta, onLogout }) {
         </div>
         <div className="row" style={{ gap: 8 }}>
           <span className="pre-pill"><Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}</span>
+          <span className="pre-pill"><Ic d={icons.sun} s={13} />{new Date().toLocaleDateString()}</span>
           <ThemeToggle />
           <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
