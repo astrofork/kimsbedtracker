@@ -21,11 +21,11 @@ export default function COOApp({ user, meta, onLogout }) {
   const pollRef = useRef(null);
 
   const load = async () => {
-    try { setData(await api.cooOverview()); } catch (e) {}
-    try { setCompliance((await api.cooCompliance()).compliance); } catch (e) {}
+    try { setData(await api.cooOverview()); } catch (e) { }
+    try { setCompliance((await api.cooCompliance()).compliance); } catch (e) { }
   };
   useEffect(() => { load(); pollRef.current = setInterval(load, 15000); return () => clearInterval(pollRef.current); }, []);
-  useEffect(() => { api.mgrHistoryDates().then((d) => setDates(d.dates || [])).catch(() => {}); }, []);
+  useEffect(() => { api.mgrHistoryDates().then((d) => setDates(d.dates || [])).catch(() => { }); }, []);
 
   // when a historical date is picked, load that day's rounds
   useEffect(() => {
@@ -274,7 +274,7 @@ function Matrix({ data, selDate, history }) {
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div>
-      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Bed matrix</div>
+      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Bed Vacant</div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 12 }}>
         {isLive ? `Vacant & reserved by ward. Updated ${fmtTime(Date.now())}.` : `Final data for ${selDate}.`}
       </div>
