@@ -46,31 +46,31 @@ export const api = {
     req("/auth/login", { method: "POST", body: JSON.stringify({ username, password, role }) }),
   preMe: () => req("/pre/me"),
   setShift: (shift) => req("/pre/shift", { method: "POST", body: JSON.stringify({ shift }) }),
-  // New backend takes wardId + vacant + reserved; occupied is auto-calculated server-side.
   setWard: (wardId, vacant, reserved) =>
     req("/pre/ward", { method: "POST", body: JSON.stringify({ wardId, vacant, reserved }) }),
   submitRound: () => req("/pre/submit", { method: "POST" }),
   cooOverview: () => req("/coo/overview"),
   cooAudit: () => req("/coo/audit"),
   cooCompliance: () => req("/coo/compliance"),
-  // manager
+  // ── manager — blocks ────────────────────────────────────────────────────────
+  mgrBlocks: () => req("/manager/blocks"),
+  mgrCreateBlock: (data) => req("/manager/blocks", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditBlock: (id, data) => req(`/manager/blocks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteBlock: (id) => req(`/manager/blocks/${id}`, { method: "DELETE" }),
+  // ── manager — wards ─────────────────────────────────────────────────────────
   mgrUsers: () => req("/manager/users"),
   mgrWards: () => req("/manager/wards"),
-  mgrFloors: () => req("/manager/floors"),
-  mgrCreatePre: (data) => req("/manager/pre", { method: "POST", body: JSON.stringify(data) }),
-  mgrEditPre: (id, data) => req(`/manager/pre/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrCreateWard: (data) => req("/manager/wards", { method: "POST", body: JSON.stringify(data) }),
   mgrEditWard: (id, data) => req(`/manager/wards/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeleteWard: (id) => req(`/manager/wards/${id}`, { method: "DELETE" }),
-  // FIX: new endpoints for PRE delete and floor reassignment
+  // ── manager — PRE users ──────────────────────────────────────────────────────
+  mgrCreatePre: (data) => req("/manager/pre", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditPre: (id, data) => req(`/manager/pre/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeletePre: (id) => req(`/manager/pre/${id}`, { method: "DELETE" }),
-  mgrSetPreFloor: (preCode, floor) =>
-    req(`/manager/pre/${encodeURIComponent(preCode)}/floor`, {
-      method: "PUT",
-      body: JSON.stringify({ floor }),
-    }),
+  // ── manager — history ────────────────────────────────────────────────────────
   mgrHistoryDates: () => req("/manager/history/dates"),
-  mgrHistory: (date, pre) => req(`/manager/history?date=${date}${pre ? "&pre=" + pre : ""}`),
+  mgrHistory: (date, blockId) =>
+    req(`/manager/history?date=${date}${blockId != null ? "&blockId=" + blockId : ""}`),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
 };
