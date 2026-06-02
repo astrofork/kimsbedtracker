@@ -2,7 +2,7 @@
 const TOKEN_KEY = "bedflow_token";
 const USER_KEY = "bedflow_user";
 
-//const BASE_API = "https://bedflow-backend.onrender.com";
+const BASE_API = "https://bedflow-backend-1.onrender.com";
 
 
 export function getToken() { return localStorage.getItem(TOKEN_KEY); }
@@ -20,7 +20,7 @@ async function req(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
   const t = getToken();
   if (t) headers.Authorization = "Bearer " + t;
-  const res = await fetch("/api" + path, { ...opts, headers });
+  const res = await fetch(BASE_API + "/api" + path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
 
   if (res.status === 401) {
