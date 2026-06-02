@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 
 export const Ic = ({ d, s = 22 }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -25,10 +25,41 @@ export const icons = {
   palette: <><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none" /></>,
 };
 
+/* ── Modal / sheet helpers ────────────────────────────────────────────────── */
+
+/**
+ * Call inside any bottom-sheet/overlay component.
+ * - Locks body scroll (iOS-safe: position:fixed + saved scroll offset)
+ * - Closes on ESC key (desktop/keyboard users)
+ * Cleanup runs automatically when the component unmounts.
+ */
+export function useModal(onClose) {
+  // Body scroll lock
+  useEffect(() => {
+    const y = window.scrollY;
+    document.body.style.top = `-${y}px`;
+    document.body.classList.add("modal-open");
+    return () => {
+      document.body.classList.remove("modal-open");
+      document.body.style.top = "";
+      window.scrollTo(0, y);
+    };
+  }, []);
+
+  // ESC key
+  useEffect(() => {
+    const h = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, [onClose]);
+}
+
 /* ── Theme system ─────────────────────────────────────────────────────────── */
 const THEMES  = ["dark", "light", "purple", "teal"];
 const T_LABEL = { dark: "Dark", light: "Light", purple: "Purple", teal: "Teal" };
 const T_COLOR = { dark: "#2dd4bf", light: "#0EA5E9", purple: "#7C3AED", teal: "#14B8A6" };
+// moon for dark mode, sun for all light-based themes
+const T_ICON  = { dark: "moon",    light: "sun",     purple: "sun",     teal: "sun"     };
 
 // theme-color = the topbar background so Android status bar matches the app UI
 const T_META_COLOR = {
@@ -80,9 +111,12 @@ export function ThemeToggle() {
       onClick={cycle}
       title={`Theme: ${T_LABEL[theme]} — tap to cycle`}
     >
-      <Ic d={icons.palette} s={17} />
+      {/* Icon uses the theme's primary colour so it reads differently for every theme */}
+      <span style={{ color: T_COLOR[theme] }}>
+        <Ic d={icons[T_ICON[theme]]} s={17} />
+      </span>
 
-      {/* coloured dot = current theme indicator */}
+      {/* coloured dot — secondary indicator, differentiates the 3 light themes */}
       <span style={{
         position: "absolute", bottom: 6, right: 6,
         width: 6, height: 6, borderRadius: "50%",
@@ -104,6 +138,161 @@ export function ThemeToggle() {
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * Consistent block identity avatar used on every screen.
+ * Always renders the same teal gradient regardless of block status.
+ */
+export function BlockAvatar({ code, size = 38 }) {
+  return (
+    <div style={{
+      width: size, height: size, flexShrink: 0,
+      borderRadius: 10,
+      background: "linear-gradient(135deg,var(--teal),var(--teal-deep))",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontWeight: 800, color: "#fff",
+      fontSize: Math.max(10, Math.floor(size * 0.34)),
+      boxShadow: "0 2px 8px rgba(14,165,233,.2)",
+    }}>
+      {code}
+    </div>
+  );
+}
+
+/* ── Friendly confirm dialog ─────────────────────────────────────────────────
+ * Replacement for window.confirm(). Themed, accessible, body-scroll-locked.
+ *
+ * Two ways to use it:
+ *
+ *  1. Hook (recommended) — returns a `confirm(opts)` async function:
+ *
+ *     const [confirm, dialog] = useConfirm();
+ *     async function onClick() {
+ *       const ok = await confirm({
+ *         title: 'Delete ward "ICU"?',
+ *         message: 'This will remove 12 beds.\n\nThis cannot be undone.',
+ *         confirmLabel: 'Delete',
+ *         danger: true,
+ *       });
+ *       if (!ok) return;
+ *       // ... do the thing
+ *     }
+ *     return <>{dialog}<button onClick={onClick}>Del</button></>;
+ *
+ *  2. Controlled component — render <ConfirmDialog ... /> yourself.
+ */
+export function ConfirmDialog({
+  title, message,
+  confirmLabel = "Confirm",
+  cancelLabel  = "Cancel",
+  danger = false,
+  onConfirm, onCancel,
+}) {
+  useModal(onCancel);
+  // Auto-focus the confirm button so keyboard users can hit Enter
+  const btnRef = React.useRef(null);
+  useEffect(() => { btnRef.current?.focus(); }, []);
+  return (
+    <div className="overlay" onClick={onCancel} style={{ alignItems: "center" }}>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--panel)",
+          color: "var(--ink)",
+          borderRadius: 14,
+          maxWidth: 380,
+          width: "calc(100% - 32px)",
+          margin: "auto",
+          padding: 20,
+          boxShadow: "0 20px 50px rgba(0,0,0,.25)",
+          border: "1px solid var(--line)",
+        }}
+      >
+        <div id="confirm-title" style={{
+          fontWeight: 700, fontSize: 16, color: "var(--ink)",
+          marginBottom: message ? 10 : 18, lineHeight: 1.3,
+        }}>
+          {title}
+        </div>
+        {message && (
+          <div style={{
+            fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5,
+            whiteSpace: "pre-wrap", marginBottom: 18,
+          }}>
+            {message}
+          </div>
+        )}
+        <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+          <button
+            className="btn btn-ghost"
+            style={{ padding: "9px 16px", fontWeight: 600 }}
+            onClick={onCancel}
+          >
+            {cancelLabel}
+          </button>
+          <button
+            ref={btnRef}
+            className={danger ? "btn" : "btn btn-primary"}
+            style={danger ? {
+              padding: "9px 16px", fontWeight: 700,
+              background: "var(--red)", color: "#fff", border: "none",
+            } : { padding: "9px 16px", fontWeight: 700 }}
+            onClick={onConfirm}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function useConfirm() {
+  const [state, setState] = useState(null); // null | { ...opts, resolve }
+
+  const confirm = React.useCallback((opts) =>
+    new Promise((resolve) => {
+      setState({ ...opts, resolve });
+    }), []);
+
+  const close = (value) => {
+    if (state) state.resolve(value);
+    setState(null);
+  };
+
+  const node = state ? (
+    <ConfirmDialog
+      title={state.title}
+      message={state.message}
+      confirmLabel={state.confirmLabel}
+      cancelLabel={state.cancelLabel}
+      danger={state.danger}
+      onConfirm={() => close(true)}
+      onCancel={() => close(false)}
+    />
+  ) : null;
+
+  return [confirm, node];
+}
+
+export function AppError({ title, message }) {
+  if (!message) return null;
+  return (
+    <div style={{
+      background: "rgba(239,68,68,.1)",
+      border: "1px solid rgba(239,68,68,.25)",
+      borderRadius: 8,
+      padding: "10px 13px",
+      marginBottom: 12,
+    }}>
+      {title && <div style={{ color: "var(--red)", fontWeight: 700, fontSize: 13, marginBottom: 3 }}>{title}</div>}
+      <div style={{ color: "var(--red)", fontSize: 13, lineHeight: 1.4 }}>{message}</div>
+    </div>
   );
 }
 

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { api, setSession } from "./lib.js";
-import { Ic, icons, ThemeToggle } from "./ui.jsx";
+import { api, setSession, friendlyError } from "./lib.js";
+import { Ic, icons, ThemeToggle, AppError } from "./ui.jsx";
 import { InstallBanner } from "./pwa.jsx";
 import { platformAvailable, fingerprintEnrolled, unlockWithFingerprint, enrollFingerprint } from "./passkey.js";
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, sessionMsg }) {
   const [role, setRole] = useState("PRE");
   const [u, setU] = useState("");
   const [p, setP] = useState("");
@@ -36,7 +36,7 @@ export default function Login({ onLogin }) {
     try {
       const { token, user } = await api.login(u.trim(), p, role);
       finish(token, user, u.trim().toLowerCase());
-    } catch (e) { setErr(e.message); }
+    } catch (e) { setErr(friendlyError(e).message); }
     finally { setBusy(false); }
   };
 
@@ -111,6 +111,8 @@ export default function Login({ onLogin }) {
           </div>
         </div>
 
+        {sessionMsg && <AppError message={sessionMsg} />}
+
         {fpReady && (
           <button className="btn btn-primary btn-block slide-up" style={{ marginTop: 26 }} onClick={fingerprintLogin}>
             <Ic d={icons.finger} s={20} /> Unlock with fingerprint
@@ -135,7 +137,7 @@ export default function Login({ onLogin }) {
                  onChange={(e) => { setP(e.target.value); setErr(""); }}
                  onKeyDown={(e) => e.key === "Enter" && submit()} />
 
-          {err && <div style={{ color: "var(--red)", fontSize: 13, marginTop: 12, fontWeight: 600 }}>{err}</div>}
+          {err && <AppError message={err} />}
 
           <button className="btn btn-primary btn-block" style={{ marginTop: 20 }} disabled={busy} onClick={submit}>
             {busy ? "Signing in…" : `Sign in as ${role}`}

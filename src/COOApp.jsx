@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
-import { api, fmtTime } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle } from "./ui.jsx";
+import { api, fmtTime, toastErr, friendlyError } from "./lib.js";
+import { Ic, icons, StatusBar, ThemeToggle, useModal, AppError, useConfirm } from "./ui.jsx";
+import {
+  snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
+} from "./snapshot.js";
+
+const HOSPITAL_NAME = "KIMS Hospitals";
 
 function fmtReminderLabel(hhmm) {
   const [h] = hhmm.split(":").map(Number);
@@ -44,11 +49,13 @@ export default function COOApp({ user, meta, onLogout }) {
           <div className="logo" style={{ width: 30, height: 30, fontSize: 14 }}>B</div>
           <div><div className="h2">COO Console</div><div className="dim" style={{ fontSize: 11 }}>All floors · live</div></div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
-          <span className="pre-pill"><Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}</span>
-          <span className="pre-pill"><Ic d={icons.sun} s={13} />{new Date().toLocaleDateString()}</span>
+        <div className="row" style={{ gap: 6 }}>
+          <span className="pre-pill" style={{ fontSize: 11, flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
+            <span><Ic d={icons.clock} s={11} /> {fmtTime(Date.now())}</span>
+            <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
+          </span>
           <ThemeToggle />
-          <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
+          <button className="btn btn-ghost" style={{ padding: 8 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
       </div>
 
@@ -68,7 +75,7 @@ export default function COOApp({ user, meta, onLogout }) {
         <DatePicker dates={dates} selDate={selDate} setSelDate={setSelDate} />
 
         {tab === "overview" && <Overview data={data} compliance={compliance} selDate={selDate} history={history} />}
-        {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} />}
+        {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} userId={user?.id} />}
       </div>
 
       <div className="navbar">
@@ -187,12 +194,10 @@ function Overview({ data, compliance, selDate, history }) {
   );
 }
 
-function Matrix({ data, selDate, history }) {
+function Matrix({ data, selDate, history, userId }) {
   const isLive = selDate === "live";
 
-  // ── Ward filter — ordered array, persisted in localStorage ──────────────
-  // selectedWards is an array of ward names in the order the COO ticked them.
-  // Empty array = no manual selection → show all wards alphabetically.
+  // ── Ward filter — existing logic unchanged ────────────────────────────────
   const [selectedWards, setSelectedWards] = useState(() => {
     try { return JSON.parse(localStorage.getItem("coo_matrix_order") || "[]"); }
     catch { return []; }
@@ -203,14 +208,63 @@ function Matrix({ data, selDate, history }) {
     localStorage.setItem("coo_matrix_order", JSON.stringify(selectedWards));
   }, [selectedWards]);
 
-  const toggleWard = (ward) => setSelectedWards((prev) => {
-    if (prev.includes(ward)) return prev.filter((w) => w !== ward); // untick → remove
-    return [...prev, ward];                                          // tick   → append
+  const toggleWard = (ward) => setSelectedWards((prev) =>
+    prev.includes(ward) ? prev.filter((w) => w !== ward) : [...prev, ward]
+  );
+  const showAllWards = () => setSelectedWards([]);
+
+  // ── Saved Views state ─────────────────────────────────────────────────────
+  const [views,        setViews]        = useState([]);
+  const [activeViewId, setActiveViewId] = useState(() => {
+    const stored = localStorage.getItem(`coo_last_view_${userId}`);
+    return stored ? Number(stored) : null;
   });
-  const showAllWards = () => setSelectedWards([]);                   // clear → back to alphabetical
+  const [viewModal,    setViewModal]    = useState(null); // null | { mode:"new"|"edit", view?:obj }
+  const [viewToast,    setViewToast]    = useState("");
+  const [confirm, confirmDialog]        = useConfirm();
+
+  const showVToast = (m) => { setViewToast(m); setTimeout(() => setViewToast(""), 2200); };
+
+  const loadViews = async () => {
+    try { setViews((await api.cooViews()).views || []); }
+    catch { /* non-fatal */ }
+  };
+  useEffect(() => { loadViews(); }, []);
+
+  // When activeViewId changes, apply the view's ward selection
+  useEffect(() => {
+    if (activeViewId == null) return;
+    const v = views.find(x => x.id === activeViewId);
+    if (v) setSelectedWards(v.selected_wards || []);
+  }, [activeViewId, views]);
+
+  // Persist last-used view
+  useEffect(() => {
+    if (userId == null) return;
+    if (activeViewId != null)
+      localStorage.setItem(`coo_last_view_${userId}`, String(activeViewId));
+    else
+      localStorage.removeItem(`coo_last_view_${userId}`);
+  }, [activeViewId, userId]);
+
+  // When user manually toggles a ward, detach from active view
+  const handleToggleWard = (ward) => {
+    setActiveViewId(null);
+    toggleWard(ward);
+  };
+  const handleShowAllWards = () => {
+    setActiveViewId(null);
+    showAllWards();
+  };
+
+  const activeView = activeViewId != null ? views.find(v => v.id === activeViewId) : null;
+
+  // Group views for the dropdown
+  const systemViews = views.filter(v => v.is_system);
+  const sharedViews = views.filter(v => !v.is_system && v.is_shared);
+  const myViews     = views.filter(v => !v.is_system && !v.is_shared);
 
   // ── Data build ────────────────────────────────────────────────────────────
-  // For historical view, build a pre→ward→counts map from the day's rounds.
   const histMap = {};
   if (!isLive && history) {
     for (const round of history) {
@@ -219,7 +273,6 @@ function Matrix({ data, selDate, history }) {
     }
   }
 
-  // Collect all unique ward types across all PREs.
   const wardSet = new Set();
   const allPres = [];
   for (const f of data.floors) for (const p of f.pres) {
@@ -230,7 +283,6 @@ function Matrix({ data, selDate, history }) {
   }
   const wardTypes = [...wardSet].sort();
 
-  // All rows (unfiltered).
   const allRows = wardTypes.map((ward) => {
     let totalV = 0, totalR = 0, hasData = false;
     for (const p of allPres) {
@@ -245,16 +297,11 @@ function Matrix({ data, selDate, history }) {
     return { ward, v: totalV, r: totalR, hasData };
   });
 
-  // Apply the ward filter.
-  // If selectedWards is empty → show all alphabetically.
-  // Otherwise → show only the selected wards in the order they were ticked.
   const isFiltered = selectedWards.length > 0;
   const rows = isFiltered
     ? selectedWards.map((ward) => allRows.find((r) => r.ward === ward)).filter(Boolean)
     : allRows;
-
   const visibleCount = isFiltered ? selectedWards.length : wardTypes.length;
-
   const grandV = rows.reduce((a, r) => a + r.v, 0);
   const grandR = rows.reduce((a, r) => a + r.r, 0);
 
@@ -264,13 +311,16 @@ function Matrix({ data, selDate, history }) {
     color: color || "var(--ink-2)", borderLeft: "1px solid var(--line)",
     textAlign: "center", background: "var(--panel-2)",
   });
-
   const tdStyle = (color, stripe) => ({
     textAlign: "center", padding: "10px 16px",
     borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)",
     fontWeight: 700, fontSize: 15, color,
     background: stripe ? "rgba(0,0,0,.022)" : "transparent",
   });
+
+  // ── Snapshot export ───────────────────────────────────────────────────────
+  const snapshotRef = useRef(null);
+  const viewLabel = activeView ? activeView.name : (isFiltered ? "Custom selection" : "All wards");
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -280,9 +330,91 @@ function Matrix({ data, selDate, history }) {
         {isLive ? `Vacant & reserved by ward. Updated ${fmtTime(Date.now())}.` : `Final data for ${selDate}.`}
       </div>
 
-      {/* ── Ward filter panel ──────────────────────────────────────────────── */}
+      <SnapshotActions
+        target={snapshotRef}
+        onToast={showVToast}
+      />
+
+      {/* ── Saved Views selector ─────────────────────────────────────────── */}
+      <div className="card" style={{ padding: "10px 12px", marginBottom: 10 }}>
+        {/* Single compact row: select + Add View button */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            className="field"
+            style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}
+            value={activeViewId ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              setActiveViewId(val === "" ? null : Number(val));
+            }}
+          >
+            {activeViewId == null && <option value="">— Custom —</option>}
+            {systemViews.length > 0 && (
+              <optgroup label="Default">
+                {systemViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+            {sharedViews.length > 0 && (
+              <optgroup label="Shared">
+                {sharedViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+            {myViews.length > 0 && (
+              <optgroup label="Mine">
+                {myViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+          </select>
+          <button
+            className="btn btn-primary"
+            style={{ padding: "8px 12px", fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}
+            onClick={() => setViewModal({ mode: "new" })}
+          >
+            + Add View
+          </button>
+        </div>
+
+        {/* Active view info — compact, only when a view is selected */}
+        {activeView && (
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--teal)", fontWeight: 700, flexShrink: 0 }}>
+              {activeView.name}
+            </span>
+            {activeView.is_shared && !activeView.is_system && (
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 10, background: "rgba(0,210,180,.15)", color: "var(--teal)" }}>shared</span>
+            )}
+            <span className="dim" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {activeView.selected_wards.length > 0 ? activeView.selected_wards.join(" · ") : "All wards"}
+            </span>
+            {!activeView.is_system && (
+              <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                <button className="chip" style={{ fontSize: 10, padding: "2px 7px" }}
+                  onClick={() => setViewModal({ mode: "edit", view: activeView })}>Edit</button>
+                <button className="chip" style={{ fontSize: 10, padding: "2px 7px", color: "var(--red)" }}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Delete view "${activeView.name}"?`,
+                      message: activeView.is_shared
+                        ? "This view is shared with all COO users. Deleting it removes it for everyone.\n\nThis cannot be undone."
+                        : "This cannot be undone.",
+                      confirmLabel: "Delete view",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                    try {
+                      await api.cooDeleteView(activeView.id);
+                      setActiveViewId(null); setSelectedWards([]);
+                      await loadViews(); showVToast(`View "${activeView.name}" deleted`);
+                    } catch (e) { showVToast(toastErr(e)); }
+                  }}>Del</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Ward filter panel — unchanged except toggle handlers ──────────── */}
       <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 12 }}>
-        {/* Filter header / toggle */}
         <button
           onClick={() => setFilterOpen((o) => !o)}
           style={{
@@ -303,7 +435,6 @@ function Matrix({ data, selDate, history }) {
                 {visibleCount}/{wardTypes.length} shown
               </span>
             )}
-            {/* chevron rotates based on open state */}
             <span style={{
               display: "inline-flex", color: "var(--ink-3)",
               transform: filterOpen ? "rotate(270deg)" : "rotate(90deg)",
@@ -314,27 +445,23 @@ function Matrix({ data, selDate, history }) {
           </span>
         </button>
 
-        {/* Checkbox list (collapsible) */}
         {filterOpen && (
           <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)" }}>
-            {/* Show All shortcut */}
             {isFiltered && (
               <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-                <button className="chip" style={{ fontSize: 12 }} onClick={showAllWards}>
+                <button className="chip" style={{ fontSize: 12 }} onClick={handleShowAllWards}>
                   ✕ Clear selection — show all
                 </button>
               </div>
             )}
-
-            {/* Ward toggle chips — always alphabetical for easy browsing */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {wardTypes.map((ward) => {
-                const idx = selectedWards.indexOf(ward); // -1 if not selected
+                const idx = selectedWards.indexOf(ward);
                 const ticked = idx !== -1;
                 return (
                   <button
                     key={ward}
-                    onClick={() => toggleWard(ward)}
+                    onClick={() => handleToggleWard(ward)}
                     style={{
                       padding: "6px 12px", borderRadius: 20, fontSize: 12,
                       fontWeight: 600, cursor: "pointer", border: "1px solid",
@@ -349,7 +476,6 @@ function Matrix({ data, selDate, history }) {
                 );
               })}
             </div>
-
             {isFiltered && (
               <div className="dim" style={{ fontSize: 11, marginTop: 10 }}>
                 Numbers show the order wards appear in the table.
@@ -359,7 +485,7 @@ function Matrix({ data, selDate, history }) {
         )}
       </div>
 
-      {/* ── Matrix table ──────────────────────────────────────────────────── */}
+      {/* ── Matrix table — unchanged ─────────────────────────────────────── */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13 }}>
           <thead>
@@ -389,7 +515,6 @@ function Matrix({ data, selDate, history }) {
                 </tr>
               ))
             )}
-            {/* Totals row — only counts visible wards */}
             {rows.length > 0 && (
               <tr>
                 <td style={{ padding: "12px 16px", fontWeight: 800, color: "var(--teal)", borderTop: "2px solid var(--line)", background: "var(--panel-2)" }}>
@@ -406,15 +531,344 @@ function Matrix({ data, selDate, history }) {
       <div className="row" style={{ gap: 14, marginTop: 12, flexWrap: "wrap" }}>
         <span className="dim" style={{ fontSize: 11 }}>– = not yet entered for this round</span>
       </div>
+
+      {/* ── Save/Edit View Modal ──────────────────────────────────────────── */}
+      {viewModal && (
+        <SaveViewModal
+          mode={viewModal.mode}
+          existingView={viewModal.view}
+          currentWards={selectedWards}
+          wardTypes={wardTypes}
+          onClose={() => setViewModal(null)}
+          onSaved={async (newId) => {
+            setViewModal(null);
+            await loadViews();
+            if (newId != null) setActiveViewId(newId);
+            showVToast(viewModal.mode === "new" ? "View saved ✓" : "View updated ✓");
+          }}
+        />
+      )}
+
+      {viewToast && <div className="toast">{viewToast}</div>}
+      {confirmDialog}
+
+      {/* Off-screen snapshot target — rendered with fixed light styling so the
+          export looks the same regardless of active theme, then html2canvas
+          captures it. Positioned far off-screen so it never affects layout. */}
+      <div
+        ref={snapshotRef}
+        id="snapshot-report"
+        aria-hidden="true"
+        style={{
+          position: "fixed",
+          left: -10000,
+          top: 0,
+          width: 720,
+          pointerEvents: "none",
+        }}
+      >
+        <SnapshotReport
+          viewLabel={viewLabel}
+          isLive={isLive}
+          selDate={selDate}
+          rows={rows}
+          grandV={grandV}
+          grandR={grandR}
+          isFiltered={isFiltered}
+        />
+      </div>
     </div>
   );
 }
 
+function SaveViewModal({ mode, existingView, currentWards, wardTypes, onClose, onSaved }) {
+  useModal(onClose);
+  const isNew = mode === "new";
+  const [name,       setName]       = useState(existingView?.name || "");
+  const [isShared,   setIsShared]   = useState(existingView?.is_shared ?? false);
+  const [selWards,   setSelWards]   = useState(
+    isNew ? [...currentWards] : [...(existingView?.selected_wards || [])]
+  );
+  const [busy, setBusy] = useState(false);
+  const [err,  setErr]  = useState("");
 
-function WardSheet({ pre, onClose }) {
+  const toggleW = (w) => setSelWards((prev) =>
+    prev.includes(w) ? prev.filter(x => x !== w) : [...prev, w]
+  );
+
+  const save = async () => {
+    if (!name.trim()) { setErr("View name required"); return; }
+    setBusy(true);
+    try {
+      let newId = null;
+      if (isNew) {
+        const r = await api.cooSaveView({ name: name.trim(), selected_wards: selWards, is_shared: isShared });
+        newId = r.id;
+      } else {
+        await api.cooEditView(existingView.id, { name: name.trim(), selected_wards: selWards, is_shared: isShared });
+      }
+      onSaved(newId);
+    } catch (e) { setErr(friendlyError(e).message); setBusy(false); }
+  };
+
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "88vh", overflowY: "auto" }}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>{isNew ? "Save View" : "Edit View"}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">View name</label>
+          <input className="field" value={name} autoFocus
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save()}
+            placeholder="e.g. Critical Care" />
+          <div style={{ height: 14 }} />
+
+          <label className="label">Visibility</label>
+          <div className="seg" style={{ marginBottom: 16 }}>
+            <button className={!isShared ? "on" : ""} onClick={() => setIsShared(false)}>Private</button>
+            <button className={isShared  ? "on" : ""} onClick={() => setIsShared(true)}>Shared (all COO)</button>
+          </div>
+
+          <label className="label">Selected wards
+            <span className="dim" style={{ fontSize: 11, marginLeft: 6 }}>
+              ({selWards.length === 0 ? "all wards" : `${selWards.length} selected`})
+            </span>
+          </label>
+          {selWards.length > 0 && (
+            <button className="chip" style={{ fontSize: 11, marginBottom: 10 }}
+              onClick={() => setSelWards([])}>✕ Clear — use all wards</button>
+          )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
+            {wardTypes.map((w) => {
+              const on = selWards.includes(w);
+              return (
+                <button key={w} onClick={() => toggleW(w)} style={{
+                  padding: "5px 11px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                  cursor: "pointer", border: "1px solid",
+                  borderColor: on ? "var(--teal)" : "var(--line)",
+                  background: on ? "rgba(0,210,180,.12)" : "var(--panel)",
+                  color: on ? "var(--teal)" : "var(--ink-3)",
+                }}>{w}</button>
+              );
+            })}
+          </div>
+
+          {err && <AppError message={err} />}
+
+          <button className="btn btn-primary btn-block" disabled={busy} onClick={save}>
+            {busy ? "Saving…" : isNew ? "Save view" : "Update view"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Snapshot — one-tap button row + off-screen report card
+// ══════════════════════════════════════════════════════════════════════════════
+
+function SnapshotActions({ target, onToast }) {
+  const [busy, setBusy] = useState(null); // "download" | "copy" | "share" | null
+  const canShare = snapshotCanShare();
+
+  const run = async (kind, fn, okMessage) => {
+    if (busy) return;
+    const el = target.current;
+    if (!el) return;
+    setBusy(kind);
+    try {
+      await fn(el);
+      onToast(okMessage);
+    } catch (e) {
+      const msg = (e && e.message) || "";
+      if (msg.includes("not supported")) onToast(msg);
+      else if (e?.name === "AbortError") { /* user cancelled share — silent */ }
+      else onToast("Unable to generate report. Please try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="card" style={{ padding: 10, marginBottom: 12 }}>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <button
+          className="btn btn-primary"
+          style={{ flex: 1, minWidth: 160, padding: "10px 12px", fontSize: 13, justifyContent: "center" }}
+          disabled={busy !== null}
+          onClick={() => run("download", snapshotDownload, "Snapshot report downloaded")}
+        >
+          {busy === "download"
+            ? <><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={15} /></span> Generating…</>
+            : <>📸 Snapshot Report</>}
+        </button>
+        <button
+          className="chip"
+          style={{ padding: "8px 12px", fontSize: 12 }}
+          disabled={busy !== null}
+          onClick={() => run("copy", snapshotCopy, "Snapshot copied to clipboard")}
+          title="Copy as image — paste into WhatsApp / Teams / Email"
+        >
+          {busy === "copy" ? "…" : "📋 Copy"}
+        </button>
+        {canShare && (
+          <button
+            className="chip"
+            style={{ padding: "8px 12px", fontSize: 12 }}
+            disabled={busy !== null}
+            onClick={() => run("share", snapshotShare, "Snapshot shared successfully")}
+            title="Share via system dialog"
+          >
+            {busy === "share" ? "…" : "📤 Share"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SnapshotReport({ viewLabel, isLive, selDate, rows, grandV, grandR, isFiltered }) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" });
+  const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
+
+  // Hard-coded light palette so the export looks the same in any theme
+  const C = {
+    ink: "#0b1220", ink2: "#3b4350", ink3: "#7a8493",
+    line: "#e3e8ef", panel: "#ffffff", panel2: "#f6f8fb",
+    teal: "#0EA5A1", tealDeep: "#0F766E",
+    green: "#16a34a", amber: "#d97706", red: "#dc2626",
+  };
+
+  return (
+    <div style={{
+      fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+      background: C.panel, color: C.ink,
+      padding: 32, width: "100%", boxSizing: "border-box",
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{
+            width: 48, height: 48, borderRadius: 12,
+            background: `linear-gradient(135deg, ${C.teal}, ${C.tealDeep})`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "#fff", fontWeight: 800, fontSize: 22, letterSpacing: ".5px",
+          }}>B</div>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: C.ink, lineHeight: 1.2 }}>{HOSPITAL_NAME}</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.teal, marginTop: 2 }}>BedFlow · Live Vacant Report</div>
+          </div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 11, color: C.ink3, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>Generated</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.ink, marginTop: 2 }}>{dateStr}</div>
+          <div style={{ fontSize: 12, color: C.ink2 }}>{timeStr}</div>
+        </div>
+      </div>
+
+      {/* View name banner */}
+      <div style={{
+        background: C.panel2, borderRadius: 10, padding: "12px 16px",
+        marginBottom: 18, borderLeft: `4px solid ${C.teal}`,
+      }}>
+        <div style={{ fontSize: 11, color: C.ink3, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>View</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.ink, marginTop: 2 }}>
+          {viewLabel}
+          {isFiltered && <span style={{ fontSize: 11, color: C.ink3, fontWeight: 500, marginLeft: 8 }}>(filtered)</span>}
+        </div>
+        <div style={{ fontSize: 12, color: C.ink2, marginTop: 4 }}>
+          {isLive ? "Live data — current round" : `Final data for ${selDate}`}
+        </div>
+      </div>
+
+      {/* Summary stat strip */}
+      <div style={{ display: "flex", gap: 12, marginBottom: 18 }}>
+        <div style={{ flex: 1, background: C.panel2, borderRadius: 10, padding: "14px 16px", borderTop: `3px solid ${C.green}` }}>
+          <div style={{ fontSize: 11, color: C.ink3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em" }}>Total Vacant</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: C.green, lineHeight: 1.1, marginTop: 4 }}>{grandV}</div>
+        </div>
+        <div style={{ flex: 1, background: C.panel2, borderRadius: 10, padding: "14px 16px", borderTop: `3px solid ${C.amber}` }}>
+          <div style={{ fontSize: 11, color: C.ink3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em" }}>Total Reserved</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: C.amber, lineHeight: 1.1, marginTop: 4 }}>{grandR}</div>
+        </div>
+        <div style={{ flex: 1, background: C.panel2, borderRadius: 10, padding: "14px 16px", borderTop: `3px solid ${C.teal}` }}>
+          <div style={{ fontSize: 11, color: C.ink3, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".05em" }}>Wards</div>
+          <div style={{ fontSize: 30, fontWeight: 800, color: C.ink, lineHeight: 1.1, marginTop: 4 }}>{rows.length}</div>
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div style={{ height: 1, background: C.line, marginBottom: 18 }} />
+
+      {/* Matrix table */}
+      <div style={{
+        border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden",
+      }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 14 }}>
+          <thead>
+            <tr style={{ background: C.panel2 }}>
+              <th style={{ textAlign: "left", padding: "12px 16px", fontWeight: 700, fontSize: 12, color: C.ink2, textTransform: "uppercase", letterSpacing: ".04em" }}>Ward</th>
+              <th style={{ textAlign: "center", padding: "12px 16px", fontWeight: 700, fontSize: 12, color: C.green, textTransform: "uppercase", letterSpacing: ".04em", borderLeft: `1px solid ${C.line}` }}>Vacant</th>
+              <th style={{ textAlign: "center", padding: "12px 16px", fontWeight: 700, fontSize: 12, color: C.amber, textTransform: "uppercase", letterSpacing: ".04em", borderLeft: `1px solid ${C.line}` }}>Reserved</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={3} style={{ padding: "28px 16px", textAlign: "center", color: C.ink3, fontSize: 13 }}>
+                  No data available.
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, ri) => (
+                <tr key={row.ward} style={{ background: ri % 2 ? C.panel : C.panel2 }}>
+                  <td style={{ padding: "11px 16px", fontWeight: 600, color: C.ink, borderTop: `1px solid ${C.line}` }}>{row.ward}</td>
+                  <td style={{ textAlign: "center", padding: "11px 16px", fontWeight: 700, fontSize: 15, color: row.hasData && row.v > 0 ? C.green : C.ink3, borderTop: `1px solid ${C.line}`, borderLeft: `1px solid ${C.line}` }}>
+                    {row.hasData ? row.v : "–"}
+                  </td>
+                  <td style={{ textAlign: "center", padding: "11px 16px", fontWeight: 700, fontSize: 15, color: row.hasData && row.r > 0 ? C.amber : C.ink3, borderTop: `1px solid ${C.line}`, borderLeft: `1px solid ${C.line}` }}>
+                    {row.hasData ? row.r : "–"}
+                  </td>
+                </tr>
+              ))
+            )}
+            {rows.length > 0 && (
+              <tr style={{ background: C.panel2 }}>
+                <td style={{ padding: "13px 16px", fontWeight: 800, color: C.tealDeep, borderTop: `2px solid ${C.line}` }}>Total</td>
+                <td style={{ textAlign: "center", padding: "13px 16px", fontWeight: 800, fontSize: 16, color: C.green, borderTop: `2px solid ${C.line}`, borderLeft: `1px solid ${C.line}` }}>{grandV}</td>
+                <td style={{ textAlign: "center", padding: "13px 16px", fontWeight: 800, fontSize: 16, color: C.amber, borderTop: `2px solid ${C.line}`, borderLeft: `1px solid ${C.line}` }}>{grandR}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer */}
+      <div style={{
+        marginTop: 22, paddingTop: 14, borderTop: `1px solid ${C.line}`,
+        display: "flex", justifyContent: "space-between", alignItems: "center",
+        fontSize: 11, color: C.ink3,
+      }}>
+        <span>Generated by BedFlow · Hospital Bed Management</span>
+        <span style={{ fontWeight: 600 }}>{HOSPITAL_NAME}</span>
+      </div>
+    </div>
+  );
+}
+
+function WardSheet({ pre, onClose }) {
+  useModal(onClose);
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="grab" />
         <div className="pad">
           <div className="row between" style={{ marginBottom: 4 }}>

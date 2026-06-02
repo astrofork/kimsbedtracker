@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { api, fmtTime, fmtClock } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle } from "./ui.jsx";
+import { api, fmtTime, fmtClock, toastErr } from "./lib.js";
+import { Ic, icons, StatusBar, ThemeToggle, useModal, BlockAvatar, useConfirm } from "./ui.jsx";
 
 export default function ManagerApp({ user, onLogout }) {
   const [tab, setTab] = useState("blocks");
@@ -15,7 +15,10 @@ export default function ManagerApp({ user, onLogout }) {
           <div><div className="h2">Manager</div><div className="dim" style={{ fontSize: 11 }}>Setup &amp; control</div></div>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          <span className="pre-pill"><Ic d={icons.clock} s={13} /> {fmtTime(Date.now())}</span>
+          <span className="pre-pill" style={{ flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
+            <span style={{ fontSize: 11 }}><Ic d={icons.clock} s={11} /> {fmtTime(Date.now())}</span>
+            <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
+          </span>
           <ThemeToggle />
           <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
         </div>
@@ -45,14 +48,46 @@ function NavBtn({ on, ic, label, onClick }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  REPORTING (team view — unchanged from previous, works with current API)
+//  REPORTING
 // ══════════════════════════════════════════════════════════════════════════════
 const STALE_MS = 3 * 60 * 60 * 1000;
 
+function elapsed(ts) {
+  const ms = Date.now() - ts;
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (h >= 1) return `${h}h ${m}m ago`;
+  return `${m}m ago`;
+}
+
+function MiniStats({ v, o, r }) {
+  return (
+    <div style={{ display: "flex", background: "var(--panel-2)", borderRadius: 10, overflow: "hidden", marginTop: 12 }}>
+      {[
+        { label: "Vacant",   val: v, color: "var(--green)" },
+        { label: "Reserved", val: r, color: "var(--amber)" },
+        { label: "Occupied", val: o, color: "var(--red)"   },
+      ].map(({ label, val, color }, i) => (
+        <div key={label} style={{
+          flex: 1, textAlign: "center", padding: "10px 4px",
+          borderLeft: i > 0 ? "1px solid var(--line)" : "none",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, marginBottom: 4 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+            <span style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 600 }}>{label}</span>
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Reporting() {
-  const [data, setData] = useState(null);
+  const [data,       setData]       = useState(null);
   const [compliance, setCompliance] = useState([]);
-  const [audit, setAudit] = useState([]);
+  const [audit,      setAudit]      = useState([]);
+  const [bedsBlock,  setBedsBlock]  = useState(null); // { pre, wards } | null
 
   const load = async () => {
     try { setData(await api.cooOverview()); } catch {}
@@ -61,12 +96,17 @@ function Reporting() {
   };
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
 
-  if (!data) return <div className="empty"><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={24} /></span><div style={{ marginTop: 10 }}>Loading…</div></div>;
+  if (!data) return (
+    <div className="empty">
+      <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={24} /></span>
+      <div style={{ marginTop: 10 }}>Loading…</div>
+    </div>
+  );
 
   const compByPre = {};
   for (const c of compliance) compByPre[c.block] = c;
-  const scored = compliance.filter((c) => c.expected > 0);
-  const avg = scored.length ? Math.round(scored.reduce((a, c) => a + c.score, 0) / scored.length) : 100;
+  const scored  = compliance.filter((c) => c.expected > 0);
+  const avg     = scored.length ? Math.round(scored.reduce((a, c) => a + c.score, 0) / scored.length) : 100;
   const lagging = scored.filter((c) => c.score < 100).length;
 
   const now = Date.now();
@@ -74,84 +114,167 @@ function Reporting() {
   for (const f of data.floors) for (const p of f.pres)
     for (const w of p.wards)
       if (w.vacant !== null && w.updatedAt && now - w.updatedAt > STALE_MS)
-        stale.push({ pre: p.pre, ward: w.ward, updatedAt: w.updatedAt });
+        stale.push({ pre: p.pre, ward: w.ward, updatedAt: w.updatedAt, age: now - w.updatedAt });
+  stale.sort((a, b) => b.age - a.age);
 
   return (
     <div>
-      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Team reporting</div>
-      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>Live progress, compliance, activity and stale-ward alerts.</div>
+      <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Team Report</div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>Live compliance, bed status and activity.</div>
 
-      <div className="card" style={{ padding: 14, marginBottom: 14, borderColor: avg >= 80 ? "var(--teal-deep)" : "var(--red)" }}>
+      {/* ── Compliance summary ── */}
+      <div className="card" style={{
+        padding: 16, marginBottom: 12,
+        borderColor: avg >= 80 ? "var(--teal-deep)" : avg >= 50 ? "var(--amber)" : "var(--red)",
+      }}>
         <div className="row between">
           <div>
-            <div className="h2">Today's compliance</div>
-            <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>{lagging === 0 ? "All blocks on schedule" : `${lagging} block${lagging > 1 ? "s" : ""} behind`}</div>
+            <div className="h2">Today's round compliance</div>
+            <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
+              {lagging === 0
+                ? "All blocks are submitting on time"
+                : `${lagging} block${lagging > 1 ? "s" : ""} behind schedule`}
+            </div>
           </div>
           <div style={{ textAlign: "right" }}>
-            <div className="mono" style={{ fontSize: 28, fontWeight: 700, color: avg >= 80 ? "var(--green)" : avg >= 50 ? "var(--amber)" : "var(--red)" }}>{avg}%</div>
-            <div className="dim" style={{ fontSize: 10 }}>on-time rounds</div>
+            <div className="mono" style={{
+              fontSize: 32, fontWeight: 800, lineHeight: 1,
+              color: avg >= 80 ? "var(--green)" : avg >= 50 ? "var(--amber)" : "var(--red)",
+            }}>{avg}%</div>
+            <div className="dim" style={{ fontSize: 10, marginTop: 2 }}>on-time rounds</div>
           </div>
         </div>
       </div>
 
+      {/* ── Stale ward warnings ── */}
       {stale.length > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 14, background: "var(--red-bg)", borderColor: "var(--red)" }}>
-          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <span style={{ color: "var(--red)" }}><Ic d={icons.bell} s={18} /></span>
-            <span style={{ fontWeight: 700, color: "var(--red)" }}>{stale.length} stale ward{stale.length > 1 ? "s" : ""}</span>
+        <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 12, borderColor: "var(--red)" }}>
+          <div style={{ padding: "12px 14px", background: "var(--red-bg)" }}>
+            <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+              <span style={{ color: "var(--red)" }}><Ic d={icons.bell} s={17} /></span>
+              <span style={{ fontWeight: 700, fontSize: 14, color: "var(--red)" }}>
+                {stale.length} ward{stale.length > 1 ? "s" : ""} with outdated data
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--red)", opacity: 0.85, paddingLeft: 25 }}>
+              These wards haven't been updated in over 3 hours. The PRE team may need a prompt.
+            </div>
           </div>
-          {stale.slice(0, 5).map((s, i) => (
-            <div key={i} className="dim" style={{ fontSize: 12, marginLeft: 26 }}>{s.pre} · {s.ward} — last {fmtTime(s.updatedAt)}</div>
-          ))}
+          <div style={{ padding: "0 14px" }}>
+            {stale.map((s, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "10px 0",
+                borderBottom: i < stale.length - 1 ? "1px solid var(--line)" : "none",
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>
+                    Block {s.pre} · <span style={{ color: "var(--ink-2)" }}>{s.ward}</span>
+                  </div>
+                  <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                    Last updated at {fmtTime(s.updatedAt)}
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 20,
+                  background: "var(--red-bg)", color: "var(--red)", border: "1px solid var(--red)",
+                  whiteSpace: "nowrap",
+                }}>
+                  {elapsed(s.updatedAt)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
+      {/* ── Block cards ── */}
       {data.floors.map((f) => (
         <div key={f.name}>
           <div className="floor-head">Block {f.name}</div>
           {f.pres.map((p) => {
             const s = p.summary;
             const c = compByPre[p.pre];
+            const statusTag = s.wards === 0
+              ? <span className="tag b">No wards</span>
+              : p.alarm?.alarmActive
+                ? <span className="tag o pulse">Overdue</span>
+                : s.complete
+                  ? <span className="tag v"><Ic d={icons.check} s={12} /> Done</span>
+                  : s.wardsDone > 0
+                    ? <span className="tag r">{Math.round((s.wardsDone / s.wards) * 100)}% done</span>
+                    : <span className="tag o">No data yet</span>;
+
             return (
               <div className="card" key={p.pre} style={{ padding: 14, marginBottom: 10 }}>
+                {/* Header */}
                 <div className="row between">
                   <div className="row" style={{ gap: 10 }}>
-                    <div className="logo" style={{ width: 34, height: 34, fontSize: 12,
-                      background: s.complete ? "linear-gradient(135deg,var(--green),var(--teal))" : "var(--panel-2)",
-                      color: s.complete ? "#fff" : "var(--ink-2)" }}>{p.pre}</div>
+                    <BlockAvatar code={p.pre} size={38} />
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.label || p.pre}</div>
-                      <div className="dim" style={{ fontSize: 11 }}>
-                        {p.assignedUser ? p.assignedUser.name : "⚠️ No PRE assigned"}
-                        {s.wards > 0 ? ` · ${s.total} beds · ${s.wards} wards` : " · no beds mapped"}
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.label || `Block ${p.pre}`}</div>
+                      <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                        {p.assignedUser ? p.assignedUser.name : "No PRE assigned"}
+                        {s.wards > 0 && ` · ${s.wards} ward${s.wards !== 1 ? "s" : ""} · ${s.total} beds`}
                       </div>
                     </div>
                   </div>
-                  {s.wards === 0 ? <span className="tag b">pending</span>
-                    : p.alarm?.alarmActive ? <span className="tag o pulse">overdue</span>
-                    : s.complete ? <span className="tag v"><Ic d={icons.check} s={12} /> done</span>
-                    : s.wardsDone > 0 ? <span className="tag r">{Math.round((s.wardsDone / s.wards) * 100)}%</span>
-                    : <span className="tag o">no data</span>}
+                  {statusTag}
                 </div>
+
                 {s.wards > 0 && (
                   <>
-                    <div style={{ marginTop: 12 }}><StatusBar v={s.v} o={s.o} r={s.r} total={s.total} /></div>
-                    <div className="row between" style={{ marginTop: 8 }}>
-                      <span className="dim" style={{ fontSize: 11 }}>
-                        <span style={{ color: "var(--green)" }}>{s.v}V</span> · <span style={{ color: "var(--red)" }}>{s.o}O</span> · <span style={{ color: "var(--amber)" }}>{s.r}R</span>
-                      </span>
-                      <span className="dim" style={{ fontSize: 11 }}>
-                        {p.roundsToday != null ? `${p.roundsToday} rounds today` : ""}
-                        {p.lastSubmittedAt ? ` · ${fmtTime(p.lastSubmittedAt)}` : ""}
-                      </span>
+                    {/* Occupancy bar — show a dim placeholder when no data entered yet */}
+                    <div style={{ marginTop: 14 }}>
+                      {s.v + s.o + s.r > 0
+                        ? <StatusBar v={s.v} o={s.o} r={s.r} total={s.total} />
+                        : <div className="bar"><span style={{ flex: 1, background: "var(--line)" }} /></div>
+                      }
                     </div>
-                    {c && c.expected > 0 && (
-                      <div className="row between" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
-                        <span className="dim" style={{ fontSize: 11 }}>Rounds {c.submitted}/{c.expected} · {c.shift}</span>
-                        <span className="mono" style={{ fontSize: 12, fontWeight: 700, color: c.score >= 80 ? "var(--green)" : c.score >= 50 ? "var(--amber)" : "var(--red)" }}>{c.score}%</span>
+
+                    {/* Mini stats block */}
+                    <MiniStats v={s.v} o={s.o} r={s.r} />
+
+                    {/* Footer row: rounds + view beds */}
+                    <div className="row between" style={{ marginTop: 12 }}>
+                      <div>
+                        {c && c.expected > 0 ? (
+                          <div className="row" style={{ gap: 8 }}>
+                            <span className="dim" style={{ fontSize: 11 }}>
+                              Rounds {c.submitted}/{c.expected}
+                            </span>
+                            <span className="mono" style={{
+                              fontSize: 12, fontWeight: 700,
+                              color: c.score >= 80 ? "var(--green)" : c.score >= 50 ? "var(--amber)" : "var(--red)",
+                            }}>{c.score}%</span>
+                            {p.lastSubmittedAt && (
+                              <span className="dim" style={{ fontSize: 11 }}>· last {fmtTime(p.lastSubmittedAt)}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="dim" style={{ fontSize: 11 }}>No rounds yet today</span>
+                        )}
                       </div>
-                    )}
+                      <button
+                        className="chip"
+                        style={{ fontSize: 11, color: "var(--teal)" }}
+                        onClick={() => setBedsBlock({ pre: p.pre, label: p.label, wards: p.wards })}
+                      >
+                        <Ic d={icons.grid} s={12} /> View beds
+                      </button>
+                    </div>
                   </>
+                )}
+
+                {/* No PRE warning */}
+                {!p.assignedUser && (
+                  <div style={{
+                    marginTop: 10, padding: "8px 10px", borderRadius: 8,
+                    background: "var(--amber-bg)", fontSize: 12,
+                    color: "var(--amber)", fontWeight: 600,
+                  }}>
+                    ⚠️ No PRE user assigned — this block has no one reporting
+                  </div>
                 )}
               </div>
             );
@@ -159,18 +282,175 @@ function Reporting() {
         </div>
       ))}
 
+      {/* ── Recent activity ── */}
       <div className="floor-head">Recent activity</div>
-      <div className="card" style={{ padding: 8 }}>
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {audit.slice(0, 12).map((a, i) => (
-          <div key={i} className="row between" style={{ padding: "8px 6px", borderBottom: i < 11 ? "1px solid var(--line)" : "none" }}>
-            <div className="row" style={{ gap: 8 }}>
-              <span className="dim" style={{ fontSize: 11, minWidth: 54 }}>{fmtTime(a.ts)}</span>
-              <span style={{ fontSize: 12 }}>{actionLabel(a.action)}{a.entity ? ` · ${a.entity}` : ""}</span>
+          <div key={i} className="row between" style={{
+            padding: "10px 14px",
+            borderBottom: i < Math.min(audit.length, 12) - 1 ? "1px solid var(--line)" : "none",
+            background: i % 2 ? "var(--panel-2)" : "transparent",
+          }}>
+            <div className="row" style={{ gap: 10 }}>
+              <span className="dim" style={{ fontSize: 11, minWidth: 48 }}>{fmtTime(a.ts)}</span>
+              <span style={{ fontSize: 12, fontWeight: 500 }}>
+                {actionLabel(a.action)}
+                {a.entity ? <span className="dim"> · {a.entity}</span> : ""}
+              </span>
             </div>
             <span className="dim" style={{ fontSize: 11 }}>{a.username || "—"}</span>
           </div>
         ))}
-        {audit.length === 0 && <div className="dim" style={{ padding: 12, fontSize: 12 }}>No activity yet.</div>}
+        {audit.length === 0 && (
+          <div className="dim" style={{ padding: "16px 14px", fontSize: 12 }}>No activity yet.</div>
+        )}
+      </div>
+
+      {/* ── View beds sheet ── */}
+      {bedsBlock && (
+        <BlockBedsSheet
+          pre={bedsBlock.pre}
+          label={bedsBlock.label}
+          wards={bedsBlock.wards}
+          onClose={() => setBedsBlock(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function BlockBedsSheet({ pre, label, wards, onClose }) {
+  useModal(onClose);
+  const [bedsByWard, setBedsByWard] = useState({});
+  const [loading,    setLoading]    = useState(true);
+  const [filter,     setFilter]     = useState("OCCUPIED");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const result = {};
+      await Promise.all(
+        wards.map(async (w) => {
+          try {
+            const { beds } = await api.wardBeds(w.id);
+            if (!cancelled) result[w.ward] = beds || [];
+          } catch { result[w.ward] = []; }
+        })
+      );
+      if (!cancelled) { setBedsByWard(result); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [pre]);
+
+  const allBeds = Object.values(bedsByWard).flat();
+  const counts  = { VACANT: 0, RESERVED: 0, OCCUPIED: 0 };
+  for (const b of allBeds) if (b.status in counts) counts[b.status]++;
+
+  function bedColor(s) {
+    if (s === "VACANT")   return "var(--green)";
+    if (s === "RESERVED") return "var(--amber)";
+    if (s === "OCCUPIED") return "var(--red)";
+    return "var(--ink-3)";
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "92vh", overflowY: "auto" }}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 6 }}>
+            <div>
+              <div className="h1" style={{ fontSize: 18 }}>Block {pre}</div>
+              <div className="dim" style={{ fontSize: 12 }}>{label || `Block ${pre}`} · bed status</div>
+            </div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          {/* Summary counts */}
+          {!loading && allBeds.length > 0 && (
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              {[
+                { key: "OCCUPIED", label: "Occupied", color: "var(--red)" },
+                { key: "RESERVED", label: "Reserved", color: "var(--amber)" },
+                { key: "VACANT",   label: "Vacant",   color: "var(--green)" },
+              ].map(({ key, label, color }) => (
+                <button key={key}
+                  onClick={() => setFilter(f => f === key ? "ALL" : key)}
+                  style={{
+                    padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                    border: `1.5px solid ${color}`,
+                    background: filter === key ? color : "transparent",
+                    color: filter === key ? "#fff" : color,
+                    cursor: "pointer",
+                  }}>
+                  {label} {counts[key]}
+                </button>
+              ))}
+              <button
+                onClick={() => setFilter("ALL")}
+                style={{
+                  padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                  border: "1.5px solid var(--line)",
+                  background: filter === "ALL" ? "var(--ink-2)" : "transparent",
+                  color: filter === "ALL" ? "#fff" : "var(--ink-2)",
+                  cursor: "pointer",
+                }}>
+                All {allBeds.length}
+              </button>
+            </div>
+          )}
+
+          {loading ? (
+            <div style={{ textAlign: "center", padding: 32 }}>
+              <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
+            </div>
+          ) : allBeds.length === 0 ? (
+            <div className="card empty">
+              <Ic d={icons.bed} s={26} />
+              <div style={{ marginTop: 10, fontWeight: 600 }}>No individual beds configured</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Generate beds from the Blocks tab to enable bed-level tracking.</div>
+            </div>
+          ) : (
+            wards.map((w) => {
+              const beds = (bedsByWard[w.ward] || [])
+                .filter(b => filter === "ALL" || b.status === filter)
+                .sort((a, b) => {
+                  const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
+                  return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
+                });
+              const wardBeds = bedsByWard[w.ward] || [];
+              const wardCounts = { VACANT: 0, RESERVED: 0, OCCUPIED: 0 };
+              for (const b of wardBeds) if (b.status in wardCounts) wardCounts[b.status]++;
+              if (beds.length === 0) return null;
+              return (
+                <div key={w.ward} style={{ marginBottom: 16 }}>
+                  <div className="row between" style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{w.ward}</span>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span style={{ fontSize: 11, color: "var(--green)" }}>{wardCounts.VACANT}V</span>
+                      <span style={{ fontSize: 11, color: "var(--amber)" }}>{wardCounts.RESERVED}R</span>
+                      <span style={{ fontSize: 11, color: "var(--red)" }}>{wardCounts.OCCUPIED}O</span>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+                    {beds.map((bed) => (
+                      <div key={bed.id} style={{
+                        padding: "8px 4px", borderRadius: 9, textAlign: "center",
+                        background: "var(--panel-2)",
+                        border: `1.5px solid ${bedColor(bed.status)}30`,
+                      }}>
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: bedColor(bed.status), margin: "0 auto 4px" }} />
+                        <div style={{ fontWeight: 700, fontSize: 12 }}>{bed.bed_number}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div style={{ height: 8 }} />
+        </div>
       </div>
     </div>
   );
@@ -182,7 +462,8 @@ function actionLabel(a) {
     pre_create: "Created PRE", pre_edit: "Edited PRE", pre_shift: "Changed shift",
     pre_delete: "Deleted PRE", block_create: "Created block", block_edit: "Edited block",
     block_delete: "Deleted block", ward_create: "Created ward", ward_edit: "Edited ward",
-    ward_delete: "Deleted ward",
+    ward_delete: "Deleted ward", bed_add: "Added bed", bed_delete: "Removed bed",
+    bed_rename: "Renamed bed", beds_generate: "Generated beds", bed_status_update: "Updated bed status",
   };
   return map[a] || a;
 }
@@ -195,14 +476,16 @@ function BlocksManager({ showToast }) {
   const [wards,  setWards]  = useState([]);   // from GET /manager/wards
   const [editingBlock, setEditingBlock] = useState(null); // null | "new" | block obj
   const [addingWard,   setAddingWard]   = useState(null); // blockId | null
-  const [expanded, setExpanded] = useState({});           // { [blockId]: bool }
+  const [expanded,     setExpanded]     = useState({});   // { [blockId]: bool }
+  const [managingBeds, setManagingBeds] = useState(null); // ward obj | null
+  const [confirm, confirmDialog] = useConfirm();
 
   const load = async () => {
     try {
       const [b, w] = await Promise.all([api.mgrBlocks(), api.mgrWards()]);
       setBlocks(b.blocks || []);
       setWards(w.wards   || []);
-    } catch (e) { showToast(e.message); }
+    } catch (e) { showToast(toastErr(e)); }
   };
   useEffect(() => { load(); }, []);
 
@@ -236,11 +519,7 @@ function BlocksManager({ showToast }) {
             <div style={{ padding: 14 }}>
               <div className="row between">
                 <div className="row" style={{ gap: 12 }}>
-                  <div className="logo" style={{
-                    width: 42, height: 42, fontSize: 13, borderRadius: 10,
-                    background: hasPre ? "linear-gradient(135deg,var(--teal),var(--teal-deep))" : "var(--panel-2)",
-                    color: hasPre ? "#fff" : "var(--ink-3)", fontWeight: 800,
-                  }}>{block.name}</div>
+                  <BlockAvatar code={block.name} size={42} />
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15 }}>{block.label || block.name}</div>
                     <div className="dim" style={{ fontSize: 12 }}>
@@ -252,9 +531,20 @@ function BlocksManager({ showToast }) {
                   <button className="chip" onClick={() => setEditingBlock(block)}>Edit</button>
                   <button className="chip" style={{ color: "var(--red)" }}
                     onClick={async () => {
-                      if (!window.confirm(`Delete block "${block.name}"?\nAll wards must be removed first.`)) return;
-                      try { await api.mgrDeleteBlock(block.id); load(); showToast(`Block ${block.name} deleted`); }
-                      catch (e) { showToast(e.message); }
+                      const wardCount = bWards.length;
+                      if (wardCount > 0) {
+                        showToast(`Block "${block.name}" still has ${wardCount} ward${wardCount === 1 ? "" : "s"} — remove them first`);
+                        return;
+                      }
+                      const ok = await confirm({
+                        title: `Delete block "${block.name}"?`,
+                        message: "Any PRE user assigned to this block will be unassigned.\n\nThis cannot be undone.",
+                        confirmLabel: "Delete block",
+                        danger: true,
+                      });
+                      if (!ok) return;
+                      try { await api.mgrDeleteBlock(block.id); load(); showToast(`Block "${block.name}" deleted`); }
+                      catch (e) { showToast(toastErr(e)); }
                     }}>Del</button>
                 </div>
               </div>
@@ -290,22 +580,39 @@ function BlocksManager({ showToast }) {
                   <div className="dim" style={{ padding: "12px 14px", fontSize: 13 }}>No wards yet.</div>
                 )}
                 {bWards.map((w, i) => (
-                  <div key={w.id} className="row between" style={{
+                  <div key={w.id} style={{
                     padding: "11px 14px",
                     borderBottom: i < bWards.length - 1 ? "1px solid var(--line)" : "none",
                   }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{w.name}</div>
-                      <div className="dim" style={{ fontSize: 11 }}>{w.total_beds} beds</div>
-                    </div>
-                    <div className="row" style={{ gap: 6 }}>
-                      <BedEditor ward={w} onSaved={() => { load(); showToast("Beds updated ✓"); }} showToast={showToast} />
-                      <button className="chip" style={{ color: "var(--red)" }}
-                        onClick={async () => {
-                          if (!window.confirm(`Delete ward "${w.name}"?`)) return;
-                          try { await api.mgrDeleteWard(w.id); load(); showToast("Ward deleted"); }
-                          catch (e) { showToast(e.message); }
-                        }}>Del</button>
+                    <div className="row between">
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{w.name}</div>
+                        <div className="dim" style={{ fontSize: 11 }}>
+                          {w.total_beds} beds
+                        </div>
+                      </div>
+                      <div className="row" style={{ gap: 6 }}>
+                        <button className="chip" style={{ color: "var(--teal)" }}
+                          onClick={() => setManagingBeds(w)}>
+                          <Ic d={icons.bed} s={13} /> Beds
+                        </button>
+                        <button className="chip" style={{ color: "var(--red)" }}
+                          onClick={async () => {
+                            const bedCount = w.total ?? w.total_beds ?? 0;
+                            const message = bedCount > 0
+                              ? `This will permanently remove the ward and all ${bedCount} bed${bedCount === 1 ? "" : "s"} inside it, along with their status history.\n\nThis cannot be undone.`
+                              : "This cannot be undone.";
+                            const ok = await confirm({
+                              title: `Delete ward "${w.name}"?`,
+                              message,
+                              confirmLabel: "Delete ward",
+                              danger: true,
+                            });
+                            if (!ok) return;
+                            try { await api.mgrDeleteWard(w.id); load(); showToast(`Ward "${w.name}" deleted`); }
+                            catch (e) { showToast(toastErr(e)); }
+                          }}>Del</button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -351,11 +658,23 @@ function BlocksManager({ showToast }) {
           showToast={showToast}
         />
       )}
+
+      {/* ── Bed manager sheet ── */}
+      {managingBeds !== null && (
+        <BedManagerModal
+          ward={managingBeds}
+          onClose={() => { setManagingBeds(null); load(); }}
+          showToast={showToast}
+        />
+      )}
+
+      {confirmDialog}
     </div>
   );
 }
 
 function BlockEditor({ block, onClose, onSaved, showToast }) {
+  useModal(onClose);
   const isNew = !block;
   const [name,  setName]  = useState(block?.name  || "");
   const [label, setLabel] = useState(block?.label || "");
@@ -371,12 +690,12 @@ function BlockEditor({ block, onClose, onSaved, showToast }) {
         await api.mgrEditBlock(block.id, { name: name.trim(), label: label.trim() || undefined });
       }
       onSaved();
-    } catch (e) { showToast(e.message); setBusy(false); }
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
   };
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="grab" />
         <div className="pad">
           <div className="row between" style={{ marginBottom: 14 }}>
@@ -404,12 +723,29 @@ function BlockEditor({ block, onClose, onSaved, showToast }) {
 }
 
 function WardCreator({ blockId, blockName, onClose, onSaved, showToast }) {
-  const [name, setName] = useState("");
-  const [beds, setBeds] = useState(10);
+  useModal(onClose);
+  const [name,       setName]       = useState("");
+  const [beds,       setBeds]       = useState(10);
+  const [genBeds,    setGenBeds]    = useState(true);
+  const [startNum,   setStartNum]   = useState(101);
+  const [busy,       setBusy]       = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Ward name required"); return; }
+    setBusy(true);
+    try {
+      const res = await api.mgrCreateWard({ name: name.trim(), blockId, totalBeds: beds });
+      if (genBeds && beds > 0 && res.id) {
+        try { await api.generateBeds(res.id, { startNumber: startNum, count: beds }); }
+        catch { /* non-fatal — beds can be generated later */ }
+      }
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="grab" />
         <div className="pad">
           <div className="row between" style={{ marginBottom: 14 }}>
@@ -425,13 +761,34 @@ function WardCreator({ blockId, blockName, onClose, onSaved, showToast }) {
             <span className="val mono">{beds}</span>
             <button onClick={() => setBeds((b) => b + 1)}>+</button>
           </div>
+
+          {beds > 0 && (
+            <>
+              <div style={{ height: 14 }} />
+              <label className="label">Generate individual bed numbers?</label>
+              <div className="seg">
+                <button className={genBeds ? "on" : ""} onClick={() => setGenBeds(true)}>Yes</button>
+                <button className={!genBeds ? "on" : ""} onClick={() => setGenBeds(false)}>No (counts only)</button>
+              </div>
+              {genBeds && (
+                <>
+                  <div style={{ height: 12 }} />
+                  <label className="label">
+                    Start number&nbsp;
+                    <span className="dim" style={{ fontSize: 11 }}>
+                      (will create {startNum} – {startNum + beds - 1})
+                    </span>
+                  </label>
+                  <input className="field" type="number" min="1" value={startNum}
+                    onChange={(e) => setStartNum(Math.max(1, Number(e.target.value)))} />
+                </>
+              )}
+            </>
+          )}
+
           <button className="btn btn-primary btn-block" style={{ marginTop: 18 }}
-            onClick={async () => {
-              if (!name.trim()) { showToast("Ward name required"); return; }
-              try { await api.mgrCreateWard({ name: name.trim(), blockId, totalBeds: beds }); onSaved(); }
-              catch (e) { showToast(e.message); }
-            }}>
-            Create ward
+            disabled={busy} onClick={save}>
+            {busy ? "Creating…" : "Create ward"}
           </button>
           <div style={{ height: 14 }} />
         </div>
@@ -440,25 +797,230 @@ function WardCreator({ blockId, blockName, onClose, onSaved, showToast }) {
   );
 }
 
-function BedEditor({ ward, onSaved, showToast }) {
-  const [open, setOpen] = useState(false);
-  const [beds, setBeds] = useState(ward.total_beds);
-  if (!open) return <button className="chip" onClick={() => setOpen(true)}>Beds</button>;
+// ══════════════════════════════════════════════════════════════════════════════
+//  BED MANAGER MODAL  (View beds + Manage beds tabs)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function BedManagerModal({ ward, onClose, showToast }) {
+  useModal(onClose);
+  const [beds,          setBeds]          = useState([]);
+  const [loading,       setLoading]       = useState(false);
+  const [individualBed, setIndividualBed] = useState("");
+  const [genStart,      setGenStart]      = useState(101);
+  const [genCount,      setGenCount]      = useState(ward.total_beds || 10);
+  const [busy,          setBusy]          = useState(false);
+  const [renamingId,    setRenamingId]    = useState(null);
+  const [renameVal,     setRenameVal]     = useState("");
+  const [confirm, confirmDialog]          = useConfirm();
+
+  const load = async () => {
+    setLoading(true);
+    try { setBeds((await api.wardBeds(ward.id)).beds || []); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, [ward.id]);
+
+  const generate = async () => {
+    if (genCount < 1) { showToast("Count must be at least 1"); return; }
+    setBusy(true);
+    try {
+      const res = await api.generateBeds(ward.id, { startNumber: genStart, count: genCount });
+      await load();
+      showToast(`Generated ${res.generated} beds ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const addBed = async () => {
+    const num = individualBed.trim();
+    if (!num) return;
+    setBusy(true);
+    try {
+      await api.addBed(ward.id, num);
+      setIndividualBed("");
+      await load();
+      showToast(`Bed ${num} added ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const startRename = (bed) => { setRenamingId(bed.id); setRenameVal(bed.bed_number); };
+
+  const saveRename = async (bedId) => {
+    const val = renameVal.trim();
+    if (!val) { showToast("Bed number required"); return; }
+    setBusy(true);
+    try {
+      await api.renameBed(bedId, val);
+      setRenamingId(null);
+      await load();
+      showToast("Bed renamed ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const removeBed = async (bed) => {
+    const ok = await confirm({
+      title: `Remove bed "${bed.bed_number}"?`,
+      message: `Bed will be removed from ${ward.name}. Its status history is kept for the audit log.\n\nThis cannot be undone.`,
+      confirmLabel: "Remove bed",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.deleteBed(bed.id);
+      await load();
+      showToast(`Bed ${bed.bed_number} removed`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  // Always display beds in numeric order (matches DB ORDER BY CAST(bed_number AS INTEGER))
+  const sortedBeds = [...beds].sort((a, b) => {
+    const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.bed_number.localeCompare(b.bed_number);
+  });
+
   return (
-    <div className="row" style={{ gap: 6 }}>
-      <div className="stepper">
-        <button onClick={() => setBeds((b) => Math.max(0, b - 1))}>–</button>
-        <span className="val mono">{beds}</span>
-        <button onClick={() => setBeds((b) => b + 1)}>+</button>
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "90vh", overflowY: "auto" }}>
+        <div className="grab" />
+        <div className="pad">
+          {/* Header — no status counts */}
+          <div className="row between" style={{ marginBottom: 16 }}>
+            <div>
+              <div className="h1" style={{ fontSize: 18 }}>{ward.name}</div>
+              <div className="dim" style={{ fontSize: 12 }}>
+                {beds.length} bed{beds.length !== 1 ? "s" : ""} configured
+              </div>
+            </div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          {loading ? (
+            <div className="dim" style={{ textAlign: "center", padding: 32 }}>
+              <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
+            </div>
+          ) : beds.length === 0 ? (
+            /* ── No beds yet: show generate range form ── */
+            <>
+              <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+                No beds yet. Generate a numbered range or add beds one by one.
+              </div>
+              <div className="row" style={{ gap: 10, marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <label className="label">Start number</label>
+                  <input className="field" type="number" min="1" value={genStart}
+                    onChange={(e) => setGenStart(Math.max(1, Number(e.target.value)))} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label className="label">Count</label>
+                  <input className="field" type="number" min="1" max="500" value={genCount}
+                    onChange={(e) => setGenCount(Math.max(1, Number(e.target.value)))} />
+                </div>
+              </div>
+              <div className="dim" style={{ fontSize: 11, marginBottom: 10 }}>
+                Will create: {genStart} – {genStart + genCount - 1}
+              </div>
+              <button className="btn btn-primary btn-block" disabled={busy} onClick={generate}>
+                {busy ? "Generating…" : `Generate ${genCount} beds`}
+              </button>
+              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+                <label className="label">Or add a single bed</label>
+                <div className="row" style={{ gap: 8 }}>
+                  <input className="field" value={individualBed} style={{ flex: 1 }}
+                    onChange={(e) => setIndividualBed(e.target.value)}
+                    placeholder="e.g. 101A"
+                    onKeyDown={(e) => e.key === "Enter" && addBed()} />
+                  <button className="btn btn-primary" disabled={busy || !individualBed.trim()}
+                    onClick={addBed}>Add</button>
+                </div>
+              </div>
+            </>
+          ) : (
+            /* ── Beds exist: grid + inline rename + add more ── */
+            <>
+              {/* Bed grid — 3 columns, name only, sorted numerically */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 20 }}>
+                {sortedBeds.map((bed) => (
+                  <div key={bed.id} style={{
+                    padding: "10px 8px", borderRadius: 10, textAlign: "center",
+                    background: "var(--panel-2)", border: "1.5px solid var(--line)",
+                  }}>
+                    {renamingId === bed.id ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        <input
+                          className="field"
+                          value={renameVal}
+                          autoFocus
+                          style={{ padding: "4px 6px", fontSize: 12, textAlign: "center" }}
+                          onChange={(e) => setRenameVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") saveRename(bed.id);
+                            if (e.key === "Escape") setRenamingId(null);
+                          }}
+                        />
+                        <div className="row" style={{ gap: 4, justifyContent: "center" }}>
+                          <button className="btn btn-primary" style={{ padding: "3px 8px", fontSize: 11 }}
+                            disabled={busy || !renameVal.trim()} onClick={() => saveRename(bed.id)}>
+                            Save
+                          </button>
+                          <button className="chip" style={{ padding: "3px 8px", fontSize: 11 }}
+                            onClick={() => setRenamingId(null)}>✕</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+                          Bed {bed.bed_number}
+                        </div>
+                        <div className="row" style={{ gap: 4, justifyContent: "center" }}>
+                          <button
+                            className="chip"
+                            style={{ fontSize: 10, padding: "2px 7px", color: "var(--teal)" }}
+                            onClick={() => startRename(bed)}>
+                            Edit
+                          </button>
+                          <button
+                            className="chip"
+                            style={{ fontSize: 10, padding: "2px 7px", color: "var(--red)" }}
+                            onClick={() => removeBed(bed)}>
+                            Del
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Add another bed */}
+              <div style={{ paddingTop: 4, borderTop: "1px solid var(--line)" }}>
+                <label className="label" style={{ marginTop: 14, display: "block" }}>Add another bed</label>
+                <div className="row" style={{ gap: 8 }}>
+                  <input className="field" value={individualBed} style={{ flex: 1 }}
+                    onChange={(e) => setIndividualBed(e.target.value)}
+                    placeholder="Bed number, e.g. 113"
+                    onKeyDown={(e) => e.key === "Enter" && addBed()} />
+                  <button className="btn btn-primary" disabled={busy || !individualBed.trim()}
+                    onClick={addBed}>Add</button>
+                </div>
+              </div>
+            </>
+          )}
+
+          <div style={{ height: 14 }} />
+        </div>
       </div>
-      <button className="chip" style={{ color: "var(--teal)" }}
-        onClick={async () => {
-          try { await api.mgrEditWard(ward.id, { totalBeds: beds }); setOpen(false); onSaved(); }
-          catch (e) { showToast(e.message); }
-        }}>Save</button>
+      {confirmDialog}
     </div>
   );
 }
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  PRE USERS MANAGER
@@ -467,13 +1029,14 @@ function PreManager({ showToast }) {
   const [users,   setUsers]   = useState([]);
   const [blocks,  setBlocks]  = useState([]);
   const [editing, setEditing] = useState(null); // null | "new" | user obj
+  const [confirm, confirmDialog] = useConfirm();
 
   const load = async () => {
     try {
       const [u, b] = await Promise.all([api.mgrUsers(), api.mgrBlocks()]);
       setUsers((u.users || []).filter((x) => x.role === "PRE"));
       setBlocks(b.blocks || []);
-    } catch (e) { showToast(e.message); }
+    } catch (e) { showToast(toastErr(e)); }
   };
   useEffect(() => { load(); }, []);
 
@@ -494,12 +1057,7 @@ function PreManager({ showToast }) {
         <div className="card" key={u.id} style={{ padding: 14, marginBottom: 10 }}>
           <div className="row between">
             <div className="row" style={{ gap: 10 }}>
-              <div className="logo" style={{ width: 36, height: 36, fontSize: 12,
-                background: u.block_name
-                  ? "linear-gradient(135deg,var(--teal),var(--teal-deep))"
-                  : "var(--panel-2)",
-                color: u.block_name ? "#fff" : "var(--ink-3)",
-              }}>{u.block_name || "?"}</div>
+              <BlockAvatar code={u.block_name || "?"} size={36} />
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
                 <div className="dim" style={{ fontSize: 11 }}>
@@ -515,9 +1073,16 @@ function PreManager({ showToast }) {
               <button className="chip" onClick={() => setEditing(u)}>Edit</button>
               <button className="chip" style={{ color: "var(--red)" }}
                 onClick={async () => {
-                  if (!window.confirm(`Delete ${u.name}?\nThis is permanent.`)) return;
-                  try { await api.mgrDeletePre(u.id); load(); showToast("PRE deleted"); }
-                  catch (e) { showToast(e.message); }
+                  const blockInfo = u.block_name ? ` from block ${u.block_name}` : "";
+                  const ok = await confirm({
+                    title: `Delete user "${u.name}"?`,
+                    message: `Username: ${u.username}\n\nThey will lose access immediately and be unassigned${blockInfo}. Past round submissions are kept for the audit log.\n\nThis cannot be undone.`,
+                    confirmLabel: "Delete user",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                  try { await api.mgrDeletePre(u.id); load(); showToast(`User "${u.name}" deleted`); }
+                  catch (e) { showToast(toastErr(e)); }
                 }}>Del</button>
             </div>
           </div>
@@ -541,6 +1106,7 @@ function PreManager({ showToast }) {
           showToast={showToast}
         />
       )}
+      {confirmDialog}
     </div>
   );
 }
@@ -570,7 +1136,7 @@ function PreEditor({ user, blocks, onClose, onSaved, showToast }) {
         await api.mgrEditPre(user.id, data);
       }
       onSaved();
-    } catch (e) { showToast(e.message); setBusy(false); }
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
   };
 
   return (
@@ -683,14 +1249,19 @@ function HistoryViewer() {
 
       {rounds.map((r, i) => (
         <div className="card" key={i} style={{ padding: 14, marginBottom: 10 }}>
-          <div className="row between" style={{ marginBottom: 8 }}>
-            <div style={{ fontWeight: 700 }}>Block {r.blockName || r.blockId}</div>
+          <div className="row between" style={{ marginBottom: 10 }}>
+            <div className="row" style={{ gap: 10 }}>
+              <BlockAvatar code={r.blockName || String(r.blockId)} size={34} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>Block {r.blockName || r.blockId}</div>
+                <div className="dim" style={{ fontSize: 11, marginTop: 1 }}>submitted {fmtTime(r.submittedAt)}</div>
+              </div>
+            </div>
             <div className="row" style={{ gap: 8 }}>
               <span className={"tag " + (r.shift === "night" ? "b" : "v")}>{r.shift}</span>
               <span className="chip">{fmtClock(r.startMin)}</span>
             </div>
           </div>
-          <div className="dim" style={{ fontSize: 11, marginBottom: 8 }}>submitted {fmtTime(r.submittedAt)}</div>
           {Array.isArray(r.wards) && r.wards.map((w, j) => (
             <div className="row between" key={j} style={{ padding: "4px 0", fontSize: 13 }}>
               <span>{w.ward}</span>

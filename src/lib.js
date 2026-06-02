@@ -2,7 +2,7 @@
 const TOKEN_KEY = "bedflow_token";
 const USER_KEY = "bedflow_user";
 
-const BASE_API = "https://bedflow-backend.onrender.com";
+//const BASE_API = "https://bedflow-backend.onrender.com";
 
 
 export function getToken() { return localStorage.getItem(TOKEN_KEY); }
@@ -20,7 +20,7 @@ async function req(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
   const t = getToken();
   if (t) headers.Authorization = "Bearer " + t;
-  const res = await fetch(BASE_API + "/api" + path, { ...opts, headers });
+  const res = await fetch("/api" + path, { ...opts, headers });
   const data = await res.json().catch(() => ({}));
 
   if (res.status === 401) {
@@ -71,8 +71,27 @@ export const api = {
   mgrHistoryDates: () => req("/manager/history/dates"),
   mgrHistory: (date, blockId) =>
     req(`/manager/history?date=${date}${blockId != null ? "&blockId=" + blockId : ""}`),
+  // ── manager — bed details (create/configure only) ────────────────────────────
+  wardBeds: (wardId, status) =>
+    req(`/manager/wards/${wardId}/beds${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  generateBeds: (wardId, data) =>
+    req(`/manager/wards/${wardId}/generate-beds`, { method: "POST", body: JSON.stringify(data) }),
+  addBed: (wardId, bedNumber) =>
+    req(`/manager/wards/${wardId}/beds`, { method: "POST", body: JSON.stringify({ bedNumber }) }),
+  renameBed: (bedId, bedNumber) =>
+    req(`/manager/beds/${bedId}/number`, { method: "PATCH", body: JSON.stringify({ bedNumber }) }),
+  deleteBed: (bedId) => req(`/manager/beds/${bedId}`, { method: "DELETE" }),
+  // ── PRE — bed status management ──────────────────────────────────────────────
+  preBeds: (wardId, status) =>
+    req(`/pre/wards/${wardId}/beds${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  preUpdateBedStatus: (bedId, status) =>
+    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
+  cooViews: () => req("/coo/views"),
+  cooSaveView: (data) => req("/coo/views", { method: "POST", body: JSON.stringify(data) }),
+  cooEditView: (id, data) => req(`/coo/views/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  cooDeleteView: (id) => req(`/coo/views/${id}`, { method: "DELETE" }),
 };
 
 // ---- audio alarm (loud repeating two-tone) ----
@@ -99,6 +118,45 @@ export function startAlarm() {
   } catch (e) { /* audio blocked until user gesture */ }
 }
 export function stopAlarm() { if (alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; } }
+
+// ---- error handling ----
+export function friendlyError(err) {
+  const msg = (err?.message ?? String(err ?? "")).trim();
+  if (!msg) return { title: null, message: "An unexpected error occurred." };
+  if (/failed to fetch|networkerror|network error|load failed/i.test(msg))
+    return { title: "Connection problem", message: "Unable to reach the server. Check your network and try again." };
+  if (/unauthorized|invalid credentials/i.test(msg))
+    return { title: "Unable to sign in", message: "Please check your username and password and try again." };
+  if (/403|forbidden/i.test(msg))
+    return { title: "Access denied", message: "You don't have permission to perform this action." };
+  if (/500|internal server/i.test(msg))
+    return { title: "Something went wrong", message: "Please try again in a moment." };
+  if (/session.{0,10}expired|token.{0,10}invalid/i.test(msg))
+    return { title: "Session expired", message: "Please sign in again." };
+  // Zod / server validation JSON array: [{"code":"too_small","path":["username"],...}]
+  if (msg.startsWith("[")) {
+    try {
+      const issues = JSON.parse(msg);
+      if (Array.isArray(issues) && issues.length > 0) {
+        const fieldMap = { username: "username", password: "password" };
+        const parts = issues.map(i => {
+          const f = i?.path?.[0];
+          if (i?.code === "too_small" && f === "username") return "Please enter your username.";
+          if (i?.code === "too_small" && f === "password") return "Please enter your password.";
+          if (f) return `Please check the ${fieldMap[f] || f} field.`;
+          return "Please fill in all required fields.";
+        });
+        return { title: null, message: parts.join(" ") };
+      }
+    } catch { /* not JSON, fall through */ }
+  }
+  return { title: null, message: msg };
+}
+
+export function toastErr(err) {
+  const { title, message } = friendlyError(err);
+  return title ?? message;
+}
 
 // ---- time formatting ----
 export function fmtTime(d) { return new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }

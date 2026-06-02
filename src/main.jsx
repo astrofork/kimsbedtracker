@@ -25,6 +25,7 @@ if ("serviceWorker" in navigator) {
 function App() {
   const [user, setUser] = useState(() => getUser());
   const [meta, setMeta] = useState(null);
+  const [sessionMsg, setSessionMsg] = useState("");
 
   useEffect(() => { api.meta().then(setMeta).catch(() => {}); }, []);
 
@@ -34,6 +35,7 @@ function App() {
   }, [user, meta]);
 
   const onLogin = (u) => {
+    setSessionMsg("");
     setUser(u);
     if (meta?.vapidPublic) enablePush(meta.vapidPublic);
   };
@@ -47,16 +49,13 @@ function App() {
       stopAlarm();
       clearSession();
       setUser(null);
-      // Show a toast-style alert after state updates so the login page is visible first.
-      if (e.detail?.message) {
-        setTimeout(() => alert(e.detail.message), 100);
-      }
+      if (e.detail?.message) setSessionMsg(e.detail.message);
     };
     window.addEventListener("session:expired", handleExpired);
     return () => window.removeEventListener("session:expired", handleExpired);
   }, []);
 
-  if (!user) return <><Login onLogin={onLogin} /><PwaManager /></>;
+  if (!user) return <><Login onLogin={onLogin} sessionMsg={sessionMsg} /><PwaManager /></>;
   if (!meta) return null;
   if (user.role === "COO")     return <><COOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "MANAGER") return <><ManagerApp user={user} onLogout={logout} /><PwaManager /></>;

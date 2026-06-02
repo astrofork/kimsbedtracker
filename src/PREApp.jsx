@@ -1,37 +1,23 @@
-import React, { useState, useEffect, useRef } from "react";
-import { api, startAlarm, stopAlarm, fmtTime, fmtClock } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle } from "./ui.jsx";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { api, startAlarm, stopAlarm, fmtTime, fmtClock, toastErr } from "./lib.js";
+import { Ic, icons, StatusBar, ThemeToggle, useModal } from "./ui.jsx";
 
 export default function PREApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("home");
   const [data, setData] = useState(null);
   const [toast, setToast] = useState("");
-  const [draft, setDraft] = useState({}); // local edits before submit: {ward:{v,o,r}}
   const pollRef = useRef(null);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
   const load = async () => {
-    try {
-      const d = await api.preMe();
-      setData(d);
-      // hydrate draft from server values (only for wards not locally edited)
-      setDraft((prev) => {
-        const next = { ...prev };
-        for (const w of d.wards) {
-          if (next[w.ward] === undefined) {
-            next[w.ward] = w.vacant === null ? { v: null, r: null }
-              : { v: w.vacant, r: w.reserved };
-          }
-        }
-        return next;
-      });
-    } catch (e) { /* token expiry handled by 401 -> caller can re-login */ }
+    try { setData(await api.preMe()); }
+    catch { /* 401 handled by session:expired event */ }
   };
 
   useEffect(() => {
     load();
-    pollRef.current = setInterval(load, 15000); // live refresh
+    pollRef.current = setInterval(load, 15000);
     return () => clearInterval(pollRef.current);
   }, []);
 
@@ -41,39 +27,31 @@ export default function PREApp({ user, meta, onLogout }) {
     return () => stopAlarm();
   }, [alarmActive]);
 
-  const setWardDraft = (ward, patch) =>
-    setDraft((d) => ({ ...d, [ward]: { ...d[ward], ...patch } }));
-
-  // saveWard takes the ward's numeric id + vacant/reserved; backend auto-calcs occupied.
-  const saveWard = async (wardId, v, r) => {
-    try {
-      await api.setWard(wardId, v || 0, r || 0);
-    } catch (e) { showToast(e.message); }
-  };
-
   const submitRound = async () => {
-    // Auto-calc model: each ward needs vacant + reserved entered; occupied is derived.
     if (!data) return;
-    for (const w of data.wards) {
-      const dw = draft[w.ward];
-      if (!dw || (dw.v === null && dw.r === null)) { showToast("Enter all wards first"); setTab("entry"); return; }
-      const v = dw.v || 0, r = dw.r || 0;
-      if (v + r > w.total) { showToast(`${w.ward}: vacant + reserved exceed ${w.total}`); setTab("entry"); return; }
+    const notReady = data.wards.filter(w => w.vacant === null);
+    if (notReady.length > 0) {
+      showToast(`Configure beds for ${notReady[0].ward} first`);
+      setTab("entry");
+      return;
     }
     try {
-      for (const w of data.wards) {
-        const v = draft[w.ward].v || 0, r = draft[w.ward].r || 0;
-        await api.setWard(w.id, v, r);
-      }
       await api.submitRound();
       stopAlarm();
       showToast("Round submitted ✓");
       await load();
       setTab("home");
-    } catch (e) { showToast(e.message); }
+    } catch (e) { showToast(toastErr(e)); }
   };
 
-  if (!data) return <div className="app"><div className="empty" style={{ paddingTop: 120 }}><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span><div style={{ marginTop: 12 }}>Loading…</div></div></div>;
+  if (!data) return (
+    <div className="app">
+      <div className="empty" style={{ paddingTop: 120 }}>
+        <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+        <div style={{ marginTop: 12 }}>Loading…</div>
+      </div>
+    </div>
+  );
 
   const pre = user.pre;
 
@@ -88,29 +66,27 @@ export default function PREApp({ user, meta, onLogout }) {
           </div>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          <span className="pre-pill">
-            <Ic d={icons.clock} s={13} />
-            {new Date().toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true
-            })}
+          <span className="pre-pill" style={{ flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
+            <span style={{ fontSize: 11 }}><Ic d={icons.clock} s={11} /> {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+            <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
           </span>
           <ThemeToggle />
-          <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}><Ic d={icons.logout} s={17} /></button>
+          <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}>
+            <Ic d={icons.logout} s={17} />
+          </button>
         </div>
       </div>
 
       <div className="pad" style={{ paddingBottom: 90 }}>
-        {tab === "home" && <Home {...{ data, meta, setTab, alarmActive }} />}
-        {tab === "entry" && <Entry {...{ data, draft, setWardDraft, saveWard, submitRound, alarmActive }} />}
-        {tab === "map" && <MyMap data={data} />}
+        {tab === "home"  && <Home {...{ data, meta, setTab, alarmActive }} />}
+        {tab === "entry" && <Entry data={data} submitRound={submitRound} alarmActive={alarmActive} onRefresh={load} />}
+        {tab === "map"   && <MyMap data={data} />}
       </div>
 
       <div className="navbar">
-        <NavBtn on={tab === "home"} ic={icons.home} label="Home" onClick={() => setTab("home")} />
-        <NavBtn on={tab === "entry"} ic={icons.bed} label="Entry" dot={alarmActive} onClick={() => setTab("entry")} />
-        <NavBtn on={tab === "map"} ic={icons.map} label="Map" onClick={() => setTab("map")} />
+        <NavBtn on={tab === "home"}  ic={icons.home} label="Home"  onClick={() => setTab("home")} />
+        <NavBtn on={tab === "entry"} ic={icons.bed}  label="Entry" dot={alarmActive} onClick={() => setTab("entry")} />
+        <NavBtn on={tab === "map"}   ic={icons.map}  label="Map"   onClick={() => setTab("map")} />
       </div>
 
       {toast && <div className="toast">{toast}</div>}
@@ -223,22 +199,23 @@ function ShiftDisplay({ shift }) {
   );
 }
 
-function Entry({ data, draft, setWardDraft, saveWard, submitRound, alarmActive }) {
-  if (data.wards.length === 0)
-    return <div className="card empty"><Ic d={icons.bed} s={28} /><div style={{ marginTop: 10, fontWeight: 600 }}>No wards to enter</div></div>;
-  const round = data.alarm.round;
+// ══════════════════════════════════════════════════════════════════════════════
+//  ENTRY TAB  — new card-based design (Image #8)
+// ══════════════════════════════════════════════════════════════════════════════
+function Entry({ data, submitRound, alarmActive, onRefresh }) {
+  const [bedModal, setBedModal] = useState(null); // { ward, tab } | null
 
-  // total beds across all this PRE's wards, and live entered tally
-  const totalBeds = data.wards.reduce((a, w) => a + w.total, 0);
-  let enteredV = 0, enteredR = 0, enteredBeds = 0;
-  for (const w of data.wards) {
-    const dw = draft[w.ward];
-    if (dw && (dw.v !== null || dw.r !== null)) {
-      const v = dw.v || 0, r = dw.r || 0;
-      enteredV += v; enteredR += r; enteredBeds += w.total;
-    }
-  }
-  const enteredO = Math.max(0, enteredBeds - enteredV - enteredR);
+  if (data.wards.length === 0)
+    return (
+      <div className="card empty">
+        <Ic d={icons.bed} s={28} />
+        <div style={{ marginTop: 10, fontWeight: 600 }}>No wards to enter</div>
+      </div>
+    );
+
+  const round = data.alarm.round;
+  const allDone = data.wards.every(w => w.vacant !== null);
+  const doneCount = data.wards.filter(w => w.vacant !== null).length;
 
   return (
     <div>
@@ -247,104 +224,97 @@ function Entry({ data, draft, setWardDraft, saveWard, submitRound, alarmActive }
         <span className="chip">{fmtClock(round.startMin)}–{fmtClock(round.endMin)}</span>
       </div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-        Enter <b style={{ color: "var(--green)" }}>Vacant</b> and <b style={{ color: "var(--amber)" }}>Reserved</b> for each ward.
-        <b style={{ color: "var(--red)" }}> Occupied</b> is calculated automatically from the total.
-      </div>
-
-      {/* NEW: total bed count summary */}
-      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <span className="h2">Total beds</span>
-          <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: "var(--teal)" }}>{totalBeds}</span>
-        </div>
-        <StatusBar v={enteredV} o={enteredO} r={enteredR} total={totalBeds} />
-        <div className="row" style={{ gap: 12, marginTop: 10 }}>
-          <span className="tag v">{enteredV} vacant</span>
-          <span className="tag o">{enteredO} occupied</span>
-          <span className="tag r">{enteredR} reserved</span>
-        </div>
-        <div className="dim" style={{ fontSize: 11, marginTop: 8 }}>{data.wards.length} wards · {totalBeds} beds total</div>
+        Open each ward to manage individual bed status, then submit.
       </div>
 
       {data.wards.map((w, i) => {
-        // Auto-calc model: Vacant + Reserved are inputs; Occupied = total − vacant − reserved.
-        const dw = draft[w.ward] || { v: null, r: null };
-        const entered = dw.v !== null || dw.r !== null;
-        const v = dw.v || 0, r = dw.r || 0;
-        const occupied = Math.max(0, w.total - v - r);
-        const overflow = v + r > w.total; // entered more vacant+reserved than beds exist
-        const ok = entered && !overflow;
-        const step = (field) => (delta) => {
-          const cur = { v: dw.v || 0, r: dw.r || 0 };
-          let next;
-
-          if (field === "r") {
-            // Reserved takes from / returns to Vacant — Occupied stays unchanged.
-            let newR = cur.r + delta;
-            let newV = cur.v - delta; // mirror: reserved up → vacant down, and vice-versa
-            // clamp: neither can drop below 0
-            if (newR < 0) { newV += newR; newR = 0; }
-            if (newV < 0) { newR += newV; newV = 0; }
-            next = { v: newV, r: newR };
-          } else {
-            // "v": Vacant changes come from / go to Occupied — Reserved stays unchanged.
-            let newV = Math.max(0, cur.v + delta);
-            if (newV + cur.r > w.total) newV = w.total - cur.r; // ceiling: can't exceed total beds
-            next = { v: newV, r: cur.r };
-          }
-
-          setWardDraft(w.ward, next);
-          // persist vacant + reserved; backend computes occupied
-          setTimeout(() => saveWard(w.id, next.v, next.r), 200);
-        };
+        const entered = w.vacant !== null;
         return (
-          <div className="ward-card slide-up" key={w.ward}
-            style={{ animationDelay: i * 0.03 + "s", borderColor: ok ? "var(--teal-deep)" : overflow ? "var(--red)" : "var(--line)" }}>
-            <div className="row between" style={{ marginBottom: 12 }}>
+          <div className="ward-card slide-up" key={w.id}
+            style={{
+              animationDelay: i * 0.03 + "s",
+              borderColor: entered ? "var(--teal-deep)" : "var(--line)",
+              padding: 16, marginBottom: 12,
+            }}>
+            {/* Header */}
+            <div className="row between" style={{ marginBottom: entered ? 14 : 12 }}>
               <div>
                 <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
-                <div className="dim" style={{ fontSize: 12 }}>{w.total} beds {ok && <span style={{ color: "var(--green)" }}>· complete</span>}</div>
+                <div className="dim" style={{ fontSize: 12 }}>
+                  {w.total} beds
+                  {entered && <span style={{ color: "var(--green)" }}> · complete</span>}
+                </div>
               </div>
-              {!entered ? <span className="tag b">not entered</span>
-                : overflow ? <span className="tag o">over by {v + r - w.total}</span>
-                  : <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>}
+              {entered
+                ? <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
+                : <span className="tag b">no data</span>}
             </div>
-            <Counter label="Vacant" color="var(--green)" val={dw.v} onStep={step("v")} />
-            <Counter label="Reserved" color="var(--amber)" val={dw.r} onStep={step("r")} />
-            {/* Occupied is auto-calculated — shown, not editable */}
-            <div className="row between" style={{ padding: "10px 0 2px", marginTop: 4, borderTop: "1px solid var(--line)" }}>
-              <div className="row" style={{ gap: 9 }}>
-                <span style={{ width: 9, height: 9, borderRadius: 99, background: "var(--red)" }} />
-                <span style={{ fontSize: 14, fontWeight: 600 }}>Occupied <span className="dim" style={{ fontWeight: 400, fontSize: 11 }}>· auto</span></span>
+
+            {/* Stats block */}
+            {entered && (
+              <div style={{
+                display: "flex",
+                background: "var(--panel-2)",
+                borderRadius: 12,
+                overflow: "hidden",
+                marginBottom: 14,
+              }}>
+                {[
+                  { label: "Vacant",   val: w.vacant,        color: "var(--green)" },
+                  { label: "Reserved", val: w.reserved ?? 0, color: "var(--amber)" },
+                  { label: "Occupied", val: w.occupied ?? 0, color: "var(--red)"   },
+                ].map(({ label, val, color }, idx) => (
+                  <div key={label} style={{
+                    flex: 1,
+                    textAlign: "center",
+                    padding: "12px 6px",
+                    borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
+                    </div>
+                    <div style={{ fontSize: 26, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                  </div>
+                ))}
               </div>
-              <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: overflow ? "var(--red)" : "var(--red)" }}>
-                {entered ? occupied : "–"}
-              </span>
+            )}
+
+            {/* Action buttons */}
+            <div className="row" style={{ gap: 8 }}>
+              <button className="chip" style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => setBedModal({ ward: w, tab: "view" })}>
+                <Ic d={icons.grid} s={13} /> View beds
+              </button>
+              <button className="chip" style={{ flex: 1, justifyContent: "center", color: "var(--teal)" }}
+                onClick={() => setBedModal({ ward: w, tab: "manage" })}>
+                <Ic d={icons.bed} s={13} /> Manage beds
+              </button>
             </div>
           </div>
         );
       })}
 
-      <button className={"btn btn-primary btn-block" + (alarmActive ? " pulse" : "")} style={{ marginTop: 6 }} onClick={submitRound}>
+      <button
+        className={"btn btn-primary btn-block" + (alarmActive ? " pulse" : "")}
+        style={{ marginTop: 6 }}
+        onClick={submitRound}>
         <Ic d={icons.check} s={18} /> Submit this round
       </button>
+      {!allDone && (
+        <div className="dim" style={{ fontSize: 11, textAlign: "center", marginTop: 6 }}>
+          {doneCount}/{data.wards.length} wards ready
+        </div>
+      )}
       <div style={{ height: 14 }} />
-    </div>
-  );
-}
 
-function Counter({ label, color, val, onStep }) {
-  return (
-    <div className="row between" style={{ padding: "7px 0" }}>
-      <div className="row" style={{ gap: 9 }}>
-        <span style={{ width: 9, height: 9, borderRadius: 99, background: color }} />
-        <span style={{ fontSize: 14, fontWeight: 600 }}>{label}</span>
-      </div>
-      <div className="stepper">
-        <button onClick={() => onStep(-1)}>–</button>
-        <span className="val mono" style={{ color: val === null ? "var(--ink-3)" : color }}>{val === null ? "–" : val}</span>
-        <button onClick={() => onStep(1)}>+</button>
-      </div>
+      {bedModal && (
+        <PreBedModal
+          ward={bedModal.ward}
+          initialTab={bedModal.tab}
+          onClose={() => { setBedModal(null); onRefresh(); }}
+        />
+      )}
     </div>
   );
 }
@@ -359,7 +329,6 @@ function MyMap({ data }) {
       <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>My ward map</div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>{data.floor} · {data.pre} · {s.wards} wards · {s.total} beds</div>
 
-      {/* floor summary header */}
       <div className="card" style={{ padding: 16, marginBottom: 16 }}>
         <div className="row between" style={{ marginBottom: 10 }}>
           <span className="h2">My occupancy</span>
@@ -376,8 +345,8 @@ function MyMap({ data }) {
       <div className="floor-head">Wards ({s.wardsDone}/{s.wards} updated)</div>
       {data.wards.map((w) => {
         const entered = w.vacant !== null;
-        const wEntered = entered ? w.vacant + w.occupied + w.reserved : 0;
-        const wPct = wEntered > 0 ? Math.round((w.occupied / wEntered) * 100) : 0;
+        const wEntered = entered ? w.vacant + (w.occupied || 0) + (w.reserved || 0) : 0;
+        const wPct = wEntered > 0 ? Math.round(((w.occupied || 0) / wEntered) * 100) : 0;
         const full = entered && w.occupied === w.total;
         return (
           <div className="ward-card" key={w.ward} style={{ borderColor: full ? "var(--red)" : entered ? "var(--teal-deep)" : "var(--line)" }}>
@@ -385,15 +354,15 @@ function MyMap({ data }) {
               <div>
                 <div style={{ fontWeight: 700 }}>{w.ward}</div>
                 <div className="dim" style={{ fontSize: 11 }}>
-                  {w.total} beds{entered && w.updatedAt ? ` · updated ${new Date(w.updatedAt).toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true
-                  })}` : ""}
+                  {w.total} beds{entered && w.updatedAt
+                    ? ` · updated ${new Date(w.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}`
+                    : ""}
                 </div>
               </div>
               {entered
-                ? <span className="tag" style={{ background: full ? "var(--red-bg)" : "var(--panel-2)", color: full ? "var(--red)" : "var(--ink-2)" }}>{full ? "FULL" : wPct + "% full"}</span>
+                ? <span className="tag" style={{ background: full ? "var(--red-bg)" : "var(--panel-2)", color: full ? "var(--red)" : "var(--ink-2)" }}>
+                    {full ? "FULL" : wPct + "% full"}
+                  </span>
                 : <span className="tag b">not entered</span>}
             </div>
             {entered && (
@@ -409,6 +378,233 @@ function MyMap({ data }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── bed status color helper ────────────────────────────────────────────────────
+function bedStatusColor(s) {
+  if (s === "VACANT")   return "var(--green)";
+  if (s === "RESERVED") return "var(--amber)";
+  if (s === "OCCUPIED") return "var(--red)";
+  return "var(--ink-3)";
+}
+
+// ── Memoized bed row for the Manage tab — only re-renders when its own status changes
+const BedManageRow = React.memo(function BedManageRow({ bed, onChangeStatus }) {
+  return (
+    <div className="row between" style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
+      <div className="row" style={{ gap: 8 }}>
+        <span style={{
+          width: 9, height: 9, borderRadius: "50%",
+          background: bedStatusColor(bed.status), flexShrink: 0, marginTop: 2,
+        }} />
+        <span style={{ fontWeight: 600, fontSize: 14 }}>Bed {bed.bed_number}</span>
+      </div>
+      <div className="row" style={{ gap: 5 }}>
+        {["VACANT", "RESERVED", "OCCUPIED"].map((s) => (
+          <button key={s}
+            style={{
+              padding: "4px 9px", borderRadius: 16, fontSize: 11, fontWeight: 700,
+              border: `1.5px solid ${bedStatusColor(s)}`,
+              background: bed.status === s ? bedStatusColor(s) : "transparent",
+              color: bed.status === s ? "#fff" : bedStatusColor(s),
+              cursor: "pointer", transition: "all 0.15s",
+            }}
+            onClick={() => bed.status !== s && onChangeStatus(bed.id, s)}>
+            {s.charAt(0) + s.slice(1).toLowerCase()}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+// ── Memoized bed card for the View tab
+const BedViewCard = React.memo(function BedViewCard({ bed }) {
+  return (
+    <div style={{
+      padding: "10px 8px", borderRadius: 10, textAlign: "center",
+      background: "var(--panel-2)",
+      border: `1.5px solid ${bedStatusColor(bed.status)}40`,
+    }}>
+      <div style={{
+        width: 9, height: 9, borderRadius: "50%",
+        background: bedStatusColor(bed.status), margin: "0 auto 5px",
+      }} />
+      <div style={{ fontWeight: 700, fontSize: 13 }}>Bed {bed.bed_number}</div>
+      <div style={{ fontSize: 10, color: bedStatusColor(bed.status), fontWeight: 600 }}>
+        {bed.status.charAt(0) + bed.status.slice(1).toLowerCase()}
+      </div>
+    </div>
+  );
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  PRE BED MODAL  (View + Manage tabs with status change)
+// ══════════════════════════════════════════════════════════════════════════════
+function PreBedModal({ ward, initialTab, onClose }) {
+  useModal(onClose);
+  const [tab,     setTab]     = useState(initialTab || "view");
+  const [beds,    setBeds]    = useState([]);
+  const [filter,  setFilter]  = useState("ALL");
+  const [loading, setLoading] = useState(false);
+  const [toast,   setToast]   = useState("");
+
+  // Stable reference — setToast is always the same React dispatch function
+  const showToast = useCallback((m) => {
+    setToast(m); setTimeout(() => setToast(""), 2000);
+  }, []);
+
+  // Initial fetch (and manual refresh). Never called from changeStatus.
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setBeds((await api.preBeds(ward.id)).beds || []); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  }, [ward.id, showToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const sortedBeds = [...beds].sort((a, b) => {
+    const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.bed_number.localeCompare(b.bed_number);
+  });
+  const counts = { VACANT: 0, RESERVED: 0, OCCUPIED: 0 };
+  for (const b of sortedBeds) if (b.status in counts) counts[b.status]++;
+  const displayed = filter === "ALL" ? sortedBeds : sortedBeds.filter((b) => b.status === filter);
+
+  // Optimistic update — no loading state, no DOM replacement, no scroll jump.
+  // On API failure the snapshot is restored and an error toast is shown.
+  const changeStatus = useCallback(async (bedId, newStatus) => {
+    let snapshot;
+    setBeds(prev => {
+      snapshot = prev;
+      return prev.map(b => b.id === bedId ? { ...b, status: newStatus } : b);
+    });
+    try {
+      await api.preUpdateBedStatus(bedId, newStatus);
+    } catch (e) {
+      setBeds(snapshot);
+      showToast(toastErr(e));
+    }
+  }, [showToast]);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} style={{ maxHeight: "92vh", overflowY: "auto" }}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div>
+              <div className="h1" style={{ fontSize: 18 }}>{ward.ward}</div>
+              <div className="dim" style={{ fontSize: 12 }}>
+                {beds.length} bed{beds.length !== 1 ? "s" : ""}
+                {beds.length > 0 && (
+                  <> · <span style={{ color: "var(--green)" }}>{counts.VACANT}V</span>
+                  {" "}<span style={{ color: "var(--red)" }}>{counts.OCCUPIED}O</span>
+                  {" "}<span style={{ color: "var(--amber)" }}>{counts.RESERVED}R</span></>
+                )}
+              </div>
+            </div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          {/* Tab bar */}
+          <div className="seg" style={{ marginBottom: 16 }}>
+            <button className={tab === "view" ? "on" : ""} onClick={() => setTab("view")}>
+              <Ic d={icons.grid} s={14} /> View beds
+            </button>
+            <button className={tab === "manage" ? "on" : ""} onClick={() => setTab("manage")}>
+              <Ic d={icons.bed} s={14} /> Manage beds
+            </button>
+          </div>
+
+          {/* ── View tab ── */}
+          {tab === "view" && (
+            loading ? (
+              <div className="dim" style={{ textAlign: "center", padding: 28 }}>
+                <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
+              </div>
+            ) : beds.length === 0 ? (
+              <div className="card empty" style={{ marginTop: 8 }}>
+                <Ic d={icons.bed} s={28} />
+                <div style={{ marginTop: 10, fontWeight: 600 }}>No beds configured</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Ask your manager to generate beds for this ward.</div>
+              </div>
+            ) : (
+              <div>
+                {/* Filter chips */}
+                <div className="row" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+                  {[
+                    { key: "ALL",      label: `All (${beds.length})`,          color: "var(--ink)" },
+                    { key: "VACANT",   label: `Vacant (${counts.VACANT})`,     color: "var(--green)" },
+                    { key: "RESERVED", label: `Reserved (${counts.RESERVED})`, color: "var(--amber)" },
+                    { key: "OCCUPIED", label: `Occupied (${counts.OCCUPIED})`, color: "var(--red)" },
+                  ].map(({ key, label, color }) => (
+                    <button key={key}
+                      style={{
+                        padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                        border: `1.5px solid ${color}`,
+                        background: filter === key ? color : "transparent",
+                        color: filter === key ? "#fff" : color, cursor: "pointer",
+                      }}
+                      onClick={() => setFilter(key)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Bed grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                  {displayed.map((bed) => (
+                    <BedViewCard key={bed.id} bed={bed} />
+                  ))}
+                </div>
+
+                {displayed.length === 0 && (
+                  <div className="dim" style={{ textAlign: "center", padding: "18px 0", fontSize: 13 }}>
+                    No beds with status "{filter.toLowerCase()}"
+                  </div>
+                )}
+
+                {/* Summary */}
+                <div className="row" style={{ gap: 16, marginTop: 16, justifyContent: "center" }}>
+                  <span className="tag v">{counts.VACANT} Vacant</span>
+                  <span className="tag r">{counts.RESERVED} Reserved</span>
+                  <span className="tag o">{counts.OCCUPIED} Occupied</span>
+                </div>
+              </div>
+            )
+          )}
+
+          {/* ── Manage tab ── */}
+          {tab === "manage" && (
+            loading ? (
+              <div className="dim" style={{ textAlign: "center", padding: 28 }}>
+                <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
+              </div>
+            ) : beds.length === 0 ? (
+              <div className="card empty" style={{ marginTop: 8 }}>
+                <Ic d={icons.bed} s={28} />
+                <div style={{ marginTop: 10, fontWeight: 600 }}>No beds configured</div>
+                <div style={{ fontSize: 12, marginTop: 4 }}>Ask your manager to generate beds for this ward.</div>
+              </div>
+            ) : (
+              <div>
+                <div className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
+                  Select a status for each bed individually.
+                </div>
+                {sortedBeds.map((bed) => (
+                  <BedManageRow key={bed.id} bed={bed} onChangeStatus={changeStatus} />
+                ))}
+              </div>
+            )
+          )}
+        </div>
+      </div>
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }

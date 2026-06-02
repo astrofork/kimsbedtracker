@@ -30,8 +30,8 @@ export default defineConfig({
         lang: "en",
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
-          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
-          { src: "/icons/icon-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: "/icons/icon-maskable.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/icons/icon-512.png", sizes: "1254x1254", type: "image/png", purpose: "any" },
         ],
       },
 
@@ -53,6 +53,8 @@ export default defineConfig({
   ],
 
   server: {
+    host: "0.0.0.0",
+    port: 5173,
     proxy: { "/api": "http://localhost:4000" },
   },
 });

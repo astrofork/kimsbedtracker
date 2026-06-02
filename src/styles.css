@@ -74,8 +74,12 @@
 
 /* ── Reset ────────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-html,body,#root{height:100%;}
+html,body,#root{min-height:100%;overscroll-behavior:none;}
+html{background:var(--bg);overscroll-behavior:none;}
 body{font-family:'Spline Sans',system-ui,sans-serif;background:var(--bg);color:var(--ink);overscroll-behavior:none;}
+/* Body scroll lock — applied by useModal() when any sheet is open.
+   position:fixed + saved top offset is required for iOS Safari/PWA. */
+body.modal-open{overflow:hidden;position:fixed;width:100%;}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
 input,select{font-family:inherit;}
 .mono{font-family:'Spline Sans Mono',monospace;}
@@ -189,7 +193,7 @@ input,select{font-family:inherit;}
 
 /* ── Sheet / overlay ──────────────────────────────────────────────────────── */
 .overlay{position:fixed;inset:0;z-index:100;background:rgba(15,23,42,.35);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;}
-.sheet{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--line);border-radius:20px 20px 0 0;max-height:88vh;overflow-y:auto;animation:slideUp .3s both;box-shadow:var(--shadow-md);}
+.sheet{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--line);border-radius:20px 20px 0 0;max-height:88vh;overflow-y:auto;animation:slideUp .3s both;box-shadow:var(--shadow-md);overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
 .grab{width:38px;height:4px;background:var(--line);border-radius:99px;margin:10px auto 4px;}
 
 /* ── Toast ────────────────────────────────────────────────────────────────── */
