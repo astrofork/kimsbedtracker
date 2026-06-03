@@ -375,19 +375,21 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
 
           {/* Filter chips — counts embedded, no separate summary bar */}
           {!loading && allBeds.length > 0 && (
-            <div className="row" style={{ gap: 5, marginBottom: 14, flexWrap: "wrap" }}>
+            <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
               {[
-                { key: "ALL",  label: `All (${allBeds.length})`, color: "var(--ink)" },
-                { key: "V",    label: `V (${counts.vn})`,         color: "var(--green)" },
-                { key: "V+R",  label: `V+R (${counts.vr})`,       color: "var(--amber)" },
-                { key: "O",    label: `O (${counts.on_})`,         color: "var(--red)" },
-                { key: "O+R",  label: `O+R (${counts.or_})`,       color: "#8B5CF6" },
+                { key: "ALL",  label: `All (${allBeds.length})`,                color: "var(--ink)" },
+                { key: "V",    label: `Vacant (${counts.vn})`,                  color: "var(--green)" },
+                { key: "V+R",  label: `V+R (${counts.vr})`,                     color: "var(--amber)" },
+                { key: "O",    label: `Occupied (${counts.on_})`,               color: "var(--red)" },
+                { key: "O+R",  label: `O+R (${counts.or_})`,                    color: "#8B5CF6" },
+                { key: "R",    label: `Reserved (${counts.vr + counts.or_})`,   color: "var(--amber)" },
               ].map(({ key, label, color }) => (
                 <button key={key} onClick={() => setFilter(key)} style={{
-                  padding: "4px 9px", borderRadius: 14, fontSize: 11, fontWeight: 700,
+                  padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
                   border: `1.5px solid ${color}`,
                   background: filter === key ? color : "transparent",
-                  color: filter === key ? "#fff" : color, cursor: "pointer",
+                  color: filter === key ? "#fff" : color,
+                  cursor: "pointer", transition: "all 0.15s",
                 }}>{label}</button>
               ))}
             </div>
@@ -419,8 +421,8 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                   if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
                   if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
                   if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
-                  if (filter === "R")   return b.reservation_status === "RESERVED";
-                  return true;
+                  if (filter === "R")   return b.reservation_status === "RESERVED"; // V+R + O+R
+                  return true; // ALL
                 })
                 .sort((a, b) => {
                   const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);

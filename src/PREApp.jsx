@@ -590,8 +590,8 @@ function PreBedModal({ ward, initialTab, onClose }) {
     if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
     if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
     if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
-    if (filter === "R")   return b.reservation_status === "RESERVED";
-    return true;
+    if (filter === "R")   return b.reservation_status === "RESERVED";  // V+R + O+R combined
+    return true; // ALL
   });
 
   // Optimistic update — snapshot restored on failure
@@ -627,22 +627,24 @@ function PreBedModal({ ward, initialTab, onClose }) {
   // ── Shared grid renderer ─────────────────────────────────────────────────
   function BedGrid({ clickable }) {
     const chips = [
-      { key: "ALL",  label: `All (${beds.length})`,  color: "var(--ink)" },
-      { key: "V",    label: `V (${counts.vn})`,       color: "var(--green)" },
-      { key: "V+R",  label: `V+R (${counts.vr})`,     color: "var(--amber)" },
-      { key: "O",    label: `O (${counts.on_})`,       color: "var(--red)" },
-      { key: "O+R",  label: `O+R (${counts.or_})`,     color: "#8B5CF6" },
+      { key: "ALL",  label: `All (${beds.length})`,                  color: "var(--ink)" },
+      { key: "V",    label: `Vacant (${counts.vn})`,                  color: "var(--green)" },
+      { key: "V+R",  label: `V+R (${counts.vr})`,                     color: "var(--amber)" },
+      { key: "O",    label: `Occupied (${counts.on_})`,               color: "var(--red)" },
+      { key: "O+R",  label: `O+R (${counts.or_})`,                    color: "#8B5CF6" },
+      { key: "R",    label: `Reserved (${counts.vr + counts.or_})`,   color: "var(--amber)" },
     ];
     return (
       <>
         {/* Filter chips */}
-        <div className="row" style={{ gap: 5, marginBottom: 12, flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
           {chips.map(({ key, label, color }) => (
             <button key={key} onClick={() => setFilter(key)} style={{
-              padding: "4px 9px", borderRadius: 14, fontSize: 11, fontWeight: 700,
-              border: `1.5px solid ${color}`,
+              padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+              border: `1.5px solid ${filter === key ? color : color}`,
               background: filter === key ? color : "transparent",
-              color: filter === key ? "#fff" : color, cursor: "pointer",
+              color: filter === key ? "#fff" : color,
+              cursor: "pointer", transition: "all 0.15s",
             }}>{label}</button>
           ))}
         </div>
