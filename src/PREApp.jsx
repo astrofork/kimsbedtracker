@@ -624,36 +624,14 @@ function PreBedModal({ ward, initialTab, onClose }) {
     </div>
   );
 
-  // ── Ward summary header bar ──────────────────────────────────────────────
-  const SummaryBar = beds.length > 0 && (
-    <div style={{
-      display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
-      gap: 6, marginBottom: 14,
-      background: "var(--panel-2)", borderRadius: 12, padding: "10px 8px",
-    }}>
-      {[
-        { label: "V",   count: counts.vn,  color: "var(--green)" },
-        { label: "V+R", count: counts.vr,  color: "var(--amber)" },
-        { label: "O",   count: counts.on_, color: "var(--red)" },
-        { label: "O+R", count: counts.or_, color: "#8B5CF6" },
-      ].map(({ label, count, color }) => (
-        <div key={label} style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{count}</div>
-          <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 2 }}>{label}</div>
-        </div>
-      ))}
-    </div>
-  );
-
   // ── Shared grid renderer ─────────────────────────────────────────────────
   function BedGrid({ clickable }) {
     const chips = [
-      { key: "ALL",  label: `All (${beds.length})`,   color: "var(--ink)" },
-      { key: "V",    label: `V (${counts.vn})`,        color: "var(--green)" },
-      { key: "V+R",  label: `V+R (${counts.vr})`,      color: "var(--amber)" },
-      { key: "O",    label: `O (${counts.on_})`,        color: "var(--red)" },
-      { key: "O+R",  label: `O+R (${counts.or_})`,      color: "#8B5CF6" },
-      { key: "R",    label: `R (${counts.vr + counts.or_})`, color: "var(--amber)" },
+      { key: "ALL",  label: `All (${beds.length})`,  color: "var(--ink)" },
+      { key: "V",    label: `V (${counts.vn})`,       color: "var(--green)" },
+      { key: "V+R",  label: `V+R (${counts.vr})`,     color: "var(--amber)" },
+      { key: "O",    label: `O (${counts.on_})`,       color: "var(--red)" },
+      { key: "O+R",  label: `O+R (${counts.or_})`,     color: "#8B5CF6" },
     ];
     return (
       <>
@@ -706,12 +684,6 @@ function PreBedModal({ ward, initialTab, onClose }) {
               <div className="h1" style={{ fontSize: 18 }}>{ward.ward}</div>
               <div className="dim" style={{ fontSize: 12 }}>
                 {beds.length} bed{beds.length !== 1 ? "s" : ""}
-                {beds.length > 0 && (
-                  <> · <span style={{ color: "var(--green)" }}>{counts.vn}V</span>
-                  {" "}<span style={{ color: "var(--amber)" }}>{counts.vr}V+R</span>
-                  {" "}<span style={{ color: "var(--red)" }}>{counts.on_}O</span>
-                  {" "}<span style={{ color: "#8B5CF6" }}>{counts.or_}O+R</span></>
-                )}
               </div>
             </div>
             <button className="chip" onClick={onClose}>Close</button>
@@ -727,8 +699,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
             </button>
           </div>
 
-          {/* Summary bar — shown in both tabs */}
-          {SummaryBar}
+
 
           {/* Tab content */}
           {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} />}

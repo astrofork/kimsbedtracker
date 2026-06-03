@@ -373,46 +373,24 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
             <button className="chip" onClick={onClose}>Close</button>
           </div>
 
-          {/* Summary counts + filter chips */}
+          {/* Filter chips — counts embedded, no separate summary bar */}
           {!loading && allBeds.length > 0 && (
-            <>
-              {/* 4-stat summary bar */}
-              <div style={{
-                display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
-                gap: 6, marginBottom: 12,
-                background: "var(--panel-2)", borderRadius: 12, padding: "10px 8px",
-              }}>
-                {[
-                  { label: "V",   count: counts.vn,  color: "var(--green)" },
-                  { label: "V+R", count: counts.vr,  color: "var(--amber)" },
-                  { label: "O",   count: counts.on_, color: "var(--red)" },
-                  { label: "O+R", count: counts.or_, color: "#8B5CF6" },
-                ].map(({ label, count, color }) => (
-                  <div key={label} style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{count}</div>
-                    <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 2 }}>{label}</div>
-                  </div>
-                ))}
-              </div>
-              {/* Filter chips */}
-              <div className="row" style={{ gap: 5, marginBottom: 14, flexWrap: "wrap" }}>
-                {[
-                  { key: "ALL",  label: `All (${allBeds.length})`,          color: "var(--ink)" },
-                  { key: "V",    label: `V (${counts.vn})`,                  color: "var(--green)" },
-                  { key: "V+R",  label: `V+R (${counts.vr})`,                color: "var(--amber)" },
-                  { key: "O",    label: `O (${counts.on_})`,                  color: "var(--red)" },
-                  { key: "O+R",  label: `O+R (${counts.or_})`,                color: "#8B5CF6" },
-                  { key: "R",    label: `R (${counts.vr + counts.or_})`,      color: "var(--amber)" },
-                ].map(({ key, label, color }) => (
-                  <button key={key} onClick={() => setFilter(key)} style={{
-                    padding: "4px 9px", borderRadius: 14, fontSize: 11, fontWeight: 700,
-                    border: `1.5px solid ${color}`,
-                    background: filter === key ? color : "transparent",
-                    color: filter === key ? "#fff" : color, cursor: "pointer",
-                  }}>{label}</button>
-                ))}
-              </div>
-            </>
+            <div className="row" style={{ gap: 5, marginBottom: 14, flexWrap: "wrap" }}>
+              {[
+                { key: "ALL",  label: `All (${allBeds.length})`, color: "var(--ink)" },
+                { key: "V",    label: `V (${counts.vn})`,         color: "var(--green)" },
+                { key: "V+R",  label: `V+R (${counts.vr})`,       color: "var(--amber)" },
+                { key: "O",    label: `O (${counts.on_})`,         color: "var(--red)" },
+                { key: "O+R",  label: `O+R (${counts.or_})`,       color: "#8B5CF6" },
+              ].map(({ key, label, color }) => (
+                <button key={key} onClick={() => setFilter(key)} style={{
+                  padding: "4px 9px", borderRadius: 14, fontSize: 11, fontWeight: 700,
+                  border: `1.5px solid ${color}`,
+                  background: filter === key ? color : "transparent",
+                  color: filter === key ? "#fff" : color, cursor: "pointer",
+                }}>{label}</button>
+              ))}
+            </div>
           )}
 
           {loading ? (
@@ -451,15 +429,9 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
               if (beds.length === 0) return null;
               return (
                 <div key={w.ward} style={{ marginBottom: 18 }}>
-                  {/* Ward header with per-ward counts */}
                   <div className="row between" style={{ marginBottom: 8 }}>
                     <span style={{ fontWeight: 700, fontSize: 14 }}>{w.ward}</span>
-                    <div className="row" style={{ gap: 6 }}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--green)" }}>{wardCounts.vn}V</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)" }}>{wardCounts.vr}V+R</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--red)" }}>{wardCounts.on_}O</span>
-                      {wardCounts.or_ > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6" }}>{wardCounts.or_}O+R</span>}
-                    </div>
+                    <span className="dim" style={{ fontSize: 12 }}>{wardBeds.length} beds</span>
                   </div>
                   {/* Compact bed grid — matches PRE manage grid */}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 6 }}>
