@@ -638,16 +638,14 @@ function PreBedModal({ ward, initialTab, onClose }) {
     const gridBeds = showFilters ? displayed : sortedBeds;
     return (
       <>
-        {/* Filter chips — View tab only */}
+        {/* Filter chips — View tab only. Active chip hides itself; others fill the row. */}
         {showFilters && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
-            {chips.map(({ key, label, color }) => (
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+            {chips.filter(c => c.key !== filter).map(({ key, label, color }) => (
               <button key={key} onClick={() => setFilter(key)} style={{
-                flexShrink: 0,
                 padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
                 border: `1.5px solid ${color}`,
-                background: filter === key ? color : "transparent",
-                color: filter === key ? "#fff" : color,
+                background: "transparent", color,
                 cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
               }}>{label}</button>
             ))}
