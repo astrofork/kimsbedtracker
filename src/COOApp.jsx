@@ -114,15 +114,16 @@ function Overview({ data, compliance, selDate, history }) {
   // compute totals from history snapshot when viewing a past day
   let t = data.totals;
   if (!isLive && history) {
-    let v = 0, o = 0, r = 0, total = 0;
+    let v = 0, o = 0, r = 0, or_ = 0, total = 0;
     for (const round of history) for (const w of round.wards || []) {
-      v += w.vacant || 0; o += w.occupied || 0; r += w.reserved || 0; total += w.total || 0;
+      v += w.vacant || 0; o += w.occupied || 0; r += w.reserved || 0;
+      or_ += w.occupied_reserved || 0; total += w.total || 0;
     }
-    t = { v, o, r, total, presReporting: new Set((history || []).map((h) => h.pre)).size, presTotal: data.totals.presTotal };
+    t = { v, o, r, or: or_, total, presReporting: new Set((history || []).map((h) => h.pre)).size, presTotal: data.totals.presTotal };
   }
 
-  const live = t.v + t.o + t.r;
-  const occRate = live > 0 ? Math.round((t.o / live) * 100) : 0;
+  const live = t.v + t.o + t.r + (t.or || 0);
+  const occRate = live > 0 ? Math.round(((t.o + (t.or || 0)) / live) * 100) : 0;
   const reporting = t.presTotal > 0 ? Math.round((t.presReporting / t.presTotal) * 100) : 0;
 
   const scored = (compliance || []).filter((c) => c.expected > 0);
@@ -142,15 +143,16 @@ function Overview({ data, compliance, selDate, history }) {
       <div className="floor-head">{isLive ? "Live occupancy · all floors" : "Occupancy · " + selDate}</div>
       <div className="stat-grid">
         <div className="stat"><div className="n" style={{ color: "var(--green)" }}>{t.v}</div><div className="l">VACANT</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--amber)" }}>{t.r}</div><div className="l">VAC+RES</div></div>
         <div className="stat"><div className="n" style={{ color: "var(--red)" }}>{t.o}</div><div className="l">OCCUPIED</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--amber)" }}>{t.r}</div><div className="l">RESERVED</div></div>
+        <div className="stat"><div className="n" style={{ color: "#8B5CF6" }}>{t.or || 0}</div><div className="l">OCC+RES</div></div>
       </div>
 
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
         <div className="row between" style={{ marginBottom: 10 }}>
           <span className="h2">Occupancy rate</span><span className="chip mono">{occRate}%</span>
         </div>
-        <StatusBar v={t.v} o={t.o} r={t.r} total={t.total} />
+        <StatusBar v={t.v} r={t.r} o={t.o} or={t.or || 0} total={t.total} />
         <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{live} of {t.total} beds {isLive ? "reported live" : "recorded"}</div>
       </div>
 
@@ -174,16 +176,16 @@ function Overview({ data, compliance, selDate, history }) {
         <div className="card" style={{ padding: 16, marginTop: 14 }}>
           <div className="h2" style={{ marginBottom: 10 }}>Floor occupancy</div>
           {data.floors.map((f) => {
-            let v = 0, o = 0, r = 0, total = 0;
-            for (const p of f.pres) { v += p.summary.v; o += p.summary.o; r += p.summary.r; total += p.summary.total; }
+            let v = 0, o = 0, r = 0, or_ = 0, total = 0;
+            for (const p of f.pres) { v += p.summary.v; o += p.summary.o; r += p.summary.r; or_ += p.summary.or || 0; total += p.summary.total; }
             if (total === 0) return null;
             return (
               <div key={f.name} style={{ marginBottom: 12 }}>
                 <div className="row between" style={{ marginBottom: 5 }}>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>{f.name}</span>
-                  <span className="dim mono" style={{ fontSize: 11 }}>{o}/{total} occ</span>
+                  <span className="dim mono" style={{ fontSize: 11 }}>{o + or_}/{total} occ</span>
                 </div>
-                <StatusBar v={v} o={o} r={r} total={total} />
+                <StatusBar v={v} r={r} o={o} or={or_} total={total} />
               </div>
             );
           })}
@@ -886,11 +888,12 @@ function WardSheet({ pre, onClose }) {
                 </div>
                 {entered ? (
                   <>
-                    <StatusBar v={w.vacant} o={w.occupied} r={w.reserved} total={w.total} />
+                    <StatusBar v={w.vacant} r={w.reserved} o={w.occupied} or={w.occupied_reserved} total={w.total} />
                     <div className="row" style={{ gap: 8, marginTop: 10 }}>
                       <span className="tag v">{w.vacant} vacant</span>
+                      <span className="tag r">{w.reserved} vac+res</span>
                       <span className="tag o">{w.occupied} occupied</span>
-                      <span className="tag r">{w.reserved} reserved</span>
+                      {(w.occupied_reserved || 0) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 6px" }}>{w.occupied_reserved} occ+res</span>}
                     </div>
                   </>
                 ) : <span className="tag b">not entered yet</span>}

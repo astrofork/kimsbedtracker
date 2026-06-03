@@ -154,8 +154,9 @@ function Home({ data, setTab, alarmActive }) {
       <div className="floor-head">Live snapshot</div>
       <div className="stat-grid">
         <div className="stat"><div className="n" style={{ color: "var(--green)" }}>{reported ? s.v : "–"}</div><div className="l">VACANT</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--amber)" }}>{reported ? s.r : "–"}</div><div className="l">VAC+RES</div></div>
         <div className="stat"><div className="n" style={{ color: "var(--red)" }}>{reported ? s.o : "–"}</div><div className="l">OCCUPIED</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--amber)" }}>{reported ? s.r : "–"}</div><div className="l">RESERVED</div></div>
+        <div className="stat"><div className="n" style={{ color: "#8B5CF6" }}>{reported ? s.or : "–"}</div><div className="l">OCC+RES</div></div>
       </div>
 
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
@@ -260,9 +261,10 @@ function Entry({ data, submitRound, alarmActive, onRefresh }) {
                 marginBottom: 14,
               }}>
                 {[
-                  { label: "Vacant",   val: w.vacant,        color: "var(--green)" },
-                  { label: "Reserved", val: w.reserved ?? 0, color: "var(--amber)" },
-                  { label: "Occupied", val: w.occupied ?? 0, color: "var(--red)"   },
+                  { label: "Vacant",   val: w.vacant,                 color: "var(--green)" },
+                  { label: "Vac+Res",  val: w.reserved ?? 0,          color: "var(--amber)" },
+                  { label: "Occupied", val: w.occupied ?? 0,          color: "var(--red)"   },
+                  { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "#8B5CF6"      },
                 ].map(({ label, val, color }, idx) => (
                   <div key={label} style={{
                     flex: 1,
@@ -321,8 +323,8 @@ function Entry({ data, submitRound, alarmActive, onRefresh }) {
 
 function MyMap({ data }) {
   const s = data.summary;
-  const enteredBeds = s.v + s.o + s.r;
-  const occPct = enteredBeds > 0 ? Math.round((s.o / enteredBeds) * 100) : 0;
+  const enteredBeds = s.v + s.r + s.o + (s.or || 0);
+  const occPct = enteredBeds > 0 ? Math.round(((s.o + (s.or || 0)) / enteredBeds) * 100) : 0;
 
   return (
     <div>
@@ -334,20 +336,21 @@ function MyMap({ data }) {
           <span className="h2">My occupancy</span>
           <span className="chip mono">{occPct}% full</span>
         </div>
-        <StatusBar v={s.v} o={s.o} r={s.r} total={s.total} />
+        <StatusBar v={s.v} r={s.r} o={s.o} or={s.or || 0} total={s.total} />
         <div className="row" style={{ gap: 12, marginTop: 10 }}>
           <span className="tag v">{s.v} vacant</span>
+          <span className="tag r">{s.r} vac+res</span>
           <span className="tag o">{s.o} occupied</span>
-          <span className="tag r">{s.r} reserved</span>
+          {(s.or || 0) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 6px" }}>{s.or} occ+res</span>}
         </div>
       </div>
 
       <div className="floor-head">Wards ({s.wardsDone}/{s.wards} updated)</div>
       {data.wards.map((w) => {
         const entered = w.vacant !== null;
-        const wEntered = entered ? w.vacant + (w.occupied || 0) + (w.reserved || 0) : 0;
-        const wPct = wEntered > 0 ? Math.round(((w.occupied || 0) / wEntered) * 100) : 0;
-        const full = entered && w.occupied === w.total;
+        const wEntered = entered ? w.vacant + (w.occupied || 0) + (w.reserved || 0) + (w.occupied_reserved || 0) : 0;
+        const wPct = wEntered > 0 ? Math.round(((w.occupied || 0) + (w.occupied_reserved || 0)) / wEntered * 100) : 0;
+        const full = entered && (w.occupied || 0) + (w.occupied_reserved || 0) === w.total;
         return (
           <div className="ward-card" key={w.ward} style={{ borderColor: full ? "var(--red)" : entered ? "var(--teal-deep)" : "var(--line)" }}>
             <div className="row between" style={{ marginBottom: entered ? 10 : 0 }}>
@@ -367,11 +370,12 @@ function MyMap({ data }) {
             </div>
             {entered && (
               <>
-                <StatusBar v={w.vacant} o={w.occupied} r={w.reserved} total={w.total} />
+                <StatusBar v={w.vacant} r={w.reserved} o={w.occupied} or={w.occupied_reserved} total={w.total} />
                 <div className="row" style={{ gap: 8, marginTop: 10 }}>
                   <span className="tag v">{w.vacant} vacant</span>
+                  <span className="tag r">{w.reserved} vac+res</span>
                   <span className="tag o">{w.occupied} occupied</span>
-                  <span className="tag r">{w.reserved} reserved</span>
+                  {(w.occupied_reserved || 0) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 6px" }}>{w.occupied_reserved} occ+res</span>}
                 </div>
               </>
             )}
@@ -382,37 +386,65 @@ function MyMap({ data }) {
   );
 }
 
-// ── bed status color helper ────────────────────────────────────────────────────
-function bedStatusColor(s) {
-  if (s === "VACANT")   return "var(--green)";
-  if (s === "RESERVED") return "var(--amber)";
-  if (s === "OCCUPIED") return "var(--red)";
+// ── dual-state bed color/label helpers ────────────────────────────────────────
+function bedStateColor(physical, reservation) {
+  if (physical === "VACANT"   && reservation === "NONE")     return "var(--green)";
+  if (physical === "VACANT"   && reservation === "RESERVED") return "var(--amber)";
+  if (physical === "OCCUPIED" && reservation === "NONE")     return "var(--red)";
+  if (physical === "OCCUPIED" && reservation === "RESERVED") return "#8B5CF6";
   return "var(--ink-3)";
+}
+function bedStateLabel(physical, reservation) {
+  if (physical === "VACANT"   && reservation === "NONE")     return "Vacant";
+  if (physical === "VACANT"   && reservation === "RESERVED") return "Vacant · Reserved";
+  if (physical === "OCCUPIED" && reservation === "NONE")     return "Occupied";
+  if (physical === "OCCUPIED" && reservation === "RESERVED") return "Occupied · Reserved";
+  return "Unknown";
 }
 
 // ── Memoized bed row for the Manage tab — only re-renders when its own status changes
 const BedManageRow = React.memo(function BedManageRow({ bed, onChangeStatus }) {
+  const color = bedStateColor(bed.physical_status, bed.reservation_status);
   return (
-    <div className="row between" style={{ padding: "10px 0", borderBottom: "1px solid var(--line)" }}>
-      <div className="row" style={{ gap: 8 }}>
-        <span style={{
-          width: 9, height: 9, borderRadius: "50%",
-          background: bedStatusColor(bed.status), flexShrink: 0, marginTop: 2,
-        }} />
-        <span style={{ fontWeight: 600, fontSize: 14 }}>Bed {bed.bed_number}</span>
+    <div style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
+      <div className="row between" style={{ marginBottom: 8 }}>
+        <div className="row" style={{ gap: 8 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: color, flexShrink: 0, marginTop: 2 }} />
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Bed {bed.bed_number}</span>
+        </div>
+        <span style={{ fontSize: 10, color, fontWeight: 700 }}>
+          {bedStateLabel(bed.physical_status, bed.reservation_status)}
+        </span>
       </div>
-      <div className="row" style={{ gap: 5 }}>
-        {["VACANT", "RESERVED", "OCCUPIED"].map((s) => (
-          <button key={s}
-            style={{
-              padding: "4px 9px", borderRadius: 16, fontSize: 11, fontWeight: 700,
-              border: `1.5px solid ${bedStatusColor(s)}`,
-              background: bed.status === s ? bedStatusColor(s) : "transparent",
-              color: bed.status === s ? "#fff" : bedStatusColor(s),
-              cursor: "pointer", transition: "all 0.15s",
-            }}
-            onClick={() => bed.status !== s && onChangeStatus(bed.id, s)}>
-            {s.charAt(0) + s.slice(1).toLowerCase()}
+      {/* Physical status row */}
+      <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+        <span style={{ fontSize: 10, color: "var(--ink-3)", width: 64, flexShrink: 0 }}>Physical</span>
+        {[["VACANT", "var(--green)", "Vacant"], ["OCCUPIED", "var(--red)", "Occupied"]].map(([val, c, lbl]) => (
+          <button key={val} style={{
+            padding: "3px 10px", borderRadius: 14, fontSize: 11, fontWeight: 700,
+            border: `1.5px solid ${c}`,
+            background: bed.physical_status === val ? c : "transparent",
+            color: bed.physical_status === val ? "#fff" : c,
+            cursor: "pointer", transition: "all 0.15s",
+          }}
+          onClick={() => bed.physical_status !== val && onChangeStatus(bed.id, val, bed.reservation_status)}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+      {/* Reservation row */}
+      <div className="row" style={{ gap: 6 }}>
+        <span style={{ fontSize: 10, color: "var(--ink-3)", width: 64, flexShrink: 0 }}>Reserve</span>
+        {[["NONE", "var(--ink-3)", "None"], ["RESERVED", "var(--amber)", "Reserved"]].map(([val, c, lbl]) => (
+          <button key={val} style={{
+            padding: "3px 10px", borderRadius: 14, fontSize: 11, fontWeight: 700,
+            border: `1.5px solid ${c}`,
+            background: bed.reservation_status === val ? c : "transparent",
+            color: bed.reservation_status === val ? "#fff" : c,
+            cursor: "pointer", transition: "all 0.15s",
+          }}
+          onClick={() => bed.reservation_status !== val && onChangeStatus(bed.id, bed.physical_status, val)}>
+            {lbl}
           </button>
         ))}
       </div>
@@ -422,20 +454,17 @@ const BedManageRow = React.memo(function BedManageRow({ bed, onChangeStatus }) {
 
 // ── Memoized bed card for the View tab
 const BedViewCard = React.memo(function BedViewCard({ bed }) {
+  const color = bedStateColor(bed.physical_status, bed.reservation_status);
+  const label = bedStateLabel(bed.physical_status, bed.reservation_status);
   return (
     <div style={{
       padding: "10px 8px", borderRadius: 10, textAlign: "center",
       background: "var(--panel-2)",
-      border: `1.5px solid ${bedStatusColor(bed.status)}40`,
+      border: `1.5px solid ${color}40`,
     }}>
-      <div style={{
-        width: 9, height: 9, borderRadius: "50%",
-        background: bedStatusColor(bed.status), margin: "0 auto 5px",
-      }} />
+      <div style={{ width: 9, height: 9, borderRadius: "50%", background: color, margin: "0 auto 5px" }} />
       <div style={{ fontWeight: 700, fontSize: 13 }}>Bed {bed.bed_number}</div>
-      <div style={{ fontSize: 10, color: bedStatusColor(bed.status), fontWeight: 600 }}>
-        {bed.status.charAt(0) + bed.status.slice(1).toLowerCase()}
-      </div>
+      <div style={{ fontSize: 10, color, fontWeight: 600 }}>{label}</div>
     </div>
   );
 });
@@ -471,20 +500,29 @@ function PreBedModal({ ward, initialTab, onClose }) {
     if (!isNaN(na) && !isNaN(nb)) return na - nb;
     return a.bed_number.localeCompare(b.bed_number);
   });
-  const counts = { VACANT: 0, RESERVED: 0, OCCUPIED: 0 };
-  for (const b of sortedBeds) if (b.status in counts) counts[b.status]++;
-  const displayed = filter === "ALL" ? sortedBeds : sortedBeds.filter((b) => b.status === filter);
+  const counts = { vn: 0, vr: 0, on_: 0, or_: 0 };
+  for (const b of sortedBeds) {
+    if (b.physical_status === "VACANT"   && b.reservation_status === "NONE")     counts.vn++;
+    if (b.physical_status === "VACANT"   && b.reservation_status === "RESERVED") counts.vr++;
+    if (b.physical_status === "OCCUPIED" && b.reservation_status === "NONE")     counts.on_++;
+    if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") counts.or_++;
+  }
+  const displayed = filter === "ALL"      ? sortedBeds
+    : filter === "RESERVED"              ? sortedBeds.filter(b => b.reservation_status === "RESERVED")
+    : filter === "VACANT"                ? sortedBeds.filter(b => b.physical_status === "VACANT")
+    : filter === "OCCUPIED"              ? sortedBeds.filter(b => b.physical_status === "OCCUPIED")
+    : sortedBeds;
 
   // Optimistic update — no loading state, no DOM replacement, no scroll jump.
   // On API failure the snapshot is restored and an error toast is shown.
-  const changeStatus = useCallback(async (bedId, newStatus) => {
+  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus) => {
     let snapshot;
     setBeds(prev => {
       snapshot = prev;
-      return prev.map(b => b.id === bedId ? { ...b, status: newStatus } : b);
+      return prev.map(b => b.id === bedId ? { ...b, physical_status: physicalStatus, reservation_status: reservationStatus } : b);
     });
     try {
-      await api.preUpdateBedStatus(bedId, newStatus);
+      await api.preUpdateBedStatus(bedId, physicalStatus, reservationStatus);
     } catch (e) {
       setBeds(snapshot);
       showToast(toastErr(e));
@@ -502,9 +540,10 @@ function PreBedModal({ ward, initialTab, onClose }) {
               <div className="dim" style={{ fontSize: 12 }}>
                 {beds.length} bed{beds.length !== 1 ? "s" : ""}
                 {beds.length > 0 && (
-                  <> · <span style={{ color: "var(--green)" }}>{counts.VACANT}V</span>
-                  {" "}<span style={{ color: "var(--red)" }}>{counts.OCCUPIED}O</span>
-                  {" "}<span style={{ color: "var(--amber)" }}>{counts.RESERVED}R</span></>
+                  <> · <span style={{ color: "var(--green)" }}>{counts.vn}V</span>
+                  {" "}<span style={{ color: "var(--amber)" }}>{counts.vr}VR</span>
+                  {" "}<span style={{ color: "var(--red)" }}>{counts.on_}O</span>
+                  {" "}<span style={{ color: "#8B5CF6" }}>{counts.or_}OR</span></>
                 )}
               </div>
             </div>
@@ -538,10 +577,10 @@ function PreBedModal({ ward, initialTab, onClose }) {
                 {/* Filter chips */}
                 <div className="row" style={{ gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
                   {[
-                    { key: "ALL",      label: `All (${beds.length})`,          color: "var(--ink)" },
-                    { key: "VACANT",   label: `Vacant (${counts.VACANT})`,     color: "var(--green)" },
-                    { key: "RESERVED", label: `Reserved (${counts.RESERVED})`, color: "var(--amber)" },
-                    { key: "OCCUPIED", label: `Occupied (${counts.OCCUPIED})`, color: "var(--red)" },
+                    { key: "ALL",      label: `All (${beds.length})`,                        color: "var(--ink)" },
+                    { key: "VACANT",   label: `Vacant (${counts.vn + counts.vr})`,           color: "var(--green)" },
+                    { key: "OCCUPIED", label: `Occupied (${counts.on_ + counts.or_})`,       color: "var(--red)" },
+                    { key: "RESERVED", label: `Reserved (${counts.vr + counts.or_})`,        color: "var(--amber)" },
                   ].map(({ key, label, color }) => (
                     <button key={key}
                       style={{
@@ -570,10 +609,11 @@ function PreBedModal({ ward, initialTab, onClose }) {
                 )}
 
                 {/* Summary */}
-                <div className="row" style={{ gap: 16, marginTop: 16, justifyContent: "center" }}>
-                  <span className="tag v">{counts.VACANT} Vacant</span>
-                  <span className="tag r">{counts.RESERVED} Reserved</span>
-                  <span className="tag o">{counts.OCCUPIED} Occupied</span>
+                <div className="row" style={{ gap: 12, marginTop: 16, justifyContent: "center", flexWrap: "wrap" }}>
+                  <span className="tag v">{counts.vn} Vacant</span>
+                  <span className="tag r">{counts.vr} Vacant·Res</span>
+                  <span className="tag o">{counts.on_} Occupied</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 8px" }}>{counts.or_} Occ·Res</span>
                 </div>
               </div>
             )
@@ -599,6 +639,12 @@ function PreBedModal({ ward, initialTab, onClose }) {
                 {sortedBeds.map((bed) => (
                   <BedManageRow key={bed.id} bed={bed} onChangeStatus={changeStatus} />
                 ))}
+                <div className="row" style={{ gap: 12, marginTop: 16, justifyContent: "center", flexWrap: "wrap" }}>
+                  <span className="tag v">{counts.vn} Vacant</span>
+                  <span className="tag r">{counts.vr} Vacant·Res</span>
+                  <span className="tag o">{counts.on_} Occupied</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 8px" }}>{counts.or_} Occ·Res</span>
+                </div>
               </div>
             )
           )}

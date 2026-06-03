@@ -296,14 +296,15 @@ export function AppError({ title, message }) {
   );
 }
 
-export function StatusBar({ v, o, r, total }) {
-  const rest = Math.max(0, total - v - o - r);
+export function StatusBar({ v, r, o, or: or_ = 0, total }) {
+  const rest = Math.max(0, total - v - r - o - (or_ || 0));
   return (
     <div className="bar">
-      <span style={{ flex: v, background: "var(--green)" }} />
-      <span style={{ flex: o, background: "var(--red)" }} />
-      <span style={{ flex: r, background: "var(--amber)" }} />
-      <span style={{ flex: rest, background: "var(--panel-2)" }} />
+      <span style={{ flex: v,          background: "var(--green)"   }} />
+      <span style={{ flex: r,          background: "var(--amber)"   }} />
+      <span style={{ flex: o,          background: "var(--red)"     }} />
+      <span style={{ flex: or_ || 0,   background: "#8B5CF6"        }} />
+      <span style={{ flex: rest,       background: "var(--panel-2)" }} />
     </div>
   );
 }

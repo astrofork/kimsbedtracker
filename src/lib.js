@@ -46,8 +46,8 @@ export const api = {
     req("/auth/login", { method: "POST", body: JSON.stringify({ username, password, role }) }),
   preMe: () => req("/pre/me"),
   setShift: (shift) => req("/pre/shift", { method: "POST", body: JSON.stringify({ shift }) }),
-  setWard: (wardId, vacant, reserved) =>
-    req("/pre/ward", { method: "POST", body: JSON.stringify({ wardId, vacant, reserved }) }),
+  setWard: (wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved) =>
+    req("/pre/ward", { method: "POST", body: JSON.stringify({ wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved }) }),
   submitRound: () => req("/pre/submit", { method: "POST" }),
   cooOverview: () => req("/coo/overview"),
   cooAudit: () => req("/coo/audit"),
@@ -72,8 +72,13 @@ export const api = {
   mgrHistory: (date, blockId) =>
     req(`/manager/history?date=${date}${blockId != null ? "&blockId=" + blockId : ""}`),
   // ── manager — bed details (create/configure only) ────────────────────────────
-  wardBeds: (wardId, status) =>
-    req(`/manager/wards/${wardId}/beds${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  wardBeds: (wardId, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
+    const qs = params.toString();
+    return req(`/manager/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
+  },
   generateBeds: (wardId, data) =>
     req(`/manager/wards/${wardId}/generate-beds`, { method: "POST", body: JSON.stringify(data) }),
   addBed: (wardId, bedNumber) =>
@@ -82,10 +87,15 @@ export const api = {
     req(`/manager/beds/${bedId}/number`, { method: "PATCH", body: JSON.stringify({ bedNumber }) }),
   deleteBed: (bedId) => req(`/manager/beds/${bedId}`, { method: "DELETE" }),
   // ── PRE — bed status management ──────────────────────────────────────────────
-  preBeds: (wardId, status) =>
-    req(`/pre/wards/${wardId}/beds${status ? `?status=${encodeURIComponent(status)}` : ""}`),
-  preUpdateBedStatus: (bedId, status) =>
-    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  preBeds: (wardId, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
+    const qs = params.toString();
+    return req(`/pre/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
+  },
+  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus) =>
+    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
   cooViews: () => req("/coo/views"),

@@ -344,13 +344,19 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
   }, [pre]);
 
   const allBeds = Object.values(bedsByWard).flat();
-  const counts  = { VACANT: 0, RESERVED: 0, OCCUPIED: 0 };
-  for (const b of allBeds) if (b.status in counts) counts[b.status]++;
+  const counts  = { vn: 0, vr: 0, on_: 0, or_: 0 };
+  for (const b of allBeds) {
+    if (b.physical_status === "VACANT"   && b.reservation_status === "NONE")     counts.vn++;
+    if (b.physical_status === "VACANT"   && b.reservation_status === "RESERVED") counts.vr++;
+    if (b.physical_status === "OCCUPIED" && b.reservation_status === "NONE")     counts.on_++;
+    if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") counts.or_++;
+  }
 
-  function bedColor(s) {
-    if (s === "VACANT")   return "var(--green)";
-    if (s === "RESERVED") return "var(--amber)";
-    if (s === "OCCUPIED") return "var(--red)";
+  function bedColor(physical, reservation) {
+    if (physical === "VACANT"   && reservation === "NONE")     return "var(--green)";
+    if (physical === "VACANT"   && reservation === "RESERVED") return "var(--amber)";
+    if (physical === "OCCUPIED" && reservation === "NONE")     return "var(--red)";
+    if (physical === "OCCUPIED" && reservation === "RESERVED") return "#8B5CF6";
     return "var(--ink-3)";
   }
 
@@ -374,9 +380,10 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                 { key: "OCCUPIED", label: "Occupied", color: "var(--red)" },
                 { key: "RESERVED", label: "Reserved", color: "var(--amber)" },
                 { key: "VACANT",   label: "Vacant",   color: "var(--green)" },
+                { key: "ALL",      label: "All",      color: "var(--ink)" },
               ].map(({ key, label, color }) => (
                 <button key={key}
-                  onClick={() => setFilter(f => f === key ? "ALL" : key)}
+                  onClick={() => setFilter(key)}
                   style={{
                     padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
                     border: `1.5px solid ${color}`,
@@ -384,20 +391,9 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                     color: filter === key ? "#fff" : color,
                     cursor: "pointer",
                   }}>
-                  {label} {counts[key]}
+                  {label === "All" ? `All ${allBeds.length}` : label}
                 </button>
               ))}
-              <button
-                onClick={() => setFilter("ALL")}
-                style={{
-                  padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                  border: "1.5px solid var(--line)",
-                  background: filter === "ALL" ? "var(--ink-2)" : "transparent",
-                  color: filter === "ALL" ? "#fff" : "var(--ink-2)",
-                  cursor: "pointer",
-                }}>
-                All {allBeds.length}
-              </button>
             </div>
           )}
 
@@ -414,23 +410,35 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
           ) : (
             wards.map((w) => {
               const beds = (bedsByWard[w.ward] || [])
-                .filter(b => filter === "ALL" || b.status === filter)
+                .filter(b => {
+                  if (filter === "ALL")      return true;
+                  if (filter === "OCCUPIED") return b.physical_status === "OCCUPIED";
+                  if (filter === "VACANT")   return b.physical_status === "VACANT";
+                  if (filter === "RESERVED") return b.reservation_status === "RESERVED";
+                  return true;
+                })
                 .sort((a, b) => {
                   const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
                   return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
                 });
               const wardBeds = bedsByWard[w.ward] || [];
-              const wardCounts = { VACANT: 0, RESERVED: 0, OCCUPIED: 0 };
-              for (const b of wardBeds) if (b.status in wardCounts) wardCounts[b.status]++;
+              const wardCounts = { vn: 0, vr: 0, on_: 0, or_: 0 };
+              for (const b of wardBeds) {
+                if (b.physical_status === "VACANT"   && b.reservation_status === "NONE")     wardCounts.vn++;
+                if (b.physical_status === "VACANT"   && b.reservation_status === "RESERVED") wardCounts.vr++;
+                if (b.physical_status === "OCCUPIED" && b.reservation_status === "NONE")     wardCounts.on_++;
+                if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") wardCounts.or_++;
+              }
               if (beds.length === 0) return null;
               return (
                 <div key={w.ward} style={{ marginBottom: 16 }}>
                   <div className="row between" style={{ marginBottom: 8 }}>
                     <span style={{ fontWeight: 700, fontSize: 14 }}>{w.ward}</span>
                     <div className="row" style={{ gap: 8 }}>
-                      <span style={{ fontSize: 11, color: "var(--green)" }}>{wardCounts.VACANT}V</span>
-                      <span style={{ fontSize: 11, color: "var(--amber)" }}>{wardCounts.RESERVED}R</span>
-                      <span style={{ fontSize: 11, color: "var(--red)" }}>{wardCounts.OCCUPIED}O</span>
+                      <span style={{ fontSize: 11, color: "var(--green)" }}>{wardCounts.vn}V</span>
+                      <span style={{ fontSize: 11, color: "var(--amber)" }}>{wardCounts.vr}VR</span>
+                      <span style={{ fontSize: 11, color: "var(--red)" }}>{wardCounts.on_}O</span>
+                      {wardCounts.or_ > 0 && <span style={{ fontSize: 11, color: "#8B5CF6" }}>{wardCounts.or_}OR</span>}
                     </div>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
@@ -438,9 +446,9 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                       <div key={bed.id} style={{
                         padding: "8px 4px", borderRadius: 9, textAlign: "center",
                         background: "var(--panel-2)",
-                        border: `1.5px solid ${bedColor(bed.status)}30`,
+                        border: `1.5px solid ${bedColor(bed.physical_status, bed.reservation_status)}30`,
                       }}>
-                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: bedColor(bed.status), margin: "0 auto 4px" }} />
+                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: bedColor(bed.physical_status, bed.reservation_status), margin: "0 auto 4px" }} />
                         <div style={{ fontWeight: 700, fontSize: 12 }}>{bed.bed_number}</div>
                       </div>
                     ))}
