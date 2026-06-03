@@ -554,7 +554,6 @@ function PreBedModal({ ward, initialTab, onClose }) {
   const [tab,        setTab]        = useState(initialTab || "view");
   const [beds,       setBeds]       = useState([]);
   const [filter,     setFilter]     = useState("ALL");
-  const [search,     setSearch]     = useState("");
   const [editingBed, setEditingBed] = useState(null);  // bed object | null
   const [loading,    setLoading]    = useState(false);
   const [toast,      setToast]      = useState("");
@@ -586,16 +585,14 @@ function PreBedModal({ ward, initialTab, onClose }) {
     if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") counts.or_++;
   }
 
-  // Filter then search
-  const filtered = sortedBeds.filter(b => {
-    if (filter === "VACANT")   return b.physical_status === "VACANT";
-    if (filter === "OCCUPIED") return b.physical_status === "OCCUPIED";
-    if (filter === "RESERVED") return b.reservation_status === "RESERVED";
+  const displayed = sortedBeds.filter(b => {
+    if (filter === "V")   return b.physical_status === "VACANT"   && b.reservation_status === "NONE";
+    if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
+    if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
+    if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
+    if (filter === "R")   return b.reservation_status === "RESERVED";
     return true;
   });
-  const displayed = search.trim()
-    ? filtered.filter(b => b.bed_number.toLowerCase().includes(search.trim().toLowerCase()))
-    : filtered;
 
   // Optimistic update — snapshot restored on failure
   const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus) => {
@@ -650,31 +647,21 @@ function PreBedModal({ ward, initialTab, onClose }) {
 
   // ── Shared grid renderer ─────────────────────────────────────────────────
   function BedGrid({ clickable }) {
+    const chips = [
+      { key: "ALL",  label: `All (${beds.length})`,   color: "var(--ink)" },
+      { key: "V",    label: `V (${counts.vn})`,        color: "var(--green)" },
+      { key: "V+R",  label: `V+R (${counts.vr})`,      color: "var(--amber)" },
+      { key: "O",    label: `O (${counts.on_})`,        color: "var(--red)" },
+      { key: "O+R",  label: `O+R (${counts.or_})`,      color: "#8B5CF6" },
+      { key: "R",    label: `R (${counts.vr + counts.or_})`, color: "var(--amber)" },
+    ];
     return (
       <>
-        {/* Search */}
-        <input
-          type="search"
-          placeholder="Search bed…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            width: "100%", padding: "8px 12px", borderRadius: 10, marginBottom: 10,
-            border: "1.5px solid var(--line)", background: "var(--panel-2)",
-            fontSize: 14, outline: "none", color: "var(--ink)", boxSizing: "border-box",
-          }}
-        />
-
         {/* Filter chips */}
-        <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-          {[
-            { key: "ALL",      label: `All (${beds.length})`,              color: "var(--ink)" },
-            { key: "VACANT",   label: `Vacant (${counts.vn + counts.vr})`, color: "var(--green)" },
-            { key: "OCCUPIED", label: `Occ (${counts.on_ + counts.or_})`,  color: "var(--red)" },
-            { key: "RESERVED", label: `Res (${counts.vr + counts.or_})`,   color: "var(--amber)" },
-          ].map(({ key, label, color }) => (
+        <div className="row" style={{ gap: 5, marginBottom: 12, flexWrap: "wrap" }}>
+          {chips.map(({ key, label, color }) => (
             <button key={key} onClick={() => setFilter(key)} style={{
-              padding: "4px 10px", borderRadius: 16, fontSize: 11, fontWeight: 600,
+              padding: "4px 9px", borderRadius: 14, fontSize: 11, fontWeight: 700,
               border: `1.5px solid ${color}`,
               background: filter === key ? color : "transparent",
               color: filter === key ? "#fff" : color, cursor: "pointer",
@@ -685,7 +672,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
         {/* Grid */}
         {displayed.length === 0 ? (
           <div className="dim" style={{ textAlign: "center", padding: "18px 0", fontSize: 13 }}>
-            {search ? `No beds matching "${search}"` : "No beds in this filter"}
+            No beds in this filter
           </div>
         ) : (
           <div style={{

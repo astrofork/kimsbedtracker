@@ -323,7 +323,7 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
   useModal(onClose);
   const [bedsByWard, setBedsByWard] = useState({});
   const [loading,    setLoading]    = useState(true);
-  const [filter,     setFilter]     = useState("OCCUPIED");
+  const [filter,     setFilter]     = useState("ALL");
 
   useEffect(() => {
     let cancelled = false;
@@ -373,28 +373,46 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
             <button className="chip" onClick={onClose}>Close</button>
           </div>
 
-          {/* Summary counts */}
+          {/* Summary counts + filter chips */}
           {!loading && allBeds.length > 0 && (
-            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              {[
-                { key: "OCCUPIED", label: "Occupied", color: "var(--red)" },
-                { key: "RESERVED", label: "Reserved", color: "var(--amber)" },
-                { key: "VACANT",   label: "Vacant",   color: "var(--green)" },
-                { key: "ALL",      label: "All",      color: "var(--ink)" },
-              ].map(({ key, label, color }) => (
-                <button key={key}
-                  onClick={() => setFilter(key)}
-                  style={{
-                    padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+            <>
+              {/* 4-stat summary bar */}
+              <div style={{
+                display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+                gap: 6, marginBottom: 12,
+                background: "var(--panel-2)", borderRadius: 12, padding: "10px 8px",
+              }}>
+                {[
+                  { label: "V",   count: counts.vn,  color: "var(--green)" },
+                  { label: "V+R", count: counts.vr,  color: "var(--amber)" },
+                  { label: "O",   count: counts.on_, color: "var(--red)" },
+                  { label: "O+R", count: counts.or_, color: "#8B5CF6" },
+                ].map(({ label, count, color }) => (
+                  <div key={label} style={{ textAlign: "center" }}>
+                    <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{count}</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, color, marginTop: 2 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Filter chips */}
+              <div className="row" style={{ gap: 5, marginBottom: 14, flexWrap: "wrap" }}>
+                {[
+                  { key: "ALL",  label: `All (${allBeds.length})`,          color: "var(--ink)" },
+                  { key: "V",    label: `V (${counts.vn})`,                  color: "var(--green)" },
+                  { key: "V+R",  label: `V+R (${counts.vr})`,                color: "var(--amber)" },
+                  { key: "O",    label: `O (${counts.on_})`,                  color: "var(--red)" },
+                  { key: "O+R",  label: `O+R (${counts.or_})`,                color: "#8B5CF6" },
+                  { key: "R",    label: `R (${counts.vr + counts.or_})`,      color: "var(--amber)" },
+                ].map(({ key, label, color }) => (
+                  <button key={key} onClick={() => setFilter(key)} style={{
+                    padding: "4px 9px", borderRadius: 14, fontSize: 11, fontWeight: 700,
                     border: `1.5px solid ${color}`,
                     background: filter === key ? color : "transparent",
-                    color: filter === key ? "#fff" : color,
-                    cursor: "pointer",
-                  }}>
-                  {label === "All" ? `All ${allBeds.length}` : label}
-                </button>
-              ))}
-            </div>
+                    color: filter === key ? "#fff" : color, cursor: "pointer",
+                  }}>{label}</button>
+                ))}
+              </div>
+            </>
           )}
 
           {loading ? (
@@ -409,18 +427,6 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
             </div>
           ) : (
             wards.map((w) => {
-              const beds = (bedsByWard[w.ward] || [])
-                .filter(b => {
-                  if (filter === "ALL")      return true;
-                  if (filter === "OCCUPIED") return b.physical_status === "OCCUPIED";
-                  if (filter === "VACANT")   return b.physical_status === "VACANT";
-                  if (filter === "RESERVED") return b.reservation_status === "RESERVED";
-                  return true;
-                })
-                .sort((a, b) => {
-                  const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
-                  return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
-                });
               const wardBeds = bedsByWard[w.ward] || [];
               const wardCounts = { vn: 0, vr: 0, on_: 0, or_: 0 };
               for (const b of wardBeds) {
@@ -429,29 +435,53 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                 if (b.physical_status === "OCCUPIED" && b.reservation_status === "NONE")     wardCounts.on_++;
                 if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") wardCounts.or_++;
               }
+              const beds = wardBeds
+                .filter(b => {
+                  if (filter === "V")   return b.physical_status === "VACANT"   && b.reservation_status === "NONE";
+                  if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
+                  if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
+                  if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
+                  if (filter === "R")   return b.reservation_status === "RESERVED";
+                  return true;
+                })
+                .sort((a, b) => {
+                  const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
+                  return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
+                });
               if (beds.length === 0) return null;
               return (
-                <div key={w.ward} style={{ marginBottom: 16 }}>
+                <div key={w.ward} style={{ marginBottom: 18 }}>
+                  {/* Ward header with per-ward counts */}
                   <div className="row between" style={{ marginBottom: 8 }}>
                     <span style={{ fontWeight: 700, fontSize: 14 }}>{w.ward}</span>
-                    <div className="row" style={{ gap: 8 }}>
-                      <span style={{ fontSize: 11, color: "var(--green)" }}>{wardCounts.vn}V</span>
-                      <span style={{ fontSize: 11, color: "var(--amber)" }}>{wardCounts.vr}VR</span>
-                      <span style={{ fontSize: 11, color: "var(--red)" }}>{wardCounts.on_}O</span>
-                      {wardCounts.or_ > 0 && <span style={{ fontSize: 11, color: "#8B5CF6" }}>{wardCounts.or_}OR</span>}
+                    <div className="row" style={{ gap: 6 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--green)" }}>{wardCounts.vn}V</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)" }}>{wardCounts.vr}V+R</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--red)" }}>{wardCounts.on_}O</span>
+                      {wardCounts.or_ > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6" }}>{wardCounts.or_}O+R</span>}
                     </div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
-                    {beds.map((bed) => (
-                      <div key={bed.id} style={{
-                        padding: "8px 4px", borderRadius: 9, textAlign: "center",
-                        background: "var(--panel-2)",
-                        border: `1.5px solid ${bedColor(bed.physical_status, bed.reservation_status)}30`,
-                      }}>
-                        <div style={{ width: 7, height: 7, borderRadius: "50%", background: bedColor(bed.physical_status, bed.reservation_status), margin: "0 auto 4px" }} />
-                        <div style={{ fontWeight: 700, fontSize: 12 }}>{bed.bed_number}</div>
-                      </div>
-                    ))}
+                  {/* Compact bed grid — matches PRE manage grid */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 6 }}>
+                    {beds.map((bed) => {
+                      const p = bed.physical_status, r = bed.reservation_status;
+                      const color = bedColor(p, r);
+                      const code  = p === "VACANT" && r === "NONE"     ? "V"
+                                  : p === "VACANT" && r === "RESERVED" ? "V+R"
+                                  : p === "OCCUPIED" && r === "NONE"   ? "O"
+                                  : "O+R";
+                      return (
+                        <div key={bed.id} style={{
+                          padding: "7px 4px 8px", borderRadius: 10, textAlign: "center",
+                          background: "var(--panel-2)", border: `2px solid ${color}`,
+                        }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
+                            {bed.bed_number}
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
