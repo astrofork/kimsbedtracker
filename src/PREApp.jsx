@@ -625,33 +625,37 @@ function PreBedModal({ ward, initialTab, onClose }) {
   );
 
   // ── Shared grid renderer ─────────────────────────────────────────────────
-  function BedGrid({ clickable }) {
+  function BedGrid({ clickable, showFilters }) {
     const chips = [
-      { key: "ALL",  label: `All (${beds.length})`,                  color: "var(--ink)" },
-      { key: "V",    label: `Vacant (${counts.vn})`,                  color: "var(--green)" },
-      { key: "V+R",  label: `V+R (${counts.vr})`,                     color: "var(--amber)" },
-      { key: "O",    label: `Occupied (${counts.on_})`,               color: "var(--red)" },
-      { key: "O+R",  label: `O+R (${counts.or_})`,                    color: "#8B5CF6" },
-      { key: "R",    label: `Reserved (${counts.vr + counts.or_})`,   color: "var(--amber)" },
+      { key: "ALL",  label: `All (${beds.length})`,               color: "var(--ink)" },
+      { key: "V",    label: `Vac (${counts.vn})`,                 color: "var(--green)" },
+      { key: "V+R",  label: `V+R (${counts.vr})`,                 color: "var(--amber)" },
+      { key: "O",    label: `Occ (${counts.on_})`,                color: "var(--red)" },
+      { key: "O+R",  label: `O+R (${counts.or_})`,                color: "#8B5CF6" },
+      { key: "R",    label: `Res (${counts.vr + counts.or_})`,    color: "var(--amber)" },
     ];
+    // Manage tab always shows all beds (no filter applied)
+    const gridBeds = showFilters ? displayed : sortedBeds;
     return (
       <>
-        {/* Filter chips */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
-          {chips.map(({ key, label, color }) => (
-            <button key={key} onClick={() => setFilter(key)} style={{
-              flexShrink: 0,
-              padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-              border: `1.5px solid ${color}`,
-              background: filter === key ? color : "transparent",
-              color: filter === key ? "#fff" : color,
-              cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-            }}>{label}</button>
-          ))}
-        </div>
+        {/* Filter chips — View tab only */}
+        {showFilters && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
+            {chips.map(({ key, label, color }) => (
+              <button key={key} onClick={() => setFilter(key)} style={{
+                flexShrink: 0,
+                padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                border: `1.5px solid ${color}`,
+                background: filter === key ? color : "transparent",
+                color: filter === key ? "#fff" : color,
+                cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+              }}>{label}</button>
+            ))}
+          </div>
+        )}
 
         {/* Grid */}
-        {displayed.length === 0 ? (
+        {gridBeds.length === 0 ? (
           <div className="dim" style={{ textAlign: "center", padding: "18px 0", fontSize: 13 }}>
             No beds in this filter
           </div>
@@ -661,7 +665,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
             gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
             gap: 6,
           }}>
-            {displayed.map((bed) => (
+            {gridBeds.map((bed) => (
               <BedGridCard
                 key={bed.id}
                 bed={bed}
@@ -705,7 +709,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
 
 
           {/* Tab content */}
-          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} />}
+          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} showFilters={tab === "view"} />}
         </div>
       </div>
 

@@ -377,12 +377,12 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
           {!loading && allBeds.length > 0 && (
             <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
               {[
-                { key: "ALL",  label: `All (${allBeds.length})`,                color: "var(--ink)" },
-                { key: "V",    label: `Vacant (${counts.vn})`,                  color: "var(--green)" },
-                { key: "V+R",  label: `V+R (${counts.vr})`,                     color: "var(--amber)" },
-                { key: "O",    label: `Occupied (${counts.on_})`,               color: "var(--red)" },
-                { key: "O+R",  label: `O+R (${counts.or_})`,                    color: "#8B5CF6" },
-                { key: "R",    label: `Reserved (${counts.vr + counts.or_})`,   color: "var(--amber)" },
+                { key: "ALL",  label: `All (${allBeds.length})`,               color: "var(--ink)" },
+                { key: "V",    label: `Vac (${counts.vn})`,                    color: "var(--green)" },
+                { key: "V+R",  label: `V+R (${counts.vr})`,                    color: "var(--amber)" },
+                { key: "O",    label: `Occ (${counts.on_})`,                   color: "var(--red)" },
+                { key: "O+R",  label: `O+R (${counts.or_})`,                   color: "#8B5CF6" },
+                { key: "R",    label: `Res (${counts.vr + counts.or_})`,       color: "var(--amber)" },
               ].map(({ key, label, color }) => (
                 <button key={key} onClick={() => setFilter(key)} style={{
                   flexShrink: 0,
