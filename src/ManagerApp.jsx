@@ -60,25 +60,32 @@ function elapsed(ts) {
   return `${m}m ago`;
 }
 
-function MiniStats({ v, o, r }) {
+function MiniStats({ v, r, o, or: or_, notUpdated, lastUpdatedAt }) {
+  const stats = [
+    { label: "Vacant",   val: v,          color: "var(--green)" },
+    { label: "V+R",      val: r,          color: "var(--amber)" },
+    { label: "Occupied", val: o,          color: "var(--red)"   },
+    { label: "O+R",      val: or_ || 0,   color: "#8B5CF6"      },
+    { label: "No data",  val: notUpdated, color: "var(--ink-3)" },
+  ];
   return (
-    <div style={{ display: "flex", background: "var(--panel-2)", borderRadius: 10, overflow: "hidden", marginTop: 12 }}>
-      {[
-        { label: "Vacant",   val: v, color: "var(--green)" },
-        { label: "Reserved", val: r, color: "var(--amber)" },
-        { label: "Occupied", val: o, color: "var(--red)"   },
-      ].map(({ label, val, color }, i) => (
-        <div key={label} style={{
-          flex: 1, textAlign: "center", padding: "10px 4px",
-          borderLeft: i > 0 ? "1px solid var(--line)" : "none",
-        }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 4, marginBottom: 4 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
-            <span style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 600 }}>{label}</span>
+    <div style={{ marginTop: 12 }}>
+      <div style={{ display: "flex", background: "var(--panel-2)", borderRadius: 10, overflow: "hidden" }}>
+        {stats.map(({ label, val, color }, i) => (
+          <div key={label} style={{
+            flex: 1, textAlign: "center", padding: "9px 2px",
+            borderLeft: i > 0 ? "1px solid var(--line)" : "none",
+          }}>
+            <div style={{ fontSize: 9, color: "var(--ink-3)", fontWeight: 600, marginBottom: 4, letterSpacing: 0.2 }}>{label}</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
           </div>
-          <div style={{ fontSize: 22, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+        ))}
+      </div>
+      {lastUpdatedAt && (
+        <div className="dim" style={{ fontSize: 10, marginTop: 5, textAlign: "right" }}>
+          Last update {fmtTime(lastUpdatedAt)}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -226,14 +233,21 @@ function Reporting() {
                   <>
                     {/* Occupancy bar — show a dim placeholder when no data entered yet */}
                     <div style={{ marginTop: 14 }}>
-                      {s.v + s.o + s.r > 0
-                        ? <StatusBar v={s.v} o={s.o} r={s.r} total={s.total} />
+                      {s.v + s.o + s.r + (s.or || 0) > 0
+                        ? <StatusBar v={s.v} r={s.r} o={s.o} or={s.or || 0} total={s.total} />
                         : <div className="bar"><span style={{ flex: 1, background: "var(--line)" }} /></div>
                       }
                     </div>
 
                     {/* Mini stats block */}
-                    <MiniStats v={s.v} o={s.o} r={s.r} />
+                    <MiniStats
+                      v={s.v} r={s.r} o={s.o} or={s.or || 0}
+                      notUpdated={s.wards - s.wardsDone}
+                      lastUpdatedAt={(() => {
+                        const ts = p.wards.map(w => w.updatedAt).filter(Boolean);
+                        return ts.length ? Math.max(...ts) : null;
+                      })()}
+                    />
 
                     {/* Footer row: rounds + view beds */}
                     <div className="row between" style={{ marginTop: 12 }}>
@@ -383,11 +397,12 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                 { key: "O",    label: `Occ (${counts.on_})`,                   color: "var(--red)" },
                 { key: "O+R",  label: `O+R (${counts.or_})`,                   color: "#8B5CF6" },
                 { key: "R",    label: `Res (${counts.vr + counts.or_})`,       color: "var(--amber)" },
-              ].filter(c => c.key !== filter).map(({ key, label, color }) => (
+              ].map(({ key, label, color }) => (
                 <button key={key} onClick={() => setFilter(key)} style={{
                   padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
                   border: `1.5px solid ${color}`,
-                  background: "transparent", color,
+                  background: filter === key ? color : "transparent",
+                  color: filter === key ? "#fff" : color,
                   cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
                 }}>{label}</button>
               ))}

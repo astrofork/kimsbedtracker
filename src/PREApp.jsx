@@ -641,11 +641,12 @@ function PreBedModal({ ward, initialTab, onClose }) {
         {/* Filter chips — View tab only. Active chip hides itself; others fill the row. */}
         {showFilters && (
           <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-            {chips.filter(c => c.key !== filter).map(({ key, label, color }) => (
+            {chips.map(({ key, label, color }) => (
               <button key={key} onClick={() => setFilter(key)} style={{
                 padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
                 border: `1.5px solid ${color}`,
-                background: "transparent", color,
+                background: filter === key ? color : "transparent",
+                color: filter === key ? "#fff" : color,
                 cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
               }}>{label}</button>
             ))}
