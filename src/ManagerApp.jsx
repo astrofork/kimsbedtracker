@@ -375,7 +375,7 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
 
           {/* Filter chips — counts embedded, no separate summary bar */}
           {!loading && allBeds.length > 0 && (
-            <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
               {[
                 { key: "ALL",  label: `All (${allBeds.length})`,                color: "var(--ink)" },
                 { key: "V",    label: `Vacant (${counts.vn})`,                  color: "var(--green)" },
@@ -385,11 +385,12 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                 { key: "R",    label: `Reserved (${counts.vr + counts.or_})`,   color: "var(--amber)" },
               ].map(({ key, label, color }) => (
                 <button key={key} onClick={() => setFilter(key)} style={{
+                  flexShrink: 0,
                   padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
                   border: `1.5px solid ${color}`,
                   background: filter === key ? color : "transparent",
                   color: filter === key ? "#fff" : color,
-                  cursor: "pointer", transition: "all 0.15s",
+                  cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
                 }}>{label}</button>
               ))}
             </div>

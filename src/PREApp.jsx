@@ -637,14 +637,15 @@ function PreBedModal({ ward, initialTab, onClose }) {
     return (
       <>
         {/* Filter chips */}
-        <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none", msOverflowStyle: "none" }}>
           {chips.map(({ key, label, color }) => (
             <button key={key} onClick={() => setFilter(key)} style={{
+              flexShrink: 0,
               padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-              border: `1.5px solid ${filter === key ? color : color}`,
+              border: `1.5px solid ${color}`,
               background: filter === key ? color : "transparent",
               color: filter === key ? "#fff" : color,
-              cursor: "pointer", transition: "all 0.15s",
+              cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
             }}>{label}</button>
           ))}
         </div>
