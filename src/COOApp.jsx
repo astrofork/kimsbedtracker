@@ -18,7 +18,8 @@ export default function COOApp({ user, meta, onLogout }) {
   const [data, setData] = useState(null);
   const [compliance, setCompliance] = useState(null);
   const [dismissed, setDismissed] = useState({});
-  const [sheet, setSheet] = useState(null);
+  const [sheet,     setSheet]     = useState(null);
+  const [bedsBlock, setBedsBlock] = useState(null); // { pre, label, wards }
   // date selection: 'live' or a YYYY-MM-DD historical day
   const [dates, setDates] = useState([]);
   const [selDate, setSelDate] = useState("live");
@@ -74,7 +75,7 @@ export default function COOApp({ user, meta, onLogout }) {
         {/* date selector — affects all COO views */}
         <DatePicker dates={dates} selDate={selDate} setSelDate={setSelDate} />
 
-        {tab === "overview" && <Overview data={data} compliance={compliance} selDate={selDate} history={history} />}
+        {tab === "overview" && <Overview data={data} compliance={compliance} selDate={selDate} history={history} onViewBeds={setBedsBlock} />}
         {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} userId={user?.id} />}
       </div>
 
@@ -83,7 +84,8 @@ export default function COOApp({ user, meta, onLogout }) {
         <NavBtn on={tab === "matrix"} ic={icons.grid} label="Matrix" onClick={() => setTab("matrix")} />
       </div>
 
-      {sheet && <WardSheet pre={sheet} onClose={() => setSheet(null)} />}
+      {sheet     && <WardSheet    pre={sheet}      onClose={() => setSheet(null)} />}
+      {bedsBlock && <BlockBedsSheet pre={bedsBlock.pre} label={bedsBlock.label} wards={bedsBlock.wards} onClose={() => setBedsBlock(null)} />}
     </div>
   );
 }
@@ -108,7 +110,7 @@ function NavBtn({ on, ic, label, onClick }) {
 
 // COO Overview — clean executive summary. Honors the date selector: when a past
 // date is chosen, totals are computed from that day's submitted rounds.
-function Overview({ data, compliance, selDate, history }) {
+function Overview({ data, compliance, selDate, history, onViewBeds }) {
   const isLive = selDate === "live";
 
   // compute totals from history snapshot when viewing a past day
@@ -174,22 +176,39 @@ function Overview({ data, compliance, selDate, history }) {
 
       {isLive && (
         <div className="card" style={{ padding: 16, marginTop: 14 }}>
-          <div className="h2" style={{ marginBottom: 10 }}>Floor occupancy</div>
+          <div className="h2" style={{ marginBottom: 10 }}>Block occupancy</div>
           {data.floors.map((f) => {
-            let v = 0, o = 0, r = 0, or_ = 0, total = 0;
-            for (const p of f.pres) { v += p.summary.v; o += p.summary.o; r += p.summary.r; or_ += p.summary.or || 0; total += p.summary.total; }
-            if (total === 0) return null;
+            const p = f.pres[0]; // each floor is one block
+            if (!p || p.summary.total === 0) return null;
+            const s = p.summary;
             return (
-              <div key={f.name} style={{ marginBottom: 12 }}>
-                <div className="row between" style={{ marginBottom: 5 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{f.name}</span>
-                  <span className="dim mono" style={{ fontSize: 11 }}>{o + or_}/{total} occ</span>
+              <div key={f.name} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--line)" }}>
+                <div className="row between" style={{ marginBottom: 6 }}>
+                  <div>
+                    <span style={{ fontSize: 13, fontWeight: 700 }}>{p.label || `Block ${f.name}`}</span>
+                    <span className="dim" style={{ fontSize: 11, marginLeft: 8 }}>{s.total} beds</span>
+                  </div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="dim mono" style={{ fontSize: 11 }}>{s.o + (s.or || 0)}/{s.total} occ</span>
+                    <button
+                      className="chip"
+                      style={{ fontSize: 11, color: "var(--teal)", padding: "4px 10px" }}
+                      onClick={() => onViewBeds({ pre: p.pre, label: p.label, wards: p.wards })}
+                    >
+                      <Ic d={icons.grid} s={11} /> Beds
+                    </button>
+                  </div>
                 </div>
-                <StatusBar v={v} r={r} o={o} or={or_} total={total} />
+                <StatusBar v={s.v} r={s.r} o={s.o} or={s.or || 0} total={s.total} />
+                <div className="row" style={{ gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11, color: "var(--green)" }}>{s.v} V</span>
+                  <span style={{ fontSize: 11, color: "var(--amber)" }}>{s.r} V+R</span>
+                  <span style={{ fontSize: 11, color: "var(--red)" }}>{s.o} O</span>
+                  {(s.or || 0) > 0 && <span style={{ fontSize: 11, color: "#8B5CF6" }}>{s.or} O+R</span>}
+                </div>
               </div>
             );
           })}
-          <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>Team reporting &amp; compliance detail is managed on the Manager dashboard.</div>
         </div>
       )}
     </div>
@@ -861,6 +880,151 @@ function SnapshotReport({ viewLabel, isLive, selDate, rows, grandV, grandR, isFi
       }}>
         <span>Generated by BedFlow · Hospital Bed Management</span>
         <span style={{ fontWeight: 600 }}>{HOSPITAL_NAME}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Block Beds Sheet (read-only bed grid for COO) ─────────────────────────────
+function BlockBedsSheet({ pre, label, wards, onClose }) {
+  useModal(onClose);
+  const [bedsByWard, setBedsByWard] = useState({});
+  const [loading,    setLoading]    = useState(true);
+  const [filter,     setFilter]     = useState("ALL");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const result = {};
+      await Promise.all(
+        wards.map(async (w) => {
+          try { result[w.ward] = (await api.wardBeds(w.id)).beds || []; }
+          catch { result[w.ward] = []; }
+        })
+      );
+      if (!cancelled) { setBedsByWard(result); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [pre]);
+
+  const allBeds = Object.values(bedsByWard).flat();
+  const counts  = { vn: 0, vr: 0, on_: 0, or_: 0 };
+  for (const b of allBeds) {
+    if (b.physical_status === "VACANT"   && b.reservation_status === "NONE")     counts.vn++;
+    if (b.physical_status === "VACANT"   && b.reservation_status === "RESERVED") counts.vr++;
+    if (b.physical_status === "OCCUPIED" && b.reservation_status === "NONE")     counts.on_++;
+    if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") counts.or_++;
+  }
+
+  function stateColor(p, r) {
+    if (p === "VACANT"   && r === "NONE")     return "var(--green)";
+    if (p === "VACANT"   && r === "RESERVED") return "var(--amber)";
+    if (p === "OCCUPIED" && r === "NONE")     return "var(--red)";
+    if (p === "OCCUPIED" && r === "RESERVED") return "#8B5CF6";
+    return "var(--ink-3)";
+  }
+  function stateCode(p, r) {
+    if (p === "VACANT"   && r === "NONE")     return "V";
+    if (p === "VACANT"   && r === "RESERVED") return "V+R";
+    if (p === "OCCUPIED" && r === "NONE")     return "O";
+    if (p === "OCCUPIED" && r === "RESERVED") return "O+R";
+    return "?";
+  }
+
+  const chips = [
+    { key: "ALL",  label: `All (${allBeds.length})`,               color: "var(--ink)"   },
+    { key: "V",    label: `Vac (${counts.vn})`,                    color: "var(--green)" },
+    { key: "V+R",  label: `V+R (${counts.vr})`,                    color: "var(--amber)" },
+    { key: "O",    label: `Occ (${counts.on_})`,                   color: "var(--red)"   },
+    { key: "O+R",  label: `O+R (${counts.or_})`,                   color: "#8B5CF6"      },
+    { key: "R",    label: `Res (${counts.vr + counts.or_})`,       color: "var(--amber)" },
+  ];
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxHeight: "92vh", overflowY: "auto" }}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div>
+              <div className="h1" style={{ fontSize: 18 }}>{label || `Block ${pre}`}</div>
+              <div className="dim" style={{ fontSize: 12 }}>{allBeds.length} beds</div>
+            </div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          {/* Filter chips */}
+          {!loading && allBeds.length > 0 && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+              {chips.map(({ key, label, color }) => (
+                <button key={key} onClick={() => setFilter(key)} style={{
+                  padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+                  border: `1.5px solid ${color}`,
+                  background: filter === key ? color : "transparent",
+                  color: filter === key ? "#fff" : color,
+                  cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+                }}>{label}</button>
+              ))}
+            </div>
+          )}
+
+          {loading ? (
+            <div style={{ textAlign: "center", padding: 32 }}>
+              <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
+            </div>
+          ) : allBeds.length === 0 ? (
+            <div className="card empty">
+              <Ic d={icons.bed} s={26} />
+              <div style={{ marginTop: 10, fontWeight: 600 }}>No beds configured</div>
+            </div>
+          ) : (
+            wards.map((w) => {
+              const wardBeds = (bedsByWard[w.ward] || [])
+                .filter(b => {
+                  if (filter === "V")   return b.physical_status === "VACANT"   && b.reservation_status === "NONE";
+                  if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
+                  if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
+                  if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
+                  if (filter === "R")   return b.reservation_status === "RESERVED";
+                  return true;
+                })
+                .sort((a, b) => {
+                  const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
+                  return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
+                });
+              if (wardBeds.length === 0) return null;
+              return (
+                <div key={w.ward} style={{ marginBottom: 18 }}>
+                  <div className="row between" style={{ marginBottom: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14 }}>{w.ward}</span>
+                    <span className="dim" style={{ fontSize: 12 }}>{(bedsByWard[w.ward] || []).length} beds</span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))", gap: 6 }}>
+                    {wardBeds.map((bed) => {
+                      const color = stateColor(bed.physical_status, bed.reservation_status);
+                      const code  = stateCode(bed.physical_status, bed.reservation_status);
+                      return (
+                        <div key={bed.id} style={{
+                          padding: "7px 4px 8px", borderRadius: 10, textAlign: "center",
+                          background: "var(--panel-2)", border: `2px solid ${color}`,
+                        }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
+                            {bed.bed_number}
+                          </div>
+                          <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div style={{ height: 8 }} />
+        </div>
       </div>
     </div>
   );
