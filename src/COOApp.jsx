@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { api, fmtTime, toastErr, friendlyError } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle, useModal, AppError, useConfirm } from "./ui.jsx";
+import { Ic, icons, StatusBar, ThemeToggle, useModal, AppError, useConfirm, BlockAvatar } from "./ui.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
 } from "./snapshot.js";
@@ -175,41 +175,87 @@ function Overview({ data, compliance, selDate, history, onViewBeds }) {
       </div>
 
       {isLive && (
-        <div className="card" style={{ padding: 16, marginTop: 14 }}>
-          <div className="h2" style={{ marginBottom: 10 }}>Block occupancy</div>
+        <>
+          <div className="floor-head" style={{ marginTop: 14 }}>Block beds</div>
           {data.floors.map((f) => {
-            const p = f.pres[0]; // each floor is one block
+            const p = f.pres[0];
             if (!p || p.summary.total === 0) return null;
             const s = p.summary;
+
+            // Last updated = most recent updatedAt across wards
+            const wardTs = (p.wards || []).map(w => w.updatedAt).filter(Boolean);
+            const lastTs = wardTs.length ? Math.max(...wardTs) : null;
+            const lastUpdated = lastTs ? (() => {
+              const d = new Date(lastTs);
+              const now = new Date();
+              const isToday = d.toDateString() === now.toDateString();
+              return isToday
+                ? `Today ${fmtTime(lastTs)}`
+                : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " " + fmtTime(lastTs);
+            })() : null;
+
+            const hasData = s.v + s.o + s.r + (s.or || 0) > 0;
+
             return (
-              <div key={f.name} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: "1px solid var(--line)" }}>
-                <div className="row between" style={{ marginBottom: 6 }}>
-                  <div>
-                    <span style={{ fontSize: 13, fontWeight: 700 }}>{p.label || `Block ${f.name}`}</span>
-                    <span className="dim" style={{ fontSize: 11, marginLeft: 8 }}>{s.total} beds</span>
+              <div key={f.name} className="card" style={{ padding: 14, marginBottom: 10 }}>
+                {/* Card header */}
+                <div className="row between" style={{ marginBottom: 12 }}>
+                  <div className="row" style={{ gap: 10 }}>
+                    <BlockAvatar code={p.pre} size={38} />
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.label || `Block ${p.pre}`}</div>
+                      <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                        {s.total} beds · {s.wards} ward{s.wards !== 1 ? "s" : ""}
+                      </div>
+                    </div>
                   </div>
-                  <div className="row" style={{ gap: 8 }}>
-                    <span className="dim mono" style={{ fontSize: 11 }}>{s.o + (s.or || 0)}/{s.total} occ</span>
-                    <button
-                      className="chip"
-                      style={{ fontSize: 11, color: "var(--teal)", padding: "4px 10px" }}
-                      onClick={() => onViewBeds({ pre: p.pre, label: p.label, wards: p.wards })}
-                    >
-                      <Ic d={icons.grid} s={11} /> Beds
-                    </button>
+                  <button
+                    className="chip"
+                    style={{ fontSize: 11, color: "var(--teal)" }}
+                    onClick={() => onViewBeds({ pre: p.pre, label: p.label, wards: p.wards })}
+                  >
+                    <Ic d={icons.grid} s={12} /> View beds
+                  </button>
+                </div>
+
+                {/* Occupancy bar */}
+                {hasData
+                  ? <StatusBar v={s.v} r={s.r} o={s.o} or={s.or || 0} total={s.total} />
+                  : <div className="bar"><span style={{ flex: 1, background: "var(--line)" }} /></div>
+                }
+
+                {/* 4-stat mini grid */}
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+                  gap: 1, marginTop: 12,
+                  background: "var(--panel-2)", borderRadius: 10, overflow: "hidden",
+                }}>
+                  {[
+                    { label: "Vacant",   val: s.v,        color: "var(--green)" },
+                    { label: "V+R",      val: s.r,        color: "var(--amber)" },
+                    { label: "Occupied", val: s.o,        color: "var(--red)"   },
+                    { label: "O+R",      val: s.or || 0,  color: "#8B5CF6"      },
+                  ].map(({ label, val, color }, i) => (
+                    <div key={label} style={{
+                      textAlign: "center", padding: "9px 4px",
+                      borderLeft: i > 0 ? "1px solid var(--line)" : "none",
+                    }}>
+                      <div style={{ fontSize: 9, color: "var(--ink-3)", fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Last updated */}
+                {lastUpdated && (
+                  <div className="dim" style={{ fontSize: 10, marginTop: 6, textAlign: "right" }}>
+                    Last updated {lastUpdated}
                   </div>
-                </div>
-                <StatusBar v={s.v} r={s.r} o={s.o} or={s.or || 0} total={s.total} />
-                <div className="row" style={{ gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, color: "var(--green)" }}>{s.v} V</span>
-                  <span style={{ fontSize: 11, color: "var(--amber)" }}>{s.r} V+R</span>
-                  <span style={{ fontSize: 11, color: "var(--red)" }}>{s.o} O</span>
-                  {(s.or || 0) > 0 && <span style={{ fontSize: 11, color: "#8B5CF6" }}>{s.or} O+R</span>}
-                </div>
+                )}
               </div>
             );
           })}
-        </div>
+        </>
       )}
     </div>
   );
