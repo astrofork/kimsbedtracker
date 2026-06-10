@@ -4,6 +4,7 @@ import { Ic, icons, StatusBar, ThemeToggle, useModal, BlockAvatar, useConfirm } 
 
 export default function ManagerApp({ user, onLogout }) {
   const [tab, setTab] = useState("blocks");
+
   const [toast, setToast] = useState("");
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2400); };
 
@@ -28,13 +29,15 @@ export default function ManagerApp({ user, onLogout }) {
         {tab === "report"  && <Reporting />}
         {tab === "blocks"  && <BlocksManager showToast={showToast} />}
         {tab === "pres"    && <PreManager showToast={showToast} />}
+        {tab === "nurses"  && <NurseManager showToast={showToast} />}
         {tab === "history" && <HistoryViewer />}
       </div>
 
       <div className="navbar">
         <NavBtn on={tab === "report"}  ic={icons.map}   label="Report"  onClick={() => setTab("report")} />
         <NavBtn on={tab === "blocks"}  ic={icons.bed}   label="Blocks"  onClick={() => setTab("blocks")} />
-        <NavBtn on={tab === "pres"}    ic={icons.user}  label="PRE Users" onClick={() => setTab("pres")} />
+        <NavBtn on={tab === "pres"}    ic={icons.user}  label="PRE"     onClick={() => setTab("pres")} />
+        <NavBtn on={tab === "nurses"}  ic={icons.user}  label="Nurses"  onClick={() => setTab("nurses")} />
         <NavBtn on={tab === "history"} ic={icons.clock} label="History" onClick={() => setTab("history")} />
       </div>
 
@@ -438,10 +441,7 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                   if (filter === "R")   return b.reservation_status === "RESERVED"; // V+R + O+R
                   return true; // ALL
                 })
-                .sort((a, b) => {
-                  const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
-                  return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
-                });
+                .sort((a, b) => naturalSort(a.bed_name, b.bed_name));
               if (beds.length === 0) return null;
               return (
                 <div key={w.ward} style={{ marginBottom: 18 }}>
@@ -464,7 +464,7 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                           background: "var(--panel-2)", border: `2px solid ${color}`,
                         }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
-                            {bed.bed_number}
+                            {bed.bed_name}
                           </div>
                           <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
                         </div>
@@ -482,6 +482,18 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
   );
 }
 
+function naturalSort(a, b) {
+  const re = /(\d+)/g;
+  const ap = a.split(re), bp = b.split(re);
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    const ai = ap[i] ?? "", bi = bp[i] ?? "";
+    const an = parseInt(ai, 10), bn = parseInt(bi, 10);
+    if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+    if (ai !== bi) return ai.localeCompare(bi);
+  }
+  return 0;
+}
+
 function actionLabel(a) {
   const map = {
     login: "Signed in", ward_update: "Updated beds", round_submit: "Submitted round",
@@ -490,6 +502,8 @@ function actionLabel(a) {
     block_delete: "Deleted block", ward_create: "Created ward", ward_edit: "Edited ward",
     ward_delete: "Deleted ward", bed_add: "Added bed", bed_delete: "Removed bed",
     bed_rename: "Renamed bed", beds_generate: "Generated beds", bed_status_update: "Updated bed status",
+    bed_master_edit: "Updated bed details",
+    nurse_create: "Created nurse", nurse_edit: "Edited nurse", nurse_delete: "Deleted nurse",
   };
   return map[a] || a;
 }
@@ -502,6 +516,7 @@ function BlocksManager({ showToast }) {
   const [wards,  setWards]  = useState([]);   // from GET /manager/wards
   const [editingBlock, setEditingBlock] = useState(null); // null | "new" | block obj
   const [addingWard,   setAddingWard]   = useState(null); // blockId | null
+  const [editingWard,  setEditingWard]  = useState(null); // null | ward obj
   const [expanded,     setExpanded]     = useState({});   // { [blockId]: bool }
   const [managingBeds, setManagingBeds] = useState(null); // ward obj | null
   const [confirm, confirmDialog] = useConfirm();
@@ -615,9 +630,13 @@ function BlocksManager({ showToast }) {
                         <div style={{ fontWeight: 600, fontSize: 14 }}>{w.name}</div>
                         <div className="dim" style={{ fontSize: 11 }}>
                           {w.total_beds} beds
+                          {w.nursing_station && <> · <span style={{ color: "var(--teal)" }}>{w.nursing_station}</span></>}
+                          {w.unit_type && <> · {w.unit_type}</>}
                         </div>
                       </div>
                       <div className="row" style={{ gap: 6 }}>
+                        <button className="chip" style={{ color: "var(--ink-2)" }}
+                          onClick={() => setEditingWard(w)}>Edit</button>
                         <button className="chip" style={{ color: "var(--teal)" }}
                           onClick={() => setManagingBeds(w)}>
                           <Ic d={icons.bed} s={13} /> Beds
@@ -685,6 +704,16 @@ function BlocksManager({ showToast }) {
         />
       )}
 
+      {/* ── Ward editor sheet ── */}
+      {editingWard !== null && (
+        <WardEditor
+          ward={editingWard}
+          onClose={() => setEditingWard(null)}
+          onSaved={() => { setEditingWard(null); load(); showToast("Ward updated ✓"); }}
+          showToast={showToast}
+        />
+      )}
+
       {/* ── Bed manager sheet ── */}
       {managingBeds !== null && (
         <BedManagerModal
@@ -748,23 +777,27 @@ function BlockEditor({ block, onClose, onSaved, showToast }) {
   );
 }
 
+const UNIT_TYPES = ["KIMS", "KIMS - Renova"];
+
 function WardCreator({ blockId, blockName, onClose, onSaved, showToast }) {
   useModal(onClose);
-  const [name,       setName]       = useState("");
-  const [beds,       setBeds]       = useState(10);
-  const [genBeds,    setGenBeds]    = useState(true);
-  const [startNum,   setStartNum]   = useState(101);
-  const [busy,       setBusy]       = useState(false);
+  const [name,            setName]            = useState("");
+  const [nursingStation,  setNursingStation]  = useState("");
+  const [unitType,        setUnitType]        = useState("");
+  const [roomType,        setRoomType]        = useState("");
+  const [beds,            setBeds]            = useState(0);
+  const [busy,            setBusy]            = useState(false);
 
   const save = async () => {
     if (!name.trim()) { showToast("Ward name required"); return; }
     setBusy(true);
     try {
-      const res = await api.mgrCreateWard({ name: name.trim(), blockId, totalBeds: beds });
-      if (genBeds && beds > 0 && res.id) {
-        try { await api.generateBeds(res.id, { startNumber: startNum, count: beds }); }
-        catch { /* non-fatal — beds can be generated later */ }
-      }
+      await api.mgrCreateWard({
+        name: name.trim(), blockId, totalBeds: beds,
+        nursingStation: nursingStation.trim() || undefined,
+        unitType:       unitType.trim()       || undefined,
+        roomType:       roomType.trim()       || undefined,
+      });
       onSaved();
     } catch (e) { showToast(toastErr(e)); setBusy(false); }
   };
@@ -778,43 +811,97 @@ function WardCreator({ blockId, blockName, onClose, onSaved, showToast }) {
             <div className="h1" style={{ fontSize: 18 }}>New ward — Block {blockName}</div>
             <button className="chip" onClick={onClose}>Close</button>
           </div>
+
           <label className="label">Ward / room name</label>
-          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="ICU" />
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="MICU I" />
           <div style={{ height: 12 }} />
-          <label className="label">Total beds</label>
+
+          <label className="label">Nursing station <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
+          <input className="field" value={nursingStation} onChange={(e) => setNursingStation(e.target.value)} placeholder="General Male" />
+          <div style={{ height: 12 }} />
+
+          <label className="label">Unit type</label>
+          <select className="field" value={unitType} onChange={(e) => setUnitType(e.target.value)}>
+            <option value="">— Select —</option>
+            {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <div style={{ height: 12 }} />
+
+          <label className="label">Room type <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
+          <input className="field" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="ICU" />
+          <div style={{ height: 12 }} />
+
+          <label className="label">Initial bed count <span className="dim" style={{ fontSize: 11 }}>(can add/generate beds later)</span></label>
           <div className="stepper" style={{ width: "fit-content" }}>
             <button onClick={() => setBeds((b) => Math.max(0, b - 1))}>–</button>
             <span className="val mono">{beds}</span>
             <button onClick={() => setBeds((b) => b + 1)}>+</button>
           </div>
 
-          {beds > 0 && (
-            <>
-              <div style={{ height: 14 }} />
-              <label className="label">Generate individual bed numbers?</label>
-              <div className="seg">
-                <button className={genBeds ? "on" : ""} onClick={() => setGenBeds(true)}>Yes</button>
-                <button className={!genBeds ? "on" : ""} onClick={() => setGenBeds(false)}>No (counts only)</button>
-              </div>
-              {genBeds && (
-                <>
-                  <div style={{ height: 12 }} />
-                  <label className="label">
-                    Start number&nbsp;
-                    <span className="dim" style={{ fontSize: 11 }}>
-                      (will create {startNum} – {startNum + beds - 1})
-                    </span>
-                  </label>
-                  <input className="field" type="number" min="1" value={startNum}
-                    onChange={(e) => setStartNum(Math.max(1, Number(e.target.value)))} />
-                </>
-              )}
-            </>
-          )}
-
           <button className="btn btn-primary btn-block" style={{ marginTop: 18 }}
             disabled={busy} onClick={save}>
             {busy ? "Creating…" : "Create ward"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WardEditor({ ward, onClose, onSaved, showToast }) {
+  useModal(onClose);
+  const [name,           setName]           = useState(ward.name           || "");
+  const [nursingStation, setNursingStation] = useState(ward.nursing_station || "");
+  const [unitType,       setUnitType]       = useState(ward.unit_type       || "");
+  const [roomType,       setRoomType]       = useState(ward.room_type       || "");
+  const [busy,           setBusy]           = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Ward name required"); return; }
+    setBusy(true);
+    try {
+      await api.mgrEditWard(ward.id, {
+        name:           name.trim(),
+        nursingStation: nursingStation.trim() || null,
+        unitType:       unitType.trim()       || null,
+        roomType:       roomType.trim()       || null,
+      });
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>Edit ward</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Ward name</label>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
+          <div style={{ height: 12 }} />
+
+          <label className="label">Nursing station</label>
+          <input className="field" value={nursingStation} onChange={(e) => setNursingStation(e.target.value)} placeholder="e.g. General Male" />
+          <div style={{ height: 12 }} />
+
+          <label className="label">Unit type</label>
+          <select className="field" value={unitType} onChange={(e) => setUnitType(e.target.value)}>
+            <option value="">— Select —</option>
+            {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <div style={{ height: 12 }} />
+
+          <label className="label">Room type</label>
+          <input className="field" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="e.g. ICU" />
+          <div style={{ height: 18 }} />
+
+          <button className="btn btn-primary btn-block" disabled={busy} onClick={save}>
+            {busy ? "Saving…" : "Save changes"}
           </button>
           <div style={{ height: 14 }} />
         </div>
@@ -832,8 +919,13 @@ function BedManagerModal({ ward, onClose, showToast }) {
   const [beds,          setBeds]          = useState([]);
   const [loading,       setLoading]       = useState(false);
   const [individualBed, setIndividualBed] = useState("");
-  const [genStart,      setGenStart]      = useState(101);
-  const [genCount,      setGenCount]      = useState(ward.total_beds || 10);
+  // Generate mode: "range" | "ab"
+  const [genMode,       setGenMode]       = useState("range");
+  const [genPrefix,     setGenPrefix]     = useState("");
+  const [genStart,      setGenStart]      = useState(1);
+  const [genEnd,        setGenEnd]        = useState(ward.total_beds || 10);
+  const [genPad,        setGenPad]        = useState(0);   // 0 = no padding
+  const [genRooms,      setGenRooms]      = useState("");  // for AB mode
   const [busy,          setBusy]          = useState(false);
   const [renamingId,    setRenamingId]    = useState(null);
   const [renameVal,     setRenameVal]     = useState("");
@@ -848,35 +940,53 @@ function BedManagerModal({ ward, onClose, showToast }) {
 
   useEffect(() => { load(); }, [ward.id]);
 
+  const buildBedNames = () => {
+    if (genMode === "range") {
+      const s = Math.max(1, genStart), e = Math.max(s, genEnd);
+      const names = [];
+      for (let i = s; i <= e; i++) {
+        const num = genPad > 0 ? String(i).padStart(genPad, "0") : String(i);
+        names.push(genPrefix + num);
+      }
+      return names;
+    }
+    // AB mode
+    const rooms = genRooms.split(/[,\n]+/).map((r) => r.trim()).filter(Boolean);
+    const names = [];
+    for (const r of rooms) { names.push(r + "A"); names.push(r + "B"); }
+    return names;
+  };
+
   const generate = async () => {
-    if (genCount < 1) { showToast("Count must be at least 1"); return; }
+    const names = buildBedNames();
+    if (names.length === 0) { showToast("No bed names to generate"); return; }
     setBusy(true);
     try {
-      const res = await api.generateBeds(ward.id, { startNumber: genStart, count: genCount });
+      const res = await api.generateBeds(ward.id, names);
       await load();
-      showToast(`Generated ${res.generated} beds ✓`);
+      showToast(`Generated ${res.generated} bed${res.generated !== 1 ? "s" : ""} ✓`);
     } catch (e) { showToast(toastErr(e)); }
     finally { setBusy(false); }
   };
 
   const addBed = async () => {
-    const num = individualBed.trim();
-    if (!num) return;
+    const name = individualBed.trim();
+    if (!name) return;
     setBusy(true);
     try {
-      await api.addBed(ward.id, num);
+      await api.addBed(ward.id, name);
       setIndividualBed("");
       await load();
-      showToast(`Bed ${num} added ✓`);
+      showToast(`Bed ${name} added ✓`);
     } catch (e) { showToast(toastErr(e)); }
     finally { setBusy(false); }
   };
 
-  const startRename = (bed) => { setRenamingId(bed.id); setRenameVal(bed.bed_number); };
+  const startRename = (bed) => { setRenamingId(bed.id); setRenameVal(bed.bed_name); };
 
   const saveRename = async (bedId) => {
     const val = renameVal.trim();
-    if (!val) { showToast("Bed number required"); return; }
+    if (!val) { showToast("Bed name required"); return; }
     setBusy(true);
     try {
       await api.renameBed(bedId, val);
@@ -889,7 +999,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
 
   const removeBed = async (bed) => {
     const ok = await confirm({
-      title: `Remove bed "${bed.bed_number}"?`,
+      title: `Remove bed "${bed.bed_name}"?`,
       message: `Bed will be removed from ${ward.name}. Its status history is kept for the audit log.\n\nThis cannot be undone.`,
       confirmLabel: "Remove bed",
       danger: true,
@@ -899,17 +1009,12 @@ function BedManagerModal({ ward, onClose, showToast }) {
     try {
       await api.deleteBed(bed.id);
       await load();
-      showToast(`Bed ${bed.bed_number} removed`);
+      showToast(`Bed "${bed.bed_name}" removed`);
     } catch (e) { showToast(toastErr(e)); }
     finally { setBusy(false); }
   };
 
-  // Always display beds in numeric order (matches DB ORDER BY CAST(bed_number AS INTEGER))
-  const sortedBeds = [...beds].sort((a, b) => {
-    const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    return a.bed_number.localeCompare(b.bed_number);
-  });
+  const sortedBeds = [...beds].sort((a, b) => naturalSort(a.bed_name, b.bed_name));
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -932,41 +1037,18 @@ function BedManagerModal({ ward, onClose, showToast }) {
               <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
             </div>
           ) : beds.length === 0 ? (
-            /* ── No beds yet: show generate range form ── */
-            <>
-              <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-                No beds yet. Generate a numbered range or add beds one by one.
-              </div>
-              <div className="row" style={{ gap: 10, marginBottom: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <label className="label">Start number</label>
-                  <input className="field" type="number" min="1" value={genStart}
-                    onChange={(e) => setGenStart(Math.max(1, Number(e.target.value)))} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label className="label">Count</label>
-                  <input className="field" type="number" min="1" max="500" value={genCount}
-                    onChange={(e) => setGenCount(Math.max(1, Number(e.target.value)))} />
-                </div>
-              </div>
-              <div className="dim" style={{ fontSize: 11, marginBottom: 10 }}>
-                Will create: {genStart} – {genStart + genCount - 1}
-              </div>
-              <button className="btn btn-primary btn-block" disabled={busy} onClick={generate}>
-                {busy ? "Generating…" : `Generate ${genCount} beds`}
-              </button>
-              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-                <label className="label">Or add a single bed</label>
-                <div className="row" style={{ gap: 8 }}>
-                  <input className="field" value={individualBed} style={{ flex: 1 }}
-                    onChange={(e) => setIndividualBed(e.target.value)}
-                    placeholder="e.g. 101A"
-                    onKeyDown={(e) => e.key === "Enter" && addBed()} />
-                  <button className="btn btn-primary" disabled={busy || !individualBed.trim()}
-                    onClick={addBed}>Add</button>
-                </div>
-              </div>
-            </>
+            /* ── No beds yet: generate form ── */
+            <GenerateBedForm
+              genMode={genMode} setGenMode={setGenMode}
+              genPrefix={genPrefix} setGenPrefix={setGenPrefix}
+              genStart={genStart} setGenStart={setGenStart}
+              genEnd={genEnd} setGenEnd={setGenEnd}
+              genPad={genPad} setGenPad={setGenPad}
+              genRooms={genRooms} setGenRooms={setGenRooms}
+              buildBedNames={buildBedNames}
+              individualBed={individualBed} setIndividualBed={setIndividualBed}
+              busy={busy} onGenerate={generate} onAddBed={addBed}
+            />
           ) : (
             /* ── Beds exist: grid + inline rename + add more ── */
             <>
@@ -1002,7 +1084,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
                     ) : (
                       <>
                         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
-                          Bed {bed.bed_number}
+                          Bed {bed.bed_name}
                         </div>
                         <div className="row" style={{ gap: 4, justifyContent: "center" }}>
                           <button
@@ -1024,16 +1106,30 @@ function BedManagerModal({ ward, onClose, showToast }) {
                 ))}
               </div>
 
-              {/* Add another bed */}
+              {/* Add another bed + generate more */}
               <div style={{ paddingTop: 4, borderTop: "1px solid var(--line)" }}>
-                <label className="label" style={{ marginTop: 14, display: "block" }}>Add another bed</label>
+                <label className="label" style={{ marginTop: 14, display: "block" }}>Add a single bed</label>
                 <div className="row" style={{ gap: 8 }}>
                   <input className="field" value={individualBed} style={{ flex: 1 }}
                     onChange={(e) => setIndividualBed(e.target.value)}
-                    placeholder="Bed number, e.g. 113"
+                    placeholder="e.g. ICU-09, 201A"
                     onKeyDown={(e) => e.key === "Enter" && addBed()} />
                   <button className="btn btn-primary" disabled={busy || !individualBed.trim()}
                     onClick={addBed}>Add</button>
+                </div>
+                <div style={{ marginTop: 14 }}>
+                  <GenerateBedForm
+                    genMode={genMode} setGenMode={setGenMode}
+                    genPrefix={genPrefix} setGenPrefix={setGenPrefix}
+                    genStart={genStart} setGenStart={setGenStart}
+                    genEnd={genEnd} setGenEnd={setGenEnd}
+                    genPad={genPad} setGenPad={setGenPad}
+                    genRooms={genRooms} setGenRooms={setGenRooms}
+                    buildBedNames={buildBedNames}
+                    individualBed={null} setIndividualBed={null}
+                    busy={busy} onGenerate={generate} onAddBed={null}
+                    compact
+                  />
                 </div>
               </div>
             </>
@@ -1047,6 +1143,96 @@ function BedManagerModal({ ward, onClose, showToast }) {
   );
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  GENERATE BED FORM  (shared between BedManagerModal empty state + "add more")
+// ══════════════════════════════════════════════════════════════════════════════
+function GenerateBedForm({
+  genMode, setGenMode, genPrefix, setGenPrefix,
+  genStart, setGenStart, genEnd, setGenEnd, genPad, setGenPad,
+  genRooms, setGenRooms, buildBedNames,
+  individualBed, setIndividualBed,
+  busy, onGenerate, onAddBed, compact,
+}) {
+  const preview = buildBedNames();
+  const previewLabel = preview.length === 0 ? "—"
+    : preview.length <= 5 ? preview.join(", ")
+    : preview.slice(0, 4).join(", ") + ` … +${preview.length - 4} more`;
+
+  return (
+    <div>
+      {!compact && (
+        <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+          Generate beds by pattern or add one at a time.
+        </div>
+      )}
+
+      <label className="label">{compact ? "Generate more beds" : "Generate beds"}</label>
+      <div className="seg" style={{ marginBottom: 12 }}>
+        <button className={genMode === "range" ? "on" : ""} onClick={() => setGenMode("range")}>Range</button>
+        <button className={genMode === "ab"    ? "on" : ""} onClick={() => setGenMode("ab")}>A/B Rooms</button>
+      </div>
+
+      {genMode === "range" ? (
+        <>
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 1.5 }}>
+              <label className="label" style={{ fontSize: 11 }}>Prefix <span className="dim">(optional)</span></label>
+              <input className="field" value={genPrefix} onChange={(e) => setGenPrefix(e.target.value)}
+                placeholder="ICU-" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ fontSize: 11 }}>From</label>
+              <input className="field" type="number" min="1" value={genStart}
+                onChange={(e) => setGenStart(Math.max(1, Number(e.target.value)))} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ fontSize: 11 }}>To</label>
+              <input className="field" type="number" min="1" value={genEnd}
+                onChange={(e) => setGenEnd(Math.max(1, Number(e.target.value)))} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label className="label" style={{ fontSize: 11 }}>Pad <span className="dim">(digits)</span></label>
+              <input className="field" type="number" min="0" max="4" value={genPad}
+                onChange={(e) => setGenPad(Math.max(0, Math.min(4, Number(e.target.value))))} />
+            </div>
+          </div>
+          <div className="dim" style={{ fontSize: 11, marginBottom: 10 }}>
+            Preview: {previewLabel}
+          </div>
+        </>
+      ) : (
+        <>
+          <label className="label" style={{ fontSize: 11 }}>Room numbers <span className="dim">(comma-separated, e.g. 101, 102, 403)</span></label>
+          <textarea className="field" rows={3} value={genRooms}
+            onChange={(e) => setGenRooms(e.target.value)}
+            placeholder="101, 102, 403" style={{ resize: "vertical" }} />
+          <div className="dim" style={{ fontSize: 11, marginBottom: 10 }}>
+            Preview: {previewLabel}
+          </div>
+        </>
+      )}
+
+      <button className="btn btn-primary btn-block" disabled={busy || preview.length === 0} onClick={onGenerate}>
+        {busy ? "Generating…" : `Generate ${preview.length} bed${preview.length !== 1 ? "s" : ""}`}
+      </button>
+
+      {!compact && onAddBed && (
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
+          <label className="label">Or add a single bed</label>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="field" value={individualBed} style={{ flex: 1 }}
+              onChange={(e) => setIndividualBed(e.target.value)}
+              placeholder="e.g. 101A, ICU-09"
+              onKeyDown={(e) => e.key === "Enter" && onAddBed()} />
+            <button className="btn btn-primary" disabled={busy || !individualBed?.trim()}
+              onClick={onAddBed}>Add</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  PRE USERS MANAGER
@@ -1210,6 +1396,200 @@ function PreEditor({ user, blocks, onClose, onSaved, showToast }) {
 
           <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
             {busy ? "Saving…" : isNew ? "Create PRE user" : "Save changes"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  NURSE-IN-CHARGE MANAGER
+// ══════════════════════════════════════════════════════════════════════════════
+function NurseManager({ showToast }) {
+  const [nurses,   setNurses]   = useState([]);
+  const [stations, setStations] = useState([]);
+  const [editing,  setEditing]  = useState(null); // null | "new" | nurse obj
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async () => {
+    try {
+      const [u, s] = await Promise.all([api.mgrUsers(), api.mgrNursingStations()]);
+      setNurses((u.users || []).filter((x) => x.role === "NURSE"));
+      setStations(s.stations || []);
+    } catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 4 }}>
+        <div className="h1" style={{ fontSize: 18 }}>Nurse In-Charge</div>
+        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }}
+          onClick={() => setEditing("new")}>
+          <Ic d={icons.user} s={15} /> Add Nurse
+        </button>
+      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+        Nurse In-Charge accounts are scoped to a nursing station — they can only view and update beds in that station.
+      </div>
+
+      {nurses.map((n) => (
+        <div className="card" key={n.id} style={{ padding: 14, marginBottom: 10 }}>
+          <div className="row between">
+            <div className="row" style={{ gap: 10 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: "50%", background: "var(--teal)",
+                color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
+                fontWeight: 700, fontSize: 14, flexShrink: 0,
+              }}>N</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{n.name}</div>
+                <div className="dim" style={{ fontSize: 11 }}>
+                  @{n.username}
+                  {n.nursing_station
+                    ? <> · <span style={{ color: "var(--teal)" }}>{n.nursing_station}</span></>
+                    : <> · <span style={{ color: "var(--red)" }}>⚠ no station assigned</span></>}
+                </div>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="chip" onClick={() => setEditing(n)}>Edit</button>
+              <button className="chip" style={{ color: "var(--red)" }}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: `Delete "${n.name}"?`,
+                    message: `Username: ${n.username}\n\nThey will lose access immediately. This cannot be undone.`,
+                    confirmLabel: "Delete nurse",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                  try { await api.mgrDeleteNurse(n.id); load(); showToast(`Nurse "${n.name}" deleted`); }
+                  catch (e) { showToast(toastErr(e)); }
+                }}>Del</button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {nurses.length === 0 && (
+        <div className="card empty" style={{ marginTop: 14 }}>
+          <Ic d={icons.user} s={28} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No Nurse In-Charge accounts yet</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>Create one above to grant station-scoped access.</div>
+        </div>
+      )}
+
+      {editing !== null && (
+        <NurseEditor
+          nurse={editing === "new" ? null : editing}
+          stations={stations}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); showToast("Saved"); }}
+          showToast={showToast}
+        />
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
+  const isNew = !nurse;
+  const [username,       setUsername]       = useState(nurse?.username        || "");
+  const [name,           setName]           = useState(nurse?.name            || "");
+  const [password,       setPassword]       = useState("");
+  const [nursingStation, setNursingStation] = useState(nurse?.nursing_station || "");
+  const [customStation,  setCustomStation]  = useState("");
+  const [busy,           setBusy]           = useState(false);
+
+  // If existing nurse has a station not in the dropdown list, put it in custom
+  useEffect(() => {
+    if (nurse?.nursing_station && !stations.includes(nurse.nursing_station)) {
+      setNursingStation("__custom__");
+      setCustomStation(nurse.nursing_station);
+    }
+  }, []);
+
+  const resolvedStation = nursingStation === "__custom__" ? customStation.trim() : nursingStation;
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Display name is required"); return; }
+    if (!resolvedStation) { showToast("Nursing station is required"); return; }
+    if (isNew && (!username.trim() || !password)) {
+      showToast("Username and password are required for new accounts"); return;
+    }
+    setBusy(true);
+    try {
+      if (isNew) {
+        await api.mgrCreateNurse({ username: username.trim().toLowerCase(), password, name: name.trim(), nursingStation: resolvedStation });
+      } else {
+        const data = { name: name.trim(), nursingStation: resolvedStation };
+        if (password) data.password = password;
+        await api.mgrEditNurse(nurse.id, data);
+      }
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>{isNew ? "New Nurse In-Charge" : "Edit " + nurse.name}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Display name</label>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nurse Priya" />
+          <div style={{ height: 12 }} />
+
+          {isNew && (
+            <>
+              <label className="label">Username <span className="dim" style={{ fontSize: 11 }}>(for login)</span></label>
+              <input className="field" value={username} autoCapitalize="none"
+                onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="nurse_gm" />
+              <div style={{ height: 12 }} />
+            </>
+          )}
+
+          <label className="label">{isNew ? "Password" : "New password (blank = keep current)"}</label>
+          <input className="field" type="text" value={password}
+            onChange={(e) => setPassword(e.target.value)} placeholder="••••••" />
+          <div style={{ height: 12 }} />
+
+          <label className="label">Nursing station</label>
+          {stations.length > 0 ? (
+            <>
+              <select className="field" value={nursingStation} onChange={(e) => setNursingStation(e.target.value)}>
+                <option value="">— Select station —</option>
+                {stations.map((s) => <option key={s} value={s}>{s}</option>)}
+                <option value="__custom__">Other (type below)</option>
+              </select>
+              {nursingStation === "__custom__" && (
+                <>
+                  <div style={{ height: 8 }} />
+                  <input className="field" value={customStation}
+                    onChange={(e) => setCustomStation(e.target.value)}
+                    placeholder="e.g. General Medicine" />
+                </>
+              )}
+            </>
+          ) : (
+            <input className="field" value={nursingStation}
+              onChange={(e) => setNursingStation(e.target.value)}
+              placeholder="e.g. General Medicine" />
+          )}
+          <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+            Stations come from ward nursing_station field. Set them in Ward settings.
+          </div>
+          <div style={{ height: 16 }} />
+
+          <button className="btn btn-primary btn-block" disabled={busy} onClick={save}>
+            {busy ? "Saving…" : isNew ? "Create Nurse In-Charge" : "Save changes"}
           </button>
           <div style={{ height: 14 }} />
         </div>

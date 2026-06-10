@@ -71,6 +71,12 @@ export const api = {
   mgrHistoryDates: () => req("/manager/history/dates"),
   mgrHistory: (date, blockId) =>
     req(`/manager/history?date=${date}${blockId != null ? "&blockId=" + blockId : ""}`),
+  // ── manager — wards ──────────────────────────────────────────────────────────
+  mgrNursingStations: () => req("/manager/nursing-stations"),
+  // ── manager — nurse users ────────────────────────────────────────────────────
+  mgrCreateNurse: (data) => req("/manager/nurses", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditNurse: (id, data) => req(`/manager/nurses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteNurse: (id) => req(`/manager/nurses/${id}`, { method: "DELETE" }),
   // ── manager — bed details (create/configure only) ────────────────────────────
   wardBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
@@ -79,12 +85,14 @@ export const api = {
     const qs = params.toString();
     return req(`/manager/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  generateBeds: (wardId, data) =>
-    req(`/manager/wards/${wardId}/generate-beds`, { method: "POST", body: JSON.stringify(data) }),
-  addBed: (wardId, bedNumber) =>
-    req(`/manager/wards/${wardId}/beds`, { method: "POST", body: JSON.stringify({ bedNumber }) }),
-  renameBed: (bedId, bedNumber) =>
-    req(`/manager/beds/${bedId}/number`, { method: "PATCH", body: JSON.stringify({ bedNumber }) }),
+  generateBeds: (wardId, bedNames) =>
+    req(`/manager/wards/${wardId}/generate-beds`, { method: "POST", body: JSON.stringify({ bedNames }) }),
+  addBed: (wardId, bedName) =>
+    req(`/manager/wards/${wardId}/beds`, { method: "POST", body: JSON.stringify({ bedName }) }),
+  renameBed: (bedId, bedName) =>
+    req(`/manager/beds/${bedId}/name`, { method: "PATCH", body: JSON.stringify({ bedName }) }),
+  updateBedMaster: (bedId, data) =>
+    req(`/manager/beds/${bedId}/master`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteBed: (bedId) => req(`/manager/beds/${bedId}`, { method: "DELETE" }),
   // ── PRE — bed status management ──────────────────────────────────────────────
   preBeds: (wardId, opts = {}) => {
@@ -96,6 +104,17 @@ export const api = {
   },
   preUpdateBedStatus: (bedId, physicalStatus, reservationStatus) =>
     req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus }) }),
+  // ── Nurse — bed management ───────────────────────────────────────────────────
+  nurseMe: () => req("/nurse/me"),
+  nurseBeds: (wardId, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
+    const qs = params.toString();
+    return req(`/nurse/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
+  },
+  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus) =>
+    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
   cooViews: () => req("/coo/views"),

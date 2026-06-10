@@ -123,12 +123,15 @@ export default function Login({ onLogin, sessionMsg }) {
           {fpReady && <div className="dim" style={{ fontSize: 11, textAlign: "center", marginBottom: 14, textTransform: "uppercase", letterSpacing: ".06em" }}>or sign in with password</div>}
           <div className="seg" style={{ marginBottom: 18 }}>
             <button className={role === "PRE" ? "on" : ""} onClick={() => { setRole("PRE"); setErr(""); }}>PRE</button>
+            <button className={role === "NURSE" ? "on" : ""} onClick={() => { setRole("NURSE"); setErr(""); }}>Nurse</button>
             <button className={role === "MANAGER" ? "on" : ""} onClick={() => { setRole("MANAGER"); setErr(""); }}>Manager</button>
             <button className={role === "COO" ? "on" : ""} onClick={() => { setRole("COO"); setErr(""); }}>COO</button>
           </div>
 
           <label className="label">Username</label>
-          <input className="field" placeholder={role === "PRE" ? "e.g. pre1" : role === "MANAGER" ? "manager" : "coo"} value={u}
+          <input className="field"
+            placeholder={role === "PRE" ? "e.g. pre1" : role === "NURSE" ? "e.g. nurse_gm" : role === "MANAGER" ? "manager" : "coo"}
+            value={u}
                  autoCapitalize="none" autoCorrect="off"
                  onChange={(e) => { setU(e.target.value); setErr(""); }} />
           <div style={{ height: 14 }} />

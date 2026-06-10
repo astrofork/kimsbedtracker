@@ -387,6 +387,18 @@ function MyMap({ data }) {
 }
 
 // ── dual-state bed color/label helpers ────────────────────────────────────────
+function naturalSort(a, b) {
+  const re = /(\d+)/g;
+  const ap = a.split(re), bp = b.split(re);
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    const ai = ap[i] ?? "", bi = bp[i] ?? "";
+    const an = parseInt(ai, 10), bn = parseInt(bi, 10);
+    if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+    if (ai !== bi) return ai.localeCompare(bi);
+  }
+  return 0;
+}
+
 function bedStateColor(physical, reservation) {
   if (physical === "VACANT"   && reservation === "NONE")     return "var(--green)";
   if (physical === "VACANT"   && reservation === "RESERVED") return "var(--amber)";
@@ -437,7 +449,7 @@ const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
       onMouseUp={onClick ? (e) => { e.currentTarget.style.opacity = "1"; } : undefined}
     >
       <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
-        {bed.bed_number}
+        {bed.bed_name}
       </div>
       <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
     </div>
@@ -480,7 +492,7 @@ function BedEditDialog({ bed, onSave, onClose }) {
         {/* Header */}
         <div className="row between" style={{ marginBottom: 18 }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>Bed {bed.bed_number}</div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>Bed {bed.bed_name}</div>
             <div style={{ fontSize: 12, color, fontWeight: 700, marginTop: 2 }}>{code} · {bedStateLabel(physical, reservation)}</div>
           </div>
           <div style={{
@@ -572,9 +584,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
   useEffect(() => { load(); }, [load]);
 
   const sortedBeds = [...beds].sort((a, b) => {
-    const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
-    return a.bed_number.localeCompare(b.bed_number);
+    return naturalSort(a.bed_name, b.bed_name);
   });
 
   const counts = { vn: 0, vr: 0, on_: 0, or_: 0 };

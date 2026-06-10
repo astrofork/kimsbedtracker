@@ -7,6 +7,18 @@ import {
 
 const HOSPITAL_NAME = "KIMS Hospitals";
 
+function naturalSort(a, b) {
+  const re = /(\d+)/g;
+  const ap = a.split(re), bp = b.split(re);
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    const ai = ap[i] ?? "", bi = bp[i] ?? "";
+    const an = parseInt(ai, 10), bn = parseInt(bi, 10);
+    if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
+    if (ai !== bi) return ai.localeCompare(bi);
+  }
+  return 0;
+}
+
 function fmtReminderLabel(hhmm) {
   const [h] = hhmm.split(":").map(Number);
   const ap = h < 12 ? "AM" : "PM", hh = h % 12 === 0 ? 12 : h % 12;
@@ -1037,10 +1049,7 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                   if (filter === "R")   return b.reservation_status === "RESERVED";
                   return true;
                 })
-                .sort((a, b) => {
-                  const na = parseInt(a.bed_number, 10), nb = parseInt(b.bed_number, 10);
-                  return !isNaN(na) && !isNaN(nb) ? na - nb : a.bed_number.localeCompare(b.bed_number);
-                });
+                .sort((a, b) => naturalSort(a.bed_name, b.bed_name));
               if (wardBeds.length === 0) return null;
               return (
                 <div key={w.ward} style={{ marginBottom: 18 }}>
@@ -1058,7 +1067,7 @@ function BlockBedsSheet({ pre, label, wards, onClose }) {
                           background: "var(--panel-2)", border: `2px solid ${color}`,
                         }}>
                           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
-                            {bed.bed_number}
+                            {bed.bed_name}
                           </div>
                           <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
                         </div>
