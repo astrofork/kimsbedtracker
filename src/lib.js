@@ -54,11 +54,16 @@ export const api = {
   cooCompliance: () => req("/coo/compliance"),
   // ── manager — KPIs ──────────────────────────────────────────────────────────
   mgrKpis: () => req("/manager/kpis"),
-  // ── manager — blocks ────────────────────────────────────────────────────────
-  mgrBlocks: () => req("/manager/blocks"),
-  mgrCreateBlock: (data) => req("/manager/blocks", { method: "POST", body: JSON.stringify(data) }),
-  mgrEditBlock: (id, data) => req(`/manager/blocks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  mgrDeleteBlock: (id) => req(`/manager/blocks/${id}`, { method: "DELETE" }),
+  // ── manager — building blocks ────────────────────────────────────────────────
+  mgrBuildingBlocks: () => req("/manager/building-blocks"),
+  mgrCreateBuildingBlock: (data) => req("/manager/building-blocks", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditBuildingBlock: (id, data) => req(`/manager/building-blocks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteBuildingBlock: (id) => req(`/manager/building-blocks/${id}`, { method: "DELETE" }),
+  // ── manager — floors ─────────────────────────────────────────────────────────
+  mgrFloors: () => req("/manager/floors"),
+  mgrCreateFloor: (data) => req("/manager/floors", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditFloor: (id, data) => req(`/manager/floors/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteFloor: (id) => req(`/manager/floors/${id}`, { method: "DELETE" }),
   // ── manager — wards ─────────────────────────────────────────────────────────
   mgrUsers: () => req("/manager/users"),
   mgrWards: () => req("/manager/wards"),
@@ -71,14 +76,25 @@ export const api = {
   mgrDeletePre: (id) => req(`/manager/pre/${id}`, { method: "DELETE" }),
   // ── manager — history ────────────────────────────────────────────────────────
   mgrHistoryDates: () => req("/manager/history/dates"),
-  mgrHistory: (date, blockId) =>
-    req(`/manager/history?date=${date}${blockId != null ? "&blockId=" + blockId : ""}`),
-  // ── manager — wards ──────────────────────────────────────────────────────────
+  mgrHistory: (date, floorId) =>
+    req(`/manager/history?date=${date}${floorId != null ? "&floorId=" + floorId : ""}`),
+  // ── manager — nursing stations ───────────────────────────────────────────────
   mgrNursingStations: () => req("/manager/nursing-stations"),
+  mgrCreateStation: (data) => req("/manager/nursing-stations", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditStation: (id, data) => req(`/manager/nursing-stations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrAssignStationWards: (id, wardIds) => req(`/manager/nursing-stations/${id}/wards`, { method: "PUT", body: JSON.stringify({ wardIds }) }),
+  mgrDeleteStation: (id) => req(`/manager/nursing-stations/${id}`, { method: "DELETE" }),
   // ── manager — nurse users ────────────────────────────────────────────────────
   mgrCreateNurse: (data) => req("/manager/nurses", { method: "POST", body: JSON.stringify(data) }),
   mgrEditNurse: (id, data) => req(`/manager/nurses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeleteNurse: (id) => req(`/manager/nurses/${id}`, { method: "DELETE" }),
+  // ── manager — PRE Blocks ─────────────────────────────────────────────────────
+  mgrPreBlocks: () => req("/manager/pre-blocks"),
+  mgrPreBlock: (id) => req(`/manager/pre-blocks/${id}`),
+  mgrCreatePreBlock: (data) => req("/manager/pre-blocks", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditPreBlock: (id, data) => req(`/manager/pre-blocks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrSetPreBlockStatus: (id, status) => req(`/manager/pre-blocks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  mgrDeletePreBlock: (id) => req(`/manager/pre-blocks/${id}`, { method: "DELETE" }),
   // ── manager — bed details (create/configure only) ────────────────────────────
   wardBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();

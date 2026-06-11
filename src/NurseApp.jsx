@@ -3,6 +3,35 @@ import { api, toastErr } from "./lib.js";
 import { Ic, icons, ThemeToggle, useModal } from "./ui.jsx";
 
 // ── helpers ────────────────────────────────────────────────────────────────────
+
+function BedBadges({ bed }) {
+  if (!bed) return null;
+  const isNC  = bed.bed_type === "Non-Census";
+  const isRv  = bed.unit_type === "Renova";
+  const notOp = !bed.operational_status;
+  return (
+    <div style={{ display: "flex", gap: 2, justifyContent: "center", marginTop: 3, alignItems: "center" }}>
+      <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: isNC ? "var(--ink-3)" : "#0EA5E9" }}>
+        {isNC ? "NC" : "C"}
+      </span>
+      {bed.unit_type && (
+        <>
+          <span style={{ fontSize: 6, color: "var(--line)" }}>·</span>
+          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: isRv ? "#F59E0B" : "var(--teal)" }}>
+            {isRv ? "Rv" : "K"}
+          </span>
+        </>
+      )}
+      {notOp && (
+        <>
+          <span style={{ fontSize: 6, color: "var(--line)" }}>·</span>
+          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: "var(--red)" }}>N/O</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function naturalSort(a, b) {
   const re = /(\d+)/g;
   const ap = a.split(re), bp = b.split(re);
@@ -49,40 +78,48 @@ function wardCounts(beds) {
   return { vn, vr, on: on_, or: or_ };
 }
 
-// ── Bed grid card ──────────────────────────────────────────────────────────────
+// ── Bed row cell — colored icon circle + name ─────────────────────────────────
 const BedCard = React.memo(function BedCard({ bed, onClick }) {
-  const p = bed.physical_status, r = bed.reservation_status;
-  const color = bedStateColor(p, r);
-  const code  = bedStateCode(p, r);
+  const color = bedStateColor(bed.physical_status, bed.reservation_status);
+  const dimmed = bed.operational_status === false;
   return (
     <div role="button" tabIndex={0} onClick={onClick}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClick()}
       style={{
-        background: "var(--panel-2)", border: `2px solid ${color}`,
-        borderRadius: 10, padding: "7px 4px 8px", textAlign: "center",
-        cursor: "pointer", transition: "transform 0.1s, opacity 0.1s",
-        userSelect: "none", minWidth: 0,
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "10px 8px",
+        borderRight: "1px solid var(--line)",
+        borderBottom: "1px solid var(--line)",
+        cursor: "pointer",
+        userSelect: "none",
+        opacity: dimmed ? 0.5 : 1,
+        WebkitTapHighlightColor: "transparent",
+        transition: "background 0.1s",
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.05)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-      onMouseDown={(e)  => { e.currentTarget.style.opacity = "0.75"; }}
-      onMouseUp={(e)    => { e.currentTarget.style.opacity = "1"; }}
+      onTouchStart={(e) => { e.currentTarget.style.background = "var(--panel-2)"; }}
+      onTouchEnd={(e)   => { e.currentTarget.style.background = "transparent"; }}
     >
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
-        {bed.bed_name}
+      <div style={{
+        width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+        background: color,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: `0 2px 6px ${color}55`,
+      }}>
+        <Ic d={icons.bed} s={14} style={{ color: "#fff" }} />
       </div>
-      <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
+      <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {bed.bed_name}
+      </span>
     </div>
   );
 });
 
-// ── Bed edit dialog ────────────────────────────────────────────────────────────
-function BedEditDialog({ bed, onSave, onClose }) {
+// ── Bed detail bottom sheet ────────────────────────────────────────────────────
+function BedDetailSheet({ bed, onSave, onClose }) {
   const [physical,    setPhysical]    = useState(bed.physical_status);
   const [reservation, setReservation] = useState(bed.reservation_status);
   const [saving,      setSaving]      = useState(false);
   const color = bedStateColor(physical, reservation);
-  const code  = bedStateCode(physical, reservation);
 
   const handleSave = async () => {
     setSaving(true);
@@ -91,40 +128,60 @@ function BedEditDialog({ bed, onSave, onClose }) {
     onClose();
   };
 
+  const classificationBadges = [
+    [bed.bed_type || "Census", bed.bed_type === "Non-Census" ? "var(--ink-3)" : "#0EA5E9"],
+    ...(bed.unit_type ? [[bed.unit_type, bed.unit_type === "Renova" ? "#F59E0B" : "var(--teal)"]] : []),
+    [bed.operational_status !== false ? "Operational" : "Non-Operational",
+     bed.operational_status !== false ? "var(--green)" : "var(--red)"],
+  ];
+
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
       display: "flex", alignItems: "center", justifyContent: "center",
       zIndex: 1200, padding: 20,
     }} onClick={onClose}>
       <div style={{
-        background: "var(--panel)", borderRadius: 18, padding: "22px 20px 18px",
-        width: "100%", maxWidth: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+        background: "var(--panel)",
+        borderRadius: 20,
+        width: "100%", maxWidth: 340,
+        padding: "24px 20px 20px",
+        maxHeight: "90vh", overflowY: "auto",
         animation: "slideUp .18s both",
+        boxShadow: "0 8px 40px rgba(0,0,0,0.22)",
       }} onClick={(e) => e.stopPropagation()}>
-        <div className="row between" style={{ marginBottom: 18 }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>Bed {bed.bed_name}</div>
-            <div style={{ fontSize: 12, color, fontWeight: 700, marginTop: 2 }}>
-              {code} · {bedStateLabel(physical, reservation)}
-            </div>
-          </div>
+
+        {/* Bed hero */}
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
           <div style={{
-            width: 36, height: 36, borderRadius: "50%",
-            background: color + "22", border: `2px solid ${color}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 900, fontSize: 12, color,
-          }}>{code}</div>
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            minWidth: 72, height: 72, borderRadius: 18, padding: "0 12px",
+            background: color + "1a", border: `3px solid ${color}`,
+            fontSize: 26, fontWeight: 900, color, marginBottom: 10,
+            letterSpacing: "-0.5px",
+          }}>{bed.bed_name}</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color }}>{bedStateLabel(physical, reservation)}</div>
         </div>
 
+        {/* Classification badges — read-only */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 24, flexWrap: "wrap", justifyContent: "center" }}>
+          {classificationBadges.map(([label, badgeColor]) => (
+            <span key={label} style={{
+              fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 8,
+              background: badgeColor + "18", color: badgeColor, border: `1px solid ${badgeColor}40`,
+            }}>{label}</span>
+          ))}
+        </div>
+
+        {/* Physical status */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
             Physical Status
           </div>
-          <div className="row" style={{ gap: 8 }}>
-            {[["VACANT","var(--green)","Vacant"],["OCCUPIED","var(--red)","Occupied"]].map(([val,c,lbl]) => (
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["VACANT", "var(--green)", "Vacant"], ["OCCUPIED", "var(--red)", "Occupied"]].map(([val, c, lbl]) => (
               <button key={val} onClick={() => setPhysical(val)} style={{
-                flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 700,
                 border: `2px solid ${c}`,
                 background: physical === val ? c : "transparent",
                 color: physical === val ? "#fff" : c,
@@ -134,14 +191,15 @@ function BedEditDialog({ bed, onSave, onClose }) {
           </div>
         </div>
 
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+        {/* Reservation status */}
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
             Reservation
           </div>
-          <div className="row" style={{ gap: 8 }}>
-            {[["NONE","var(--ink-3)","None"],["RESERVED","var(--amber)","Reserved"]].map(([val,c,lbl]) => (
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["NONE", "var(--ink-3)", "None"], ["RESERVED", "var(--amber)", "Reserved"]].map(([val, c, lbl]) => (
               <button key={val} onClick={() => setReservation(val)} style={{
-                flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 700,
                 border: `2px solid ${c}`,
                 background: reservation === val ? c : "transparent",
                 color: reservation === val ? "#fff" : c,
@@ -151,14 +209,17 @@ function BedEditDialog({ bed, onSave, onClose }) {
           </div>
         </div>
 
-        <div className="row" style={{ gap: 8 }}>
-          <button className="chip" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>Cancel</button>
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="chip" style={{ flex: 1, justifyContent: "center", padding: "11px 0", fontSize: 14 }} onClick={onClose}>
+            Cancel
+          </button>
           <button onClick={handleSave} disabled={saving} style={{
-            flex: 1, padding: "10px 0", borderRadius: 10, fontWeight: 700,
+            flex: 2, padding: "11px 0", borderRadius: 12, fontWeight: 700,
             fontSize: 14, background: "var(--teal)", color: "#fff",
             border: "none", cursor: saving ? "not-allowed" : "pointer",
             opacity: saving ? 0.7 : 1, transition: "opacity 0.15s",
-          }}>{saving ? "Saving…" : "Save"}</button>
+          }}>{saving ? "Saving…" : "Save changes"}</button>
         </div>
       </div>
     </div>
@@ -168,35 +229,52 @@ function BedEditDialog({ bed, onSave, onClose }) {
 // ── Bed manage modal — full bed grid for one ward ──────────────────────────────
 function NurseBedModal({ ward, onSave, onClose }) {
   useModal(onClose);
-  const [beds,       setBeds]       = useState(ward.beds || []);
+  // Annotate each bed with ward-level unit_type so badges + filters work uniformly
+  const [beds, setBeds] = useState(() =>
+    (ward.beds || []).map(b => ({ ...b, unit_type: ward.unit_type || null }))
+  );
   const [filter,     setFilter]     = useState("ALL");
   const [editingBed, setEditingBed] = useState(null);
 
   const sorted = [...beds].sort((a, b) => naturalSort(a.bed_name, b.bed_name));
 
   const displayed = sorted.filter((b) => {
-    if (filter === "V")   return b.physical_status === "VACANT"   && b.reservation_status === "NONE";
-    if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
-    if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
-    if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
+    if (filter === "KIMS")     return b.unit_type === "KIMS";
+    if (filter === "Renova")   return b.unit_type === "Renova";
+    if (filter === "Op")       return !!b.operational_status;
+    if (filter === "Non-Op")   return !b.operational_status;
+    if (filter === "Vacant")   return b.physical_status === "VACANT";
+    if (filter === "Occupied") return b.physical_status === "OCCUPIED";
+    if (filter === "Reserved") return b.reservation_status === "RESERVED";
     return true;
   });
 
-  const counts = wardCounts(sorted);
+  const fc = { ALL: sorted.length, KIMS: 0, Renova: 0, Op: 0, "Non-Op": 0, Vacant: 0, Occupied: 0, Reserved: 0 };
+  for (const b of sorted) {
+    if (b.unit_type === "Renova") fc["Renova"]++;
+    else if (b.unit_type === "KIMS") fc["KIMS"]++;
+    if (b.operational_status !== false) fc["Op"]++; else fc["Non-Op"]++;
+    if (b.physical_status === "VACANT") fc["Vacant"]++; else fc["Occupied"]++;
+    if (b.reservation_status === "RESERVED") fc["Reserved"]++;
+  }
 
   const handleSave = async (bedId, physical, reservation) => {
     await onSave(bedId, physical, reservation);
+    // Preserve unit_type and other master fields via spread
     setBeds((prev) => prev.map((b) =>
       b.id === bedId ? { ...b, physical_status: physical, reservation_status: reservation } : b
     ));
   };
 
   const FILTERS = [
-    { key: "ALL", label: "All",       count: sorted.length },
-    { key: "V",   label: "Vacant",    count: counts.vn },
-    { key: "V+R", label: "Vac+Res",   count: counts.vr },
-    { key: "O",   label: "Occupied",  count: counts.on },
-    { key: "O+R", label: "Occ+Res",   count: counts.or },
+    { key: "ALL",      label: "All",         color: "var(--ink)"  },
+    { key: "KIMS",     label: "KIMS",        color: "var(--teal)" },
+    { key: "Renova",   label: "Renova",      color: "#F59E0B"     },
+    { key: "Op",       label: "Operational", color: "var(--green)"},
+    { key: "Non-Op",   label: "Non-Op",      color: "var(--red)"  },
+    { key: "Vacant",   label: "Vacant",      color: "var(--green)"},
+    { key: "Occupied", label: "Occupied",    color: "var(--red)"  },
+    { key: "Reserved", label: "Reserved",    color: "var(--amber)"},
   ];
 
   return (
@@ -209,22 +287,24 @@ function NurseBedModal({ ward, onSave, onClose }) {
             <div>
               <div style={{ fontWeight: 700, fontSize: 17 }}>{ward.name}</div>
               <div className="dim" style={{ fontSize: 12 }}>
-                {sorted.length} beds · {counts.vn} vacant · {counts.on + counts.or} occupied
+                {sorted.length} beds · {fc.Vacant} vacant · {fc.Occupied} occupied
               </div>
             </div>
             <button className="chip" onClick={onClose}>Close</button>
           </div>
 
-          {/* Filter pills */}
-          <div style={{ display: "flex", gap: 6, marginTop: 10, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
-            {FILTERS.map(({ key, label, count }) => (
+          {/* Filter pills — wrap, evenly spaced */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10, marginBottom: 14 }}>
+            {FILTERS.map(({ key, label, color }) => (
               <button key={key} onClick={() => setFilter(key)} style={{
-                padding: "5px 11px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-                border: "1.5px solid " + (filter === key ? "var(--teal)" : "var(--line)"),
-                background: filter === key ? "var(--teal)" : "transparent",
-                color: filter === key ? "#fff" : "var(--ink-2)",
-                cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.15s", flexShrink: 0,
-              }}>{label} {count > 0 && <span style={{ opacity: 0.8 }}>({count})</span>}</button>
+                padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+                border: `1.5px solid ${color}`,
+                background: filter === key ? color : "transparent",
+                color: filter === key ? "#fff" : color,
+                cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+              }}>
+                {label}{fc[key] > 0 ? ` (${fc[key]})` : ""}
+              </button>
             ))}
           </div>
 
@@ -236,8 +316,9 @@ function NurseBedModal({ ward, onSave, onClose }) {
           ) : (
             <div style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(56px, 1fr))",
-              gap: 8,
+              gridTemplateColumns: "repeat(3, 1fr)",
+              borderTop: "1px solid var(--line)",
+              borderLeft: "1px solid var(--line)",
             }}>
               {displayed.map((bed) => (
                 <BedCard key={bed.id} bed={bed} onClick={() => setEditingBed(bed)} />
@@ -249,7 +330,7 @@ function NurseBedModal({ ward, onSave, onClose }) {
       </div>
 
       {editingBed && (
-        <BedEditDialog
+        <BedDetailSheet
           bed={editingBed}
           onSave={handleSave}
           onClose={() => setEditingBed(null)}

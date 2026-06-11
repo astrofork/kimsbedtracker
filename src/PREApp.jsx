@@ -386,6 +386,35 @@ function MyMap({ data }) {
   );
 }
 
+// ── bed classification badges (read-only, set by Manager only) ────────────────
+function BedBadges({ bed }) {
+  if (!bed) return null;
+  const isNC  = bed.bed_type === "Non-Census";
+  const isRv  = bed.unit_type === "Renova";
+  const notOp = !bed.operational_status;
+  return (
+    <div style={{ display: "flex", gap: 2, justifyContent: "center", marginTop: 3, alignItems: "center" }}>
+      <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: isNC ? "var(--ink-3)" : "#0EA5E9" }}>
+        {isNC ? "NC" : "C"}
+      </span>
+      {bed.unit_type && (
+        <>
+          <span style={{ fontSize: 6, color: "var(--line)" }}>·</span>
+          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: isRv ? "#F59E0B" : "var(--teal)" }}>
+            {isRv ? "Rv" : "K"}
+          </span>
+        </>
+      )}
+      {notOp && (
+        <>
+          <span style={{ fontSize: 6, color: "var(--line)" }}>·</span>
+          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: "var(--red)" }}>N/O</span>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── dual-state bed color/label helpers ────────────────────────────────────────
 function naturalSort(a, b) {
   const re = /(\d+)/g;
@@ -421,11 +450,10 @@ function bedStateCode(physical, reservation) {
   return "?";
 }
 
-// ── Compact bed card — used in both View and Manage grids ─────────────────────
+// ── Bed row cell — colored icon circle + name ─────────────────────────────────
 const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
-  const p = bed.physical_status, r = bed.reservation_status;
-  const color = bedStateColor(p, r);
-  const code  = bedStateCode(p, r);
+  const color = bedStateColor(bed.physical_status, bed.reservation_status);
+  const dimmed = bed.operational_status === false;
   return (
     <div
       onClick={onClick}
@@ -433,37 +461,41 @@ const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
       style={{
-        background: "var(--panel-2)",
-        border: `2px solid ${color}`,
-        borderRadius: 10,
-        padding: "7px 4px 8px",
-        textAlign: "center",
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "10px 8px",
+        borderRight: "1px solid var(--line)",
+        borderBottom: "1px solid var(--line)",
         cursor: onClick ? "pointer" : "default",
-        transition: "transform 0.1s, opacity 0.1s",
         userSelect: "none",
-        minWidth: 0,
+        opacity: dimmed ? 0.5 : 1,
+        WebkitTapHighlightColor: "transparent",
+        transition: "background 0.1s",
       }}
-      onMouseEnter={onClick ? (e) => { e.currentTarget.style.transform = "scale(1.05)"; } : undefined}
-      onMouseLeave={onClick ? (e) => { e.currentTarget.style.transform = "scale(1)"; } : undefined}
-      onMouseDown={onClick ? (e) => { e.currentTarget.style.opacity = "0.75"; } : undefined}
-      onMouseUp={onClick ? (e) => { e.currentTarget.style.opacity = "1"; } : undefined}
+      onTouchStart={onClick ? (e) => { e.currentTarget.style.background = "var(--panel-2)"; } : undefined}
+      onTouchEnd={onClick   ? (e) => { e.currentTarget.style.background = "transparent"; }   : undefined}
     >
-      <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 3, lineHeight: 1.2 }}>
-        {bed.bed_name}
+      <div style={{
+        width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+        background: color,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: `0 2px 6px ${color}55`,
+      }}>
+        <Ic d={icons.bed} s={14} style={{ color: "#fff" }} />
       </div>
-      <div style={{ fontSize: 12, fontWeight: 900, color, lineHeight: 1 }}>{code}</div>
+      <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {bed.bed_name}
+      </span>
     </div>
   );
 });
 
-// ── Edit dialog — opens when a bed card is clicked in Manage mode ─────────────
-function BedEditDialog({ bed, onSave, onClose }) {
+// ── Bed detail bottom sheet — opens when a bed card is tapped ─────────────────
+function BedDetailSheet({ bed, onSave, onClose }) {
   const [physical,    setPhysical]    = useState(bed.physical_status);
   const [reservation, setReservation] = useState(bed.reservation_status);
   const [saving,      setSaving]      = useState(false);
 
   const color = bedStateColor(physical, reservation);
-  const code  = bedStateCode(physical, reservation);
 
   async function handleSave() {
     setSaving(true);
@@ -472,46 +504,60 @@ function BedEditDialog({ bed, onSave, onClose }) {
     onClose();
   }
 
+  const classificationBadges = [
+    [bed.bed_type || "Census", bed.bed_type === "Non-Census" ? "var(--ink-3)" : "#0EA5E9"],
+    ...(bed.unit_type ? [[bed.unit_type, bed.unit_type === "Renova" ? "#F59E0B" : "var(--teal)"]] : []),
+    [bed.operational_status !== false ? "Operational" : "Non-Operational",
+     bed.operational_status !== false ? "var(--green)" : "var(--red)"],
+  ];
+
   return (
-    <div
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        zIndex: 1100, padding: 20,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: "var(--panel)", borderRadius: 18, padding: "22px 20px 18px",
-          width: "100%", maxWidth: 300, boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
-          animation: "slideUp .18s both",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="row between" style={{ marginBottom: 18 }}>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>Bed {bed.bed_name}</div>
-            <div style={{ fontSize: 12, color, fontWeight: 700, marginTop: 2 }}>{code} · {bedStateLabel(physical, reservation)}</div>
-          </div>
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      zIndex: 1100, padding: 20,
+    }} onClick={onClose}>
+      <div style={{
+        background: "var(--panel)",
+        borderRadius: 20,
+        width: "100%", maxWidth: 340,
+        padding: "24px 20px 20px",
+        maxHeight: "90vh", overflowY: "auto",
+        animation: "slideUp .18s both",
+        boxShadow: "0 8px 40px rgba(0,0,0,0.22)",
+      }} onClick={(e) => e.stopPropagation()}>
+
+        {/* Bed hero */}
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
           <div style={{
-            width: 36, height: 36, borderRadius: "50%",
-            background: color + "22", border: `2px solid ${color}`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontWeight: 900, fontSize: 12, color,
-          }}>{code}</div>
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            minWidth: 72, height: 72, borderRadius: 18, padding: "0 12px",
+            background: color + "1a", border: `3px solid ${color}`,
+            fontSize: 26, fontWeight: 900, color, marginBottom: 10,
+            letterSpacing: "-0.5px",
+          }}>{bed.bed_name}</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color }}>{bedStateLabel(physical, reservation)}</div>
+        </div>
+
+        {/* Classification — read-only */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 24, flexWrap: "wrap", justifyContent: "center" }}>
+          {classificationBadges.map(([label, badgeColor]) => (
+            <span key={label} style={{
+              fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 8,
+              background: badgeColor + "18", color: badgeColor, border: `1px solid ${badgeColor}40`,
+            }}>{label}</span>
+          ))}
         </div>
 
         {/* Physical Status */}
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
             Physical Status
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
             {[["VACANT","var(--green)","Vacant"],["OCCUPIED","var(--red)","Occupied"]].map(([val, c, lbl]) => (
               <button key={val} onClick={() => setPhysical(val)} style={{
-                flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 700,
                 border: `2px solid ${c}`,
                 background: physical === val ? c : "transparent",
                 color: physical === val ? "#fff" : c,
@@ -522,14 +568,14 @@ function BedEditDialog({ bed, onSave, onClose }) {
         </div>
 
         {/* Reservation Status */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
             Reservation
           </div>
-          <div className="row" style={{ gap: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
             {[["NONE","var(--ink-3)","None"],["RESERVED","var(--amber)","Reserved"]].map(([val, c, lbl]) => (
               <button key={val} onClick={() => setReservation(val)} style={{
-                flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 700,
                 border: `2px solid ${c}`,
                 background: reservation === val ? c : "transparent",
                 color: reservation === val ? "#fff" : c,
@@ -539,19 +585,17 @@ function BedEditDialog({ bed, onSave, onClose }) {
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="row" style={{ gap: 8 }}>
-          <button className="chip" style={{ flex: 1, justifyContent: "center" }} onClick={onClose}>
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="chip" style={{ flex: 1, justifyContent: "center", padding: "11px 0", fontSize: 14 }} onClick={onClose}>
             Cancel
           </button>
           <button onClick={handleSave} disabled={saving} style={{
-            flex: 1, padding: "10px 0", borderRadius: 10, fontWeight: 700,
+            flex: 2, padding: "11px 0", borderRadius: 12, fontWeight: 700,
             fontSize: 14, background: "var(--teal)", color: "#fff",
             border: "none", cursor: saving ? "not-allowed" : "pointer",
             opacity: saving ? 0.7 : 1, transition: "opacity 0.15s",
-          }}>
-            {saving ? "Saving…" : "Save"}
-          </button>
+          }}>{saving ? "Saving…" : "Save changes"}</button>
         </div>
       </div>
     </div>
@@ -576,10 +620,15 @@ function PreBedModal({ ward, initialTab, onClose }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setBeds((await api.preBeds(ward.id)).beds || []); }
+    try {
+      const result = await api.preBeds(ward.id);
+      // Annotate beds with ward-level unit_type so filter + badges work uniformly
+      const unitType = ward.unit_type || null;
+      setBeds((result.beds || []).map(b => ({ ...b, unit_type: unitType })));
+    }
     catch (e) { showToast(toastErr(e)); }
     finally { setLoading(false); }
-  }, [ward.id, showToast]);
+  }, [ward.id, ward.unit_type, showToast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -587,24 +636,18 @@ function PreBedModal({ ward, initialTab, onClose }) {
     return naturalSort(a.bed_name, b.bed_name);
   });
 
-  const counts = { vn: 0, vr: 0, on_: 0, or_: 0 };
-  for (const b of sortedBeds) {
-    if (b.physical_status === "VACANT"   && b.reservation_status === "NONE")     counts.vn++;
-    if (b.physical_status === "VACANT"   && b.reservation_status === "RESERVED") counts.vr++;
-    if (b.physical_status === "OCCUPIED" && b.reservation_status === "NONE")     counts.on_++;
-    if (b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED") counts.or_++;
-  }
-
   const displayed = sortedBeds.filter(b => {
-    if (filter === "V")   return b.physical_status === "VACANT"   && b.reservation_status === "NONE";
-    if (filter === "V+R") return b.physical_status === "VACANT"   && b.reservation_status === "RESERVED";
-    if (filter === "O")   return b.physical_status === "OCCUPIED" && b.reservation_status === "NONE";
-    if (filter === "O+R") return b.physical_status === "OCCUPIED" && b.reservation_status === "RESERVED";
-    if (filter === "R")   return b.reservation_status === "RESERVED";  // V+R + O+R combined
-    return true; // ALL
+    if (filter === "KIMS")     return b.unit_type === "KIMS";
+    if (filter === "Renova")   return b.unit_type === "Renova";
+    if (filter === "Op")       return !!b.operational_status;
+    if (filter === "Non-Op")   return !b.operational_status;
+    if (filter === "Vacant")   return b.physical_status === "VACANT";
+    if (filter === "Occupied") return b.physical_status === "OCCUPIED";
+    if (filter === "Reserved") return b.reservation_status === "RESERVED";
+    return true;
   });
 
-  // Optimistic update — snapshot restored on failure
+  // Optimistic update — snapshot restored on failure; unit_type preserved via spread
   const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus) => {
     let snapshot;
     setBeds(prev => {
@@ -635,46 +678,55 @@ function PreBedModal({ ward, initialTab, onClose }) {
   );
 
   // ── Shared grid renderer ─────────────────────────────────────────────────
-  function BedGrid({ clickable, showFilters }) {
-    const chips = [
-      { key: "ALL",  label: `All (${beds.length})`,               color: "var(--ink)" },
-      { key: "V",    label: `Vac (${counts.vn})`,                 color: "var(--green)" },
-      { key: "V+R",  label: `V+R (${counts.vr})`,                 color: "var(--amber)" },
-      { key: "O",    label: `Occ (${counts.on_})`,                color: "var(--red)" },
-      { key: "O+R",  label: `O+R (${counts.or_})`,                color: "#8B5CF6" },
-      { key: "R",    label: `Res (${counts.vr + counts.or_})`,    color: "var(--amber)" },
+  function BedGrid({ clickable }) {
+    const fc = { ALL: sortedBeds.length, KIMS: 0, Renova: 0, Op: 0, "Non-Op": 0, Vacant: 0, Occupied: 0, Reserved: 0 };
+    for (const b of sortedBeds) {
+      if (b.unit_type === "Renova") fc["Renova"]++;
+      else if (b.unit_type === "KIMS") fc["KIMS"]++;
+      if (b.operational_status !== false) fc["Op"]++; else fc["Non-Op"]++;
+      if (b.physical_status === "VACANT") fc["Vacant"]++; else fc["Occupied"]++;
+      if (b.reservation_status === "RESERVED") fc["Reserved"]++;
+    }
+    const CHIPS = [
+      { key: "ALL",      label: "All",         color: "var(--ink)"  },
+      { key: "KIMS",     label: "KIMS",        color: "var(--teal)" },
+      { key: "Renova",   label: "Renova",      color: "#F59E0B"     },
+      { key: "Op",       label: "Operational", color: "var(--green)"},
+      { key: "Non-Op",   label: "Non-Op",      color: "var(--red)"  },
+      { key: "Vacant",   label: "Vacant",      color: "var(--green)"},
+      { key: "Occupied", label: "Occupied",    color: "var(--red)"  },
+      { key: "Reserved", label: "Reserved",    color: "var(--amber)"},
     ];
-    // Manage tab always shows all beds (no filter applied)
-    const gridBeds = showFilters ? displayed : sortedBeds;
     return (
       <>
-        {/* Filter chips — View tab only. Active chip hides itself; others fill the row. */}
-        {showFilters && (
-          <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-            {chips.map(({ key, label, color }) => (
-              <button key={key} onClick={() => setFilter(key)} style={{
-                padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600,
-                border: `1.5px solid ${color}`,
-                background: filter === key ? color : "transparent",
-                color: filter === key ? "#fff" : color,
-                cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-              }}>{label}</button>
-            ))}
-          </div>
-        )}
+        {/* Filter pills — wrap, evenly spaced */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+          {CHIPS.map(({ key, label, color }) => (
+            <button key={key} onClick={() => setFilter(key)} style={{
+              padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
+              border: `1.5px solid ${color}`,
+              background: filter === key ? color : "transparent",
+              color: filter === key ? "#fff" : color,
+              cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
+            }}>
+              {label}{fc[key] > 0 ? ` (${fc[key]})` : ""}
+            </button>
+          ))}
+        </div>
 
         {/* Grid */}
-        {gridBeds.length === 0 ? (
+        {displayed.length === 0 ? (
           <div className="dim" style={{ textAlign: "center", padding: "18px 0", fontSize: 13 }}>
             No beds in this filter
           </div>
         ) : (
           <div style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
-            gap: 6,
+            gridTemplateColumns: "repeat(3, 1fr)",
+            borderTop: "1px solid var(--line)",
+            borderLeft: "1px solid var(--line)",
           }}>
-            {gridBeds.map((bed) => (
+            {displayed.map((bed) => (
               <BedGridCard
                 key={bed.id}
                 bed={bed}
@@ -718,16 +770,15 @@ function PreBedModal({ ward, initialTab, onClose }) {
 
 
           {/* Tab content */}
-          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} showFilters={tab === "view"} />}
+          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} />}
         </div>
       </div>
 
       {/* Bed edit dialog — rendered outside the sheet so it overlays everything */}
       {editingBed && (
-        <BedEditDialog
+        <BedDetailSheet
           bed={editingBed}
           onSave={async (bedId, physical, reservation) => {
-            // Keep editingBed state in sync so the dialog header updates live
             setEditingBed(prev => ({ ...prev, physical_status: physical, reservation_status: reservation }));
             await changeStatus(bedId, physical, reservation);
           }}
