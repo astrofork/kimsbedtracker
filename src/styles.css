@@ -199,3 +199,67 @@ input,select{font-family:inherit;}
 /* ── Toast ────────────────────────────────────────────────────────────────── */
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;background:var(--ink);color:var(--panel);padding:11px 18px;border-radius:999px;font-size:13px;font-weight:600;z-index:90;box-shadow:var(--shadow-md);}
 .empty{text-align:center;padding:40px 20px;color:var(--ink-3);}
+
+/* ── Glass look — classic glassmorphism layer ─────────────────────────────────
+   Cards become translucent panes over soft ambient gradient blobs.
+   Per-theme vars keep contrast correct in dark and light themes. */
+:root {
+  --glass-bg:rgba(17,24,31,.66);
+  --glass-edge:rgba(255,255,255,.07);
+  --glass-shadow:0 8px 24px rgba(0,0,0,.30);
+}
+[data-theme="light"]  { --glass-bg:rgba(255,255,255,.62); --glass-edge:rgba(255,255,255,.75); --glass-shadow:0 8px 24px rgba(15,23,42,.10); }
+[data-theme="purple"] { --glass-bg:rgba(255,255,255,.60); --glass-edge:rgba(255,255,255,.75); --glass-shadow:0 8px 24px rgba(30,27,75,.12); }
+[data-theme="teal"]   { --glass-bg:rgba(255,255,255,.60); --glass-edge:rgba(255,255,255,.75); --glass-shadow:0 8px 24px rgba(15,42,42,.12); }
+
+/* Ambient color blobs behind everything — gives the blur something to refract */
+.app{background:transparent;}
+.app::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(420px 320px at 12% -4%,  color-mix(in srgb, var(--teal) 18%, transparent), transparent 70%),
+    radial-gradient(380px 300px at 105% 14%, color-mix(in srgb, var(--blue) 13%, transparent), transparent 70%),
+    radial-gradient(460px 380px at 45% 112%, color-mix(in srgb, var(--teal-deep) 12%, transparent), transparent 72%),
+    var(--bg);
+}
+
+/* Frosted panes */
+.card,.ward-card,.stat{
+  background:var(--glass-bg);
+  -webkit-backdrop-filter:blur(14px) saturate(1.5);
+  backdrop-filter:blur(14px) saturate(1.5);
+  box-shadow:var(--glass-shadow), inset 0 1px 0 var(--glass-edge);
+}
+/* Hero/glass emphasis cards (KPIs, day summary) get a subtle sheen */
+.card.glass{
+  background:linear-gradient(160deg,
+    var(--glass-bg),
+    color-mix(in srgb, var(--glass-bg) 72%, var(--teal) 6%));
+}
+
+/* Chrome: stronger blur on the sticky bars + sheets */
+.topbar{
+  -webkit-backdrop-filter:blur(18px) saturate(1.6);
+  backdrop-filter:blur(18px) saturate(1.6);
+}
+.navbar{
+  -webkit-backdrop-filter:blur(18px) saturate(1.6);
+  backdrop-filter:blur(18px) saturate(1.6);
+}
+.sheet{
+  background:color-mix(in srgb, var(--panel) 86%, transparent);
+  -webkit-backdrop-filter:blur(24px) saturate(1.6);
+  backdrop-filter:blur(24px) saturate(1.6);
+  box-shadow:0 -12px 40px rgba(0,0,0,.22), inset 0 1px 0 var(--glass-edge);
+}
+
+/* Inputs & chips pick up a light frost too */
+.field,.seg,.pre-pill,.chip,.stepper{
+  background:color-mix(in srgb, var(--panel-2) 78%, transparent);
+}
+.btn-ghost{background:color-mix(in srgb, var(--panel-2) 78%, transparent);}
+
+/* Graceful fallback: solid panels when backdrop-filter is unsupported */
+@supports not (backdrop-filter: blur(1px)) {
+  .card,.ward-card,.stat,.sheet{background:var(--panel);}
+}

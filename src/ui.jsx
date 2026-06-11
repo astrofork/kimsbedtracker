@@ -146,17 +146,28 @@ export function ThemeToggle() {
  * Always renders the same teal gradient regardless of block status.
  */
 export function BlockAvatar({ code, size = 38 }) {
+  // Block names can be long ("GF Emergency", "2F Economy MGW") — condense to a
+  // short monogram so it fits the square: floor prefix + first word initials.
+  const short = (() => {
+    const s = String(code || "?").trim();
+    if (s.length <= 4) return s.toUpperCase();
+    const words = s.split(/[\s\-/]+/).filter(Boolean);
+    const floorPrefix = /^\d?[A-Z]?F$|^GF$/i.test(words[0]) ? words[0].toUpperCase() : null;
+    const rest = floorPrefix ? words.slice(1) : words;
+    const initials = rest.map((w) => w[0].toUpperCase()).join("").slice(0, floorPrefix ? 2 : 3);
+    return floorPrefix ? floorPrefix + initials : initials || s.slice(0, 3).toUpperCase();
+  })();
   return (
-    <div style={{
+    <div title={code} style={{
       width: size, height: size, flexShrink: 0,
       borderRadius: 10,
       background: "linear-gradient(135deg,var(--teal),var(--teal-deep))",
       display: "flex", alignItems: "center", justifyContent: "center",
-      fontWeight: 800, color: "#fff",
-      fontSize: Math.max(10, Math.floor(size * 0.34)),
+      fontWeight: 800, color: "#fff", letterSpacing: "0.02em",
+      fontSize: Math.max(9, Math.floor(size * (short.length > 3 ? 0.26 : 0.34))),
       boxShadow: "0 2px 8px rgba(14,165,233,.2)",
     }}>
-      {code}
+      {short}
     </div>
   );
 }

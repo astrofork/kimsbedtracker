@@ -52,6 +52,8 @@ export const api = {
   cooOverview: () => req("/coo/overview"),
   cooAudit: () => req("/coo/audit"),
   cooCompliance: () => req("/coo/compliance"),
+  // ── manager — KPIs ──────────────────────────────────────────────────────────
+  mgrKpis: () => req("/manager/kpis"),
   // ── manager — blocks ────────────────────────────────────────────────────────
   mgrBlocks: () => req("/manager/blocks"),
   mgrCreateBlock: (data) => req("/manager/blocks", { method: "POST", body: JSON.stringify(data) }),
@@ -188,7 +190,21 @@ export function toastErr(err) {
 }
 
 // ---- time formatting ----
-export function fmtTime(d) { return new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }); }
+// Postgres bigint columns arrive as strings, and some legacy rows store epoch
+// seconds instead of milliseconds — normalize both before constructing a Date.
+export function toMs(ts) {
+  if (ts == null || ts === "") return null;
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n < 1e12 ? n * 1000 : n;
+}
+export function fmtTime(d) {
+  const ms = typeof d === "number" || typeof d === "string" ? toMs(d) : d;
+  if (ms == null) return "—";
+  const date = new Date(ms);
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
 export function fmtClock(mins) {
 
   // const h = Math.floor(mins / 60) % 24, m = mins % 60;

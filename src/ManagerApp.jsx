@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { api, fmtTime, fmtClock, toastErr } from "./lib.js";
+import { api, fmtTime, fmtClock, toastErr, toMs } from "./lib.js";
 import { Ic, icons, StatusBar, ThemeToggle, useModal, BlockAvatar, useConfirm } from "./ui.jsx";
 
 export default function ManagerApp({ user, onLogout }) {
@@ -56,7 +56,9 @@ function NavBtn({ on, ic, label, onClick }) {
 const STALE_MS = 3 * 60 * 60 * 1000;
 
 function elapsed(ts) {
-  const ms = Date.now() - ts;
+  const t = toMs(ts);
+  if (t == null) return "never";
+  const ms = Date.now() - t;
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   if (h >= 1) return `${h}h ${m}m ago`;
@@ -97,12 +99,14 @@ function Reporting() {
   const [data,       setData]       = useState(null);
   const [compliance, setCompliance] = useState([]);
   const [audit,      setAudit]      = useState([]);
+  const [kpis,       setKpis]       = useState(null);
   const [bedsBlock,  setBedsBlock]  = useState(null); // { pre, wards } | null
 
   const load = async () => {
     try { setData(await api.cooOverview()); } catch {}
     try { setCompliance((await api.cooCompliance()).compliance || []); } catch {}
     try { setAudit((await api.cooAudit()).logs || []); } catch {}
+    try { setKpis(await api.mgrKpis()); } catch {}
   };
   useEffect(() => { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }, []);
 
@@ -113,24 +117,63 @@ function Reporting() {
     </div>
   );
 
+  // Only score blocks that actually have a PRE assigned — unstaffed blocks
+  // cannot submit rounds, so counting them buries the real signal.
+  const assignedBlocks = new Set();
+  for (const f of data.floors) for (const p of f.pres)
+    if (p.assignedUser) assignedBlocks.add(p.pre);
+
   const compByPre = {};
   for (const c of compliance) compByPre[c.block] = c;
-  const scored  = compliance.filter((c) => c.expected > 0);
+  const scored  = compliance.filter((c) => c.expected > 0 && assignedBlocks.has(c.block));
   const avg     = scored.length ? Math.round(scored.reduce((a, c) => a + c.score, 0) / scored.length) : 100;
   const lagging = scored.filter((c) => c.score < 100).length;
+  const unstaffed = data.floors.reduce((n, f) => n + f.pres.filter((p) => !p.assignedUser).length, 0);
 
   const now = Date.now();
   const stale = [];
   for (const f of data.floors) for (const p of f.pres)
-    for (const w of p.wards)
-      if (w.vacant !== null && w.updatedAt && now - w.updatedAt > STALE_MS)
-        stale.push({ pre: p.pre, ward: w.ward, updatedAt: w.updatedAt, age: now - w.updatedAt });
+    for (const w of p.wards) {
+      const ts = toMs(w.updatedAt);
+      if (w.vacant !== null && ts && now - ts > STALE_MS)
+        stale.push({ pre: p.pre, ward: w.ward, updatedAt: ts, age: now - ts });
+    }
   stale.sort((a, b) => b.age - a.age);
 
   return (
     <div>
       <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Team Report</div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>Live compliance, bed status and activity.</div>
+
+      {/* ── Bed master KPIs ── */}
+      {kpis && (
+        <div className="card glass" style={{ padding: 16, marginBottom: 12 }}>
+          <div className="row between" style={{ marginBottom: 12 }}>
+            <span className="h2">Hospital bed master</span>
+            <span className="chip mono">{kpis.occupancy_pct}% occupied</span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+            {[
+              { label: "Total",      val: kpis.total,             color: "var(--ink)"   },
+              { label: "Census",     val: kpis.census,            color: "var(--teal)"  },
+              { label: "Non-Census", val: kpis.non_census,        color: "var(--ink-2)" },
+              { label: "Non-Op",     val: kpis.non_operational,   color: "var(--red)"   },
+              { label: "Vacant",     val: kpis.vacant,            color: "var(--green)" },
+              { label: "Vac+Res",    val: kpis.vacant_reserved,   color: "var(--amber)" },
+              { label: "Occupied",   val: kpis.occupied,          color: "var(--red)"   },
+              { label: "Occ+Res",    val: kpis.occupied_reserved, color: "#8B5CF6"      },
+            ].map(({ label, val, color }) => (
+              <div key={label} style={{
+                textAlign: "center", padding: "10px 4px",
+                background: "var(--panel-2)", borderRadius: 10,
+              }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                <div style={{ fontSize: 9.5, color: "var(--ink-3)", fontWeight: 600, marginTop: 5, letterSpacing: 0.2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Compliance summary ── */}
       <div className="card" style={{
@@ -142,8 +185,9 @@ function Reporting() {
             <div className="h2">Today's round compliance</div>
             <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
               {lagging === 0
-                ? "All blocks are submitting on time"
-                : `${lagging} block${lagging > 1 ? "s" : ""} behind schedule`}
+                ? "All staffed blocks are submitting on time"
+                : `${lagging} staffed block${lagging > 1 ? "s" : ""} behind schedule`}
+              {unstaffed > 0 && ` · ${unstaffed} unstaffed`}
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -198,8 +242,15 @@ function Reporting() {
         </div>
       )}
 
-      {/* ── Block cards ── */}
-      {data.floors.map((f) => (
+      {/* ── Block cards, grouped by block label (A / B / …) ── */}
+      {(() => {
+        const groups = {};
+        for (const f of data.floors) for (const p of f.pres) {
+          const g = p.label && p.label !== p.pre ? p.label : "Other";
+          (groups[g] ||= []).push(p);
+        }
+        return Object.entries(groups).map(([g, pres]) => ({ name: g, pres }));
+      })().map((f) => (
         <div key={f.name}>
           <div className="floor-head">Block {f.name}</div>
           {f.pres.map((p) => {
@@ -222,7 +273,7 @@ function Reporting() {
                   <div className="row" style={{ gap: 10 }}>
                     <BlockAvatar code={p.pre} size={38} />
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.label || `Block ${p.pre}`}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>{p.pre}</div>
                       <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
                         {p.assignedUser ? p.assignedUser.name : "No PRE assigned"}
                         {s.wards > 0 && ` · ${s.wards} ward${s.wards !== 1 ? "s" : ""} · ${s.total} beds`}
@@ -562,8 +613,9 @@ function BlocksManager({ showToast }) {
                 <div className="row" style={{ gap: 12 }}>
                   <BlockAvatar code={block.name} size={42} />
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{block.label || block.name}</div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{block.name}</div>
                     <div className="dim" style={{ fontSize: 12 }}>
+                      {block.label && block.label !== block.name ? `Block ${block.label} · ` : ""}
                       {bWards.length} ward{bWards.length !== 1 ? "s" : ""} · {totalBeds} beds
                     </div>
                   </div>
@@ -1602,12 +1654,13 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
 //  HISTORY VIEWER
 // ══════════════════════════════════════════════════════════════════════════════
 function HistoryViewer() {
-  const [dates,   setDates]   = useState([]);
-  const [blocks,  setBlocks]  = useState([]);
-  const [date,    setDate]    = useState("");
-  const [blockId, setBlockId] = useState("");
-  const [rounds,  setRounds]  = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [dates,    setDates]    = useState([]);
+  const [blocks,   setBlocks]   = useState([]);
+  const [date,     setDate]     = useState("");
+  const [blockId,  setBlockId]  = useState("");
+  const [rounds,   setRounds]   = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [expanded, setExpanded] = useState({}); // { [roundIdx]: bool }
 
   useEffect(() => {
     Promise.all([api.mgrHistoryDates(), api.mgrBlocks()]).then(([d, b]) => {
@@ -1620,72 +1673,165 @@ function HistoryViewer() {
   useEffect(() => {
     if (!date) return;
     setLoading(true);
+    setExpanded({});
     api.mgrHistory(date, blockId ? Number(blockId) : undefined)
       .then((d) => setRounds(d.rounds || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [date, blockId]);
 
+  const fmtDateLabel = (d) => {
+    const dt = new Date(d + "T00:00:00");
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  };
+
+  // Day summary across the filtered rounds
+  const reportedBlocks = new Set(rounds.map((r) => r.blockName || r.blockId));
+  const dayTotals = rounds.reduce((acc, r) => {
+    for (const w of (Array.isArray(r.wards) ? r.wards : [])) {
+      acc.v += w.vacant   || 0;
+      acc.o += w.occupied || 0;
+      acc.r += w.reserved || 0;
+      acc.t += w.total    || 0;
+    }
+    return acc;
+  }, { v: 0, o: 0, r: 0, t: 0 });
+
   return (
     <div>
-      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Previous data</div>
-      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>Pick a date to view that day's submitted rounds.</div>
+      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>History</div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>Pick a date to review that day's submitted rounds.</div>
 
       <div className="row" style={{ gap: 10, marginBottom: 16 }}>
         <div style={{ flex: 1 }}>
           <label className="label">Date</label>
           <select className="field" value={date} onChange={(e) => setDate(e.target.value)}>
             {dates.length === 0 && <option value="">No history yet</option>}
-            {dates.map((d) => <option key={d} value={d}>{d}</option>)}
+            {dates.map((d) => <option key={d} value={d}>{fmtDateLabel(d)}</option>)}
           </select>
         </div>
         <div style={{ flex: 1 }}>
           <label className="label">Block</label>
           <select className="field" value={blockId} onChange={(e) => setBlockId(e.target.value)}>
             <option value="">All blocks</option>
-            {blocks.map((b) => <option key={b.id} value={b.id}>Block {b.name}</option>)}
+            {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
       </div>
 
-      {loading && <div className="dim" style={{ fontSize: 13 }}>Loading…</div>}
-      {!loading && rounds.length === 0 && date && (
-        <div className="card empty"><Ic d={icons.clock} s={26} /><div style={{ marginTop: 10, fontWeight: 600 }}>No rounds on this date</div></div>
+      {/* Day summary strip */}
+      {!loading && rounds.length > 0 && (
+        <div className="card glass" style={{ padding: 14, marginBottom: 14 }}>
+          <div className="row between" style={{ marginBottom: 10 }}>
+            <span className="h2">{fmtDateLabel(date)}</span>
+            <span className="chip">{rounds.length} round{rounds.length !== 1 ? "s" : ""} · {reportedBlocks.size} block{reportedBlocks.size !== 1 ? "s" : ""}</span>
+          </div>
+          <div style={{ display: "flex", background: "var(--panel-2)", borderRadius: 10, overflow: "hidden" }}>
+            {[
+              { label: "Vacant",   val: dayTotals.v, color: "var(--green)" },
+              { label: "Occupied", val: dayTotals.o, color: "var(--red)"   },
+              { label: "Reserved", val: dayTotals.r, color: "var(--amber)" },
+              { label: "Beds",     val: dayTotals.t, color: "var(--ink)"   },
+            ].map(({ label, val, color }, i) => (
+              <div key={label} style={{
+                flex: 1, textAlign: "center", padding: "10px 4px",
+                borderLeft: i > 0 ? "1px solid var(--line)" : "none",
+              }}>
+                <div style={{ fontSize: 19, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                <div style={{ fontSize: 9.5, color: "var(--ink-3)", fontWeight: 600, marginTop: 4 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+          <div className="dim" style={{ fontSize: 10, marginTop: 6, textAlign: "right" }}>
+            totals across all rounds submitted this day
+          </div>
+        </div>
       )}
 
-      {rounds.map((r, i) => (
-        <div className="card" key={i} style={{ padding: 14, marginBottom: 10 }}>
-          <div className="row between" style={{ marginBottom: 10 }}>
-            <div className="row" style={{ gap: 10 }}>
-              <BlockAvatar code={r.blockName || String(r.blockId)} size={34} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14 }}>Block {r.blockName || r.blockId}</div>
-                <div className="dim" style={{ fontSize: 11, marginTop: 1 }}>submitted {fmtTime(r.submittedAt)}</div>
-              </div>
-            </div>
-            <div className="row" style={{ gap: 8 }}>
-              <span className={"tag " + (r.shift === "night" ? "b" : "v")}>{r.shift}</span>
-              <span className="chip">{fmtClock(r.startMin)}</span>
-            </div>
-          </div>
-          {Array.isArray(r.wards) && r.wards.map((w, j) => (
-            <div className="row between" key={j} style={{ padding: "4px 0", fontSize: 13 }}>
-              <span>{w.ward}</span>
-              <span className="mono">
-                <span style={{ color: "var(--green)" }}>{w.vacant}</span> /
-                <span style={{ color: "var(--red)" }}> {w.occupied}</span> /
-                <span style={{ color: "var(--amber)" }}> {w.reserved}</span>
-                <span className="dim"> of {w.total}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      ))}
-      {rounds.length > 0 && (
-        <div className="dim" style={{ fontSize: 11, textAlign: "center", marginTop: 6 }}>
-          green vacant · red occupied · amber reserved
+      {loading && (
+        <div className="empty" style={{ padding: "30px 0" }}>
+          <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
         </div>
       )}
+      {!loading && rounds.length === 0 && date && (
+        <div className="card empty">
+          <Ic d={icons.clock} s={26} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No rounds on this date</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>Try another date or block filter.</div>
+        </div>
+      )}
+
+      {rounds.map((r, i) => {
+        const wards = Array.isArray(r.wards) ? r.wards : [];
+        const tot = wards.reduce((a, w) => ({
+          v: a.v + (w.vacant || 0), o: a.o + (w.occupied || 0),
+          r: a.r + (w.reserved || 0), t: a.t + (w.total || 0),
+        }), { v: 0, o: 0, r: 0, t: 0 });
+        const isOpen = !!expanded[i];
+        return (
+          <div className="card" key={i} style={{ padding: 14, marginBottom: 10 }}>
+            <div className="row between">
+              <div className="row" style={{ gap: 10 }}>
+                <BlockAvatar code={r.blockName || String(r.blockId)} size={36} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{r.blockName || `Block ${r.blockId}`}</div>
+                  <div className="dim" style={{ fontSize: 11, marginTop: 1 }}>
+                    submitted {fmtTime(r.submittedAt)} · {fmtClock(r.startMin)} round
+                  </div>
+                </div>
+              </div>
+              <span className={"tag " + (r.shift === "night" ? "b" : "v")}>
+                {r.shift === "night" ? "Night" : "Morning"}
+              </span>
+            </div>
+
+            {/* Round totals bar */}
+            {tot.t > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <StatusBar v={tot.v} r={tot.r} o={tot.o} or={0} total={tot.t} />
+                <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                  <span className="tag v">{tot.v} vacant</span>
+                  <span className="tag r">{tot.r} reserved</span>
+                  <span className="tag o">{tot.o} occupied</span>
+                  <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{tot.t} beds</span>
+                </div>
+              </div>
+            )}
+
+            {/* Per-ward breakdown (collapsible) */}
+            {wards.length > 0 && (
+              <>
+                <button style={{
+                  marginTop: 10, width: "100%", padding: "7px 0", borderRadius: 8,
+                  background: "var(--panel-2)", border: "none", cursor: "pointer", fontSize: 12,
+                  color: "var(--ink-2)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                }} onClick={() => setExpanded((p) => ({ ...p, [i]: !p[i] }))}>
+                  {isOpen ? "▲ Hide" : "▼ Show"} ward breakdown ({wards.length})
+                </button>
+                {isOpen && (
+                  <div style={{ marginTop: 8 }}>
+                    {wards.map((w, j) => (
+                      <div className="row between" key={j} style={{
+                        padding: "7px 10px", fontSize: 13, borderRadius: 8,
+                        background: j % 2 ? "var(--panel-2)" : "transparent",
+                      }}>
+                        <span style={{ fontWeight: 500 }}>{w.ward}</span>
+                        <span className="mono" style={{ fontSize: 12 }}>
+                          <span style={{ color: "var(--green)" }}>{w.vacant}V</span>
+                          <span style={{ color: "var(--amber)" }}> {w.reserved}R</span>
+                          <span style={{ color: "var(--red)" }}> {w.occupied}O</span>
+                          <span className="dim"> / {w.total}</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
