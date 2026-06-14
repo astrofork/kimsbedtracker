@@ -26,6 +26,14 @@ export const icons = {
   pencil: <><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></>,
   trash:  <><path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></>,
   plus:   <><path d="M12 5v14M5 12h14" /></>,
+  menu:   <><path d="M4 6h16M4 12h16M4 18h16" /></>,
+  chart:  <><path d="M3 3v18h18" /><path d="M8 17v-6M13 17V8M18 17v-3" /></>,
+  layers: <><path d="m12 2 9 5-9 5-9-5 9-5Z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" /></>,
+  list:   <><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></>,
+  settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></>,
+  eye:    <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
+  eyeOff: <><path d="M9.9 4.2A10 10 0 0 1 12 4c7 0 10 8 10 8a13.3 13.3 0 0 1-1.7 2.7M6.6 6.6A10 10 0 0 0 2 12s3 8 10 8a10 10 0 0 0 5.4-1.6" /><circle cx="12" cy="12" r="3" /><path d="m2 2 20 20" /></>,
+  search: <><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></>,
 };
 
 /* ── Modal / sheet helpers ────────────────────────────────────────────────── */
@@ -58,25 +66,25 @@ export function useModal(onClose) {
 }
 
 /* ── Theme system ─────────────────────────────────────────────────────────── */
-const THEMES  = ["dark", "light", "purple", "teal"];
-const T_LABEL = { dark: "Dark", light: "Light", purple: "Purple", teal: "Teal" };
-const T_COLOR = { dark: "#2dd4bf", light: "#0EA5E9", purple: "#7C3AED", teal: "#14B8A6" };
+export const THEMES  = ["dark", "light", "purple", "teal"];
+export const T_LABEL = { dark: "Dark", light: "Light", purple: "Purple", teal: "Teal" };
+export const T_COLOR = { dark: "#2dd4bf", light: "#2563EB", purple: "#7C3AED", teal: "#14B8A6" };
 // moon for dark mode, sun for all light-based themes
 const T_ICON  = { dark: "moon",    light: "sun",     purple: "sun",     teal: "sun"     };
 
 // theme-color = the topbar background so Android status bar matches the app UI
 const T_META_COLOR = {
-  dark:   "#0b0f14",   // dark topbar
+  dark:   "#11181f",   // dark topbar
   light:  "#FFFFFF",   // white topbar
-  purple: "#F8F4FF",   // light purple topbar
-  teal:   "#F0FAFB",   // light teal topbar
+  purple: "#FFFFFF",
+  teal:   "#FFFFFF",
 };
 
-function getTheme() {
+export function getTheme() {
   return localStorage.getItem("app_theme") || "light";
 }
 
-function applyTheme(t) {
+export function applyTheme(t) {
   localStorage.setItem("app_theme", t);
   if (t === "dark") {
     document.documentElement.removeAttribute("data-theme");
@@ -311,14 +319,14 @@ export function AppError({ title, message }) {
 }
 
 export function StatusBar({ v, r, o, or: or_ = 0, total }) {
-  const rest = Math.max(0, total - v - r - o - (or_ || 0));
+  const rest = Math.max(0, total - v - r - o - or_);
   return (
     <div className="bar">
-      <span style={{ flex: v,          background: "var(--green)"   }} />
-      <span style={{ flex: r,          background: "var(--amber)"   }} />
-      <span style={{ flex: o,          background: "var(--red)"     }} />
-      <span style={{ flex: or_ || 0,   background: "#8B5CF6"        }} />
-      <span style={{ flex: rest,       background: "var(--panel-2)" }} />
+      <span style={{ flex: v,    background: "var(--st-v)"    }} />
+      <span style={{ flex: r,    background: "var(--st-vr)"   }} />
+      <span style={{ flex: o,    background: "var(--st-o)"    }} />
+      <span style={{ flex: or_,  background: "var(--st-or)"   }} />
+      <span style={{ flex: rest, background: "var(--panel-2)" }} />
     </div>
   );
 }

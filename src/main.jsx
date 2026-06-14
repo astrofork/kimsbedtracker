@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { api, getUser, clearSession, stopAlarm } from "./lib.js";
 import { enablePush } from "./push.js";
-import { initTheme } from "./ui.jsx";
+import { initTheme, Ic, icons } from "./ui.jsx";
 import { PwaManager } from "./pwa.jsx";
 import Login from "./Login.jsx";
 import PREApp from "./PREApp.jsx";
@@ -24,11 +24,17 @@ if ("serviceWorker" in navigator) {
 }
 
 function App() {
-  const [user, setUser] = useState(() => getUser());
-  const [meta, setMeta] = useState(null);
+  const [user,      setUser]      = useState(() => getUser());
+  const [meta,      setMeta]      = useState(null);
+  const [metaError, setMetaError] = useState(false);
   const [sessionMsg, setSessionMsg] = useState("");
 
-  useEffect(() => { api.meta().then(setMeta).catch(() => {}); }, []);
+  const loadMeta = useCallback(() => {
+    setMetaError(false);
+    api.meta().then(setMeta).catch(() => setMetaError(true));
+  }, []);
+
+  useEffect(() => { loadMeta(); }, [loadMeta]);
 
   // Register background push once we have a logged-in user + meta with VAPID key.
   useEffect(() => {
@@ -57,7 +63,24 @@ function App() {
   }, []);
 
   if (!user) return <><Login onLogin={onLogin} sessionMsg={sessionMsg} /><PwaManager /></>;
-  if (!meta) return null;
+  if (!meta) return (
+    <div className="empty" style={{ paddingTop: 120 }}>
+      {metaError ? (
+        <>
+          <div style={{ fontWeight: 600 }}>Unable to connect to server</div>
+          <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>Check your network and try again.</div>
+          <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={loadMeta}>
+            <Ic d={icons.refresh} s={15} /> Retry
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+          <div className="dim" style={{ marginTop: 12 }}>Loading…</div>
+        </>
+      )}
+    </div>
+  );
   if (user.role === "COO")     return <><COOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "MANAGER") return <><ManagerApp user={user} onLogout={logout} /><PwaManager /></>;
   if (user.role === "NURSE")   return <><NurseApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;

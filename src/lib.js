@@ -1,3 +1,5 @@
+import { io } from "socket.io-client";
+
 // ---- API client ----
 const TOKEN_KEY = "bedflow_token";
 const USER_KEY = "bedflow_user";
@@ -21,20 +23,24 @@ async function req(path, opts = {}) {
   const t = getToken();
   if (t) headers.Authorization = "Bearer " + t;
   const res = await fetch(BASE_API + "/api" + path, { ...opts, headers });
-  const data = await res.json().catch(() => ({}));
+  let data = {};
+  try { data = await res.json(); } catch { /* non-JSON response (e.g. nginx 502) — data stays {} */ }
 
-  if (res.status === 401) {
+  // Only treat 401 as a session-expiry event when the user already has a token.
+  // Login requests have no token — their 401 ("Incorrect username or password.")
+  // should fall through as a normal error so the login form can show the message.
+  if (res.status === 401 && getToken()) {
     clearSession();
     // Notify the React app so it can reset its user state and show the Login screen.
     // We cannot use window.location.href = "/login" here because this is a state-driven
     // SPA with no real /login route — doing so causes a 404 or infinite reload.
     window.dispatchEvent(new CustomEvent("session:expired", {
-      detail: { message: data?.error || "Session expired. Please log in again." }
+      detail: { message: "Session expired. Please sign in again." }
     }));
     throw new Error("Unauthorized");
   }
 
-  if (!res.ok) throw new Error(data.error || "Request failed");
+  if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
 
 
   return data;
@@ -46,10 +52,13 @@ export const api = {
     req("/auth/login", { method: "POST", body: JSON.stringify({ username, password, role }) }),
   preMe: () => req("/pre/me"),
   setShift: (shift) => req("/pre/shift", { method: "POST", body: JSON.stringify({ shift }) }),
-  setWard: (wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved) =>
+  setWard: (wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved = 0) =>
     req("/pre/ward", { method: "POST", body: JSON.stringify({ wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved }) }),
   submitRound: () => req("/pre/submit", { method: "POST" }),
   cooOverview: () => req("/coo/overview"),
+  cooLiveWards: () => req("/coo/live-wards"),
+  cooPreActivity: () => req("/coo/pre-activity"),
+  cooNurseActivity: () => req("/coo/nurse-activity"),
   cooAudit: () => req("/coo/audit"),
   cooCompliance: () => req("/coo/compliance"),
   // ── manager — KPIs ──────────────────────────────────────────────────────────
@@ -66,6 +75,7 @@ export const api = {
   mgrDeleteFloor: (id) => req(`/manager/floors/${id}`, { method: "DELETE" }),
   // ── manager — wards ─────────────────────────────────────────────────────────
   mgrUsers: () => req("/manager/users"),
+  mgrUnitTypes: () => req("/manager/unit-types"),
   mgrWards: () => req("/manager/wards"),
   mgrCreateWard: (data) => req("/manager/wards", { method: "POST", body: JSON.stringify(data) }),
   mgrEditWard: (id, data) => req(`/manager/wards/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -76,18 +86,32 @@ export const api = {
   mgrDeletePre: (id) => req(`/manager/pre/${id}`, { method: "DELETE" }),
   // ── manager — history ────────────────────────────────────────────────────────
   mgrHistoryDates: () => req("/manager/history/dates"),
-  mgrHistory: (date, floorId) =>
-    req(`/manager/history?date=${date}${floorId != null ? "&floorId=" + floorId : ""}`),
+  mgrHistory: (date, preBlockId) =>
+    req(`/manager/history?date=${date}${preBlockId != null ? "&preBlockId=" + preBlockId : ""}`),
   // ── manager — nursing stations ───────────────────────────────────────────────
   mgrNursingStations: () => req("/manager/nursing-stations"),
   mgrCreateStation: (data) => req("/manager/nursing-stations", { method: "POST", body: JSON.stringify(data) }),
   mgrEditStation: (id, data) => req(`/manager/nursing-stations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrAssignStationWards: (id, wardIds) => req(`/manager/nursing-stations/${id}/wards`, { method: "PUT", body: JSON.stringify({ wardIds }) }),
   mgrDeleteStation: (id) => req(`/manager/nursing-stations/${id}`, { method: "DELETE" }),
+  // ── manager — nurse access assignments ───────────────────────────────────────
+  mgrNurseAccess: (p = {}) => {
+    const qs = Object.keys(p).length ? "?" + new URLSearchParams(p) : "";
+    return req(`/manager/nurse-access${qs}`);
+  },
+  mgrCreateNurseAccess: (data) =>
+    req("/manager/nurse-access", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditNurseAccess: (id, data) =>
+    req(`/manager/nurse-access/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteNurseAccess: (id) =>
+    req(`/manager/nurse-access/${id}`, { method: "DELETE" }),
   // ── manager — nurse users ────────────────────────────────────────────────────
   mgrCreateNurse: (data) => req("/manager/nurses", { method: "POST", body: JSON.stringify(data) }),
   mgrEditNurse: (id, data) => req(`/manager/nurses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeleteNurse: (id) => req(`/manager/nurses/${id}`, { method: "DELETE" }),
+  mgrSetNurseStation: (nurseId, stationId) =>
+    req(`/manager/nurses/${nurseId}`, { method: "PUT", body: JSON.stringify({ stationId }) }),
+  mgrStationCoverage: (id) => req(`/manager/stations/${id}/coverage`),
   // ── manager — PRE Blocks ─────────────────────────────────────────────────────
   mgrPreBlocks: () => req("/manager/pre-blocks"),
   mgrPreBlock: (id) => req(`/manager/pre-blocks/${id}`),
@@ -103,10 +127,10 @@ export const api = {
     const qs = params.toString();
     return req(`/manager/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  generateBeds: (wardId, bedNames) =>
-    req(`/manager/wards/${wardId}/generate-beds`, { method: "POST", body: JSON.stringify({ bedNames }) }),
-  addBed: (wardId, bedName) =>
-    req(`/manager/wards/${wardId}/beds`, { method: "POST", body: JSON.stringify({ bedName }) }),
+  generateBeds: (wardId, bedNames, opts = {}) =>
+    req(`/manager/wards/${wardId}/generate-beds`, { method: "POST", body: JSON.stringify({ bedNames, ...opts }) }),
+  addBed: (wardId, bedName, opts = {}) =>
+    req(`/manager/wards/${wardId}/beds`, { method: "POST", body: JSON.stringify({ bedName, ...opts }) }),
   renameBed: (bedId, bedName) =>
     req(`/manager/beds/${bedId}/name`, { method: "PATCH", body: JSON.stringify({ bedName }) }),
   updateBedMaster: (bedId, data) =>
@@ -120,8 +144,9 @@ export const api = {
     const qs = params.toString();
     return req(`/pre/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus) =>
-    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus }) }),
+  prePayerTypes: () => req("/pre/payer-types"),
+  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType) =>
+    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined }) }),
   // ── Nurse — bed management ───────────────────────────────────────────────────
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
@@ -131,15 +156,42 @@ export const api = {
     const qs = params.toString();
     return req(`/nurse/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus) =>
-    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus }) }),
+  nursePayerTypes: () => req("/nurse/payer-types"),
+  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType) =>
+    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
+  mgrPayerTypes: () => req("/manager/payer-types"),
+  mgrCreatePayerType: (name) => req("/manager/payer-types", { method: "POST", body: JSON.stringify({ name }) }),
+  mgrUpdatePayerType: (id, data) => req(`/manager/payer-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrReorderPayerType: (id, direction) => req(`/manager/payer-types/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
+  mgrDeletePayerType: (id) => req(`/manager/payer-types/${id}`, { method: "DELETE" }),
   cooViews: () => req("/coo/views"),
   cooSaveView: (data) => req("/coo/views", { method: "POST", body: JSON.stringify(data) }),
   cooEditView: (id, data) => req(`/coo/views/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   cooDeleteView: (id) => req(`/coo/views/${id}`, { method: "DELETE" }),
 };
+
+// ---- WebSocket ----
+// In dev: BASE_API is "" so socket connects to the vite dev server which proxies
+// /socket.io → localhost:4000 (see vite.config.js).
+// In prod: BASE_API is the backend URL so socket connects directly.
+export function createSocket() {
+  const socket = io(BASE_API || undefined, {
+    auth: { token: getToken() },
+    // polling first so the initial handshake always works through Vite's proxy;
+    // socket.io then upgrades to WebSocket automatically if the path supports it
+    transports: ["polling", "websocket"],
+  });
+  socket.on("connect_error", (err) => {
+    if (err.message === "No token" || err.message === "Invalid token") {
+      window.dispatchEvent(new CustomEvent("session:expired", {
+        detail: { message: "Session expired. Please log in again." },
+      }));
+    }
+  });
+  return socket;
+}
 
 // ---- audio alarm (loud repeating two-tone) ----
 let audioCtx = null, alarmTimer = null;
@@ -158,6 +210,7 @@ export function startAlarm() {
         g.gain.exponentialRampToValueAtTime(0.0001, t0 + off + 0.4);
         o.connect(g).connect(audioCtx.destination);
         o.start(t0 + off); o.stop(t0 + off + 0.42);
+        o.onended = () => { o.disconnect(); g.disconnect(); };
       });
     };
     beep();
@@ -169,40 +222,23 @@ export function stopAlarm() { if (alarmTimer) { clearInterval(alarmTimer); alarm
 // ---- error handling ----
 export function friendlyError(err) {
   const msg = (err?.message ?? String(err ?? "")).trim();
-  if (!msg) return { title: null, message: "An unexpected error occurred." };
+  if (!msg || msg === "Request failed")
+    return { title: null, message: "Something went wrong. Please try again." };
   if (/failed to fetch|networkerror|network error|load failed/i.test(msg))
-    return { title: "Connection problem", message: "Unable to reach the server. Check your network and try again." };
-  if (/unauthorized|invalid credentials/i.test(msg))
-    return { title: "Unable to sign in", message: "Please check your username and password and try again." };
-  if (/403|forbidden/i.test(msg))
-    return { title: "Access denied", message: "You don't have permission to perform this action." };
-  if (/500|internal server/i.test(msg))
-    return { title: "Something went wrong", message: "Please try again in a moment." };
-  if (/session.{0,10}expired|token.{0,10}invalid/i.test(msg))
-    return { title: "Session expired", message: "Please sign in again." };
-  // Zod / server validation JSON array: [{"code":"too_small","path":["username"],...}]
-  if (msg.startsWith("[")) {
-    try {
-      const issues = JSON.parse(msg);
-      if (Array.isArray(issues) && issues.length > 0) {
-        const fieldMap = { username: "username", password: "password" };
-        const parts = issues.map(i => {
-          const f = i?.path?.[0];
-          if (i?.code === "too_small" && f === "username") return "Please enter your username.";
-          if (i?.code === "too_small" && f === "password") return "Please enter your password.";
-          if (f) return `Please check the ${fieldMap[f] || f} field.`;
-          return "Please fill in all required fields.";
-        });
-        return { title: null, message: parts.join(" ") };
-      }
-    } catch { /* not JSON, fall through */ }
-  }
+    return { title: null, message: "Can't reach the server. Check your connection and try again." };
+  // "Unauthorized" is only thrown by req() for expired sessions (authenticated routes).
+  // Login errors now arrive as plain messages from the server and fall through below.
+  if (/^unauthorized$/i.test(msg))
+    return { title: null, message: "Session expired. Please sign in again." };
+  if (/500|internal server error/i.test(msg))
+    return { title: null, message: "Server error. Please try again in a moment." };
+  // The server returns specific, already-friendly messages for all other cases
+  // (wrong password, wrong role, missing fields, etc.) — pass them through as-is.
   return { title: null, message: msg };
 }
 
 export function toastErr(err) {
-  const { title, message } = friendlyError(err);
-  return title ?? message;
+  return friendlyError(err).message;
 }
 
 // ---- time formatting ----

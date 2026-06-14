@@ -1,24 +1,48 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { api, startAlarm, stopAlarm, fmtTime, fmtClock, toastErr } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle, useModal } from "./ui.jsx";
+import { api, startAlarm, stopAlarm, fmtTime, fmtClock, toastErr, createSocket } from "./lib.js";
+import { Ic, icons, StatusBar, useModal } from "./ui.jsx";
+import { AppShell } from "./shell.jsx";
+import { naturalSort, bedStateColor, bedStateBg, bedStateShort } from "./bedUtils.js";
+
+const TAB_TITLES = { home: "Dashboard", entry: "Entry — Wards", map: "My Ward Map" };
 
 export default function PREApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("home");
-  const [data, setData] = useState(null);
-  const [toast, setToast] = useState("");
-  const pollRef = useRef(null);
+  const [data,      setData]      = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [toast,     setToast]     = useState("");
+  const loadRef = useRef(null);
 
-  const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
+  const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
     try { setData(await api.preMe()); }
-    catch { /* 401 handled by session:expired event */ }
-  };
+    catch (e) {
+      if ((e?.message ?? "") !== "Unauthorized") {
+        setLoadError(true);
+        showToast(toastErr(e));
+      }
+    }
+    finally { setLoading(false); }
+  }, [showToast]);
 
+  // Always keep loadRef current so socket handlers call the latest load closure
+  loadRef.current = load;
+
+  useEffect(() => { load(); }, [load]);
+
+  // Real-time updates via WebSocket — replaces 15-second polling
   useEffect(() => {
-    load();
-    pollRef.current = setInterval(load, 15000);
-    return () => clearInterval(pollRef.current);
+    const socket = createSocket();
+    const refresh = () => { loadRef.current(); };
+    socket.on("bed:update",   refresh); // ward counts changed
+    socket.on("round:submit", refresh); // round submitted → alarm clears
+    socket.on("alarm:active", refresh); // scheduler fired → alarm state changed
+    socket.on("connect",      refresh); // reconnect → catch missed updates
+    return () => { socket.disconnect(); };
   }, []);
 
   const alarmActive = data?.alarm?.alarmActive;
@@ -27,82 +51,74 @@ export default function PREApp({ user, meta, onLogout }) {
     return () => stopAlarm();
   }, [alarmActive]);
 
+  const [submitting, setSubmitting] = useState(false);
   const submitRound = async () => {
-    if (!data) return;
+    if (!data || submitting) return;
     const notReady = data.wards.filter(w => w.vacant === null);
     if (notReady.length > 0) {
       showToast(`Configure beds for ${notReady[0].ward} first`);
       setTab("entry");
       return;
     }
+    setSubmitting(true);
     try {
       await api.submitRound();
       stopAlarm();
       showToast("Round submitted ✓");
-      await load();
+      await loadRef.current();
       setTab("home");
     } catch (e) { showToast(toastErr(e)); }
+    finally { setSubmitting(false); }
   };
 
   if (!data) return (
-    <div className="app">
-      <div className="empty" style={{ paddingTop: 120 }}>
-        <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
-        <div style={{ marginTop: 12 }}>Loading…</div>
-      </div>
-    </div>
-  );
-
-  const pre = user.pre;
-
-  return (
-    <div className={"app" + (alarmActive ? " alarm-flash" : "")}>
-      <div className="topbar">
-        <div className="row">
-          <div className="logo" style={{ width: 30, height: 30, fontSize: 14 }}>B</div>
-          <div>
-            <div className="h2">{pre}</div>
-            <div className="dim" style={{ fontSize: 11 }}>{data.floor}</div>
-          </div>
-        </div>
-        <div className="row" style={{ gap: 8 }}>
-          <span className="pre-pill" style={{ flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
-            <span style={{ fontSize: 11 }}><Ic d={icons.clock} s={11} /> {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
-            <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
-          </span>
-          <ThemeToggle />
-          <button className="btn btn-ghost" style={{ padding: 9 }} onClick={onLogout}>
-            <Ic d={icons.logout} s={17} />
+    <div className="empty" style={{ paddingTop: 120 }}>
+      {loadError ? (
+        <>
+          <div style={{ fontWeight: 600 }}>Unable to connect to server</div>
+          <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>Check your network and try again.</div>
+          <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={load}>
+            <Ic d={icons.refresh} s={15} /> Retry
           </button>
-        </div>
-      </div>
-
-      <div className="pad" style={{ paddingBottom: 90 }}>
-        {tab === "home"  && <Home {...{ data, meta, setTab, alarmActive }} />}
-        {tab === "entry" && <Entry data={data} submitRound={submitRound} alarmActive={alarmActive} onRefresh={load} />}
-        {tab === "map"   && <MyMap data={data} />}
-      </div>
-
-      <div className="navbar">
-        <NavBtn on={tab === "home"}  ic={icons.home} label="Home"  onClick={() => setTab("home")} />
-        <NavBtn on={tab === "entry"} ic={icons.bed}  label="Entry" dot={alarmActive} onClick={() => setTab("entry")} />
-        <NavBtn on={tab === "map"}   ic={icons.map}  label="Map"   onClick={() => setTab("map")} />
-      </div>
-
+        </>
+      ) : (
+        <>
+          <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+          <div className="dim" style={{ marginTop: 12 }}>Loading…</div>
+        </>
+      )}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
-}
 
-function NavBtn({ on, ic, label, dot, onClick }) {
+  const menu = [
+    { key: "home",  icon: icons.home, label: "Home" },
+    { key: "entry", icon: icons.bed,  label: "Entry", dot: alarmActive },
+    { key: "map",   icon: icons.map,  label: "Map" },
+  ];
+
   return (
-    <button className={on ? "on" : ""} onClick={onClick}>
-      <span style={{ position: "relative", lineHeight: 1 }}>
-        <Ic d={ic} s={20} />
-        {dot && <span style={{ position: "absolute", top: -3, right: -6, width: 8, height: 8, borderRadius: 99, background: "var(--red)" }} />}
-      </span>
-      {label}
-    </button>
+    <AppShell
+      menu={menu}
+      active={tab}
+      onSelect={setTab}
+      title={TAB_TITLES[tab]}
+      user={{ name: user.username || data.pre, role: "PRE" }}
+      onLogout={onLogout}
+      alarm={alarmActive}
+      topExtra={
+        <span className="pre-pill" style={{ flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
+          <span style={{ fontSize: 11 }}><Ic d={icons.clock} s={11} /> {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
+          <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
+        </span>
+      }
+    >
+      {tab === "home"  && <Home {...{ data, meta, setTab, alarmActive }} />}
+      {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} />}
+      {tab === "map"   && <MyMap data={data} />}
+
+      {toast && <div className="toast">{toast}</div>}
+    </AppShell>
   );
 }
 
@@ -111,9 +127,41 @@ function Home({ data, setTab, alarmActive }) {
   const round = data.alarm.round;
   const pct = s.wards > 0 ? Math.round((s.wardsDone / s.wards) * 100) : 0;
   const reported = s.wardsDone > 0;
+  const isMorning = data.alarm.shift === "morning";
 
   return (
     <div>
+      {/* Row 1 — context info cards */}
+      <div className="stat-grid" style={{ marginBottom: 14 }}>
+        <div className="stat">
+          <div className="n" style={{ fontSize: 18 }}>{data.floor || "—"}</div>
+          <div className="l">BLOCK</div>
+        </div>
+        <div className="stat">
+          <div className="n" style={{ fontSize: 18, display: "flex", alignItems: "center", gap: 7 }}>
+            <span style={{ color: isMorning ? "var(--amber)" : "var(--blue)", display: "inline-flex" }}>
+              <Ic d={isMorning ? icons.sun : icons.moon} s={16} />
+            </span>
+            {isMorning ? "Morning" : "Night"}
+          </div>
+          <div className="l">SHIFT · {data.alarm.shiftWindow || (isMorning ? "Morning" : "Night")}</div>
+        </div>
+        <div className="stat">
+          <div>
+            <div className="n" style={{ fontSize: 18 }}>{pct}%</div>
+            <div className="bar" style={{ marginTop: 8 }}>
+              <span style={{ flex: pct, background: "var(--primary)" }} />
+              <span style={{ flex: 100 - pct, background: "var(--panel-2)" }} />
+            </div>
+          </div>
+          <div className="l">ROUND PROGRESS</div>
+        </div>
+        <div className="stat">
+          <div className="n" style={{ fontSize: 18 }}>{s.wardsDone}/{s.wards}</div>
+          <div className="l">WARDS UPDATED</div>
+        </div>
+      </div>
+
       {alarmActive && (
         <div className="alarm-banner slide-up">
           <div className="row">
@@ -123,40 +171,38 @@ function Home({ data, setTab, alarmActive }) {
               <div style={{ fontSize: 12, color: "#DC2626" }}>Alarm rings until you submit this round</div>
             </div>
           </div>
-          <button className="btn btn-primary btn-block" style={{ marginTop: 14 }} onClick={() => setTab("entry")}>
+          <button className="btn btn-primary btn-block" style={{ marginTop: 14, maxWidth: 360 }} onClick={() => setTab("entry")}>
             Enter bed status now
           </button>
-          <div style={{ fontSize: 11, color: "#DC2626", marginTop: 9, textAlign: "center" }}>
+          <div style={{ fontSize: 11, color: "#DC2626", marginTop: 9 }}>
             Window {fmtClock(round.startMin)} – {fmtClock(round.endMin)}
           </div>
         </div>
       )}
 
       {!alarmActive && data.alarm.submitted && (
-        <div className="card slide-up" style={{ padding: 16, borderColor: "var(--teal-deep)", background: "var(--green-bg)" }}>
-          <div className="row"><span style={{ color: "var(--green)" }}><Ic d={icons.check} s={22} /></span>
-            <div><div style={{ fontWeight: 700, color: "var(--green)" }}>This round submitted</div>
-              <div style={{ fontSize: 12, color: "var(--green)" }}>Next round at {fmtClock(round.endMin)}</div></div></div>
+        <div className="card slide-up" style={{ padding: 16, borderColor: "var(--st-v)", background: "var(--st-v-bg)", marginBottom: 14 }}>
+          <div className="row"><span style={{ color: "var(--st-v)" }}><Ic d={icons.check} s={22} /></span>
+            <div><div style={{ fontWeight: 700, color: "var(--st-v)" }}>This round submitted</div>
+              <div style={{ fontSize: 12, color: "var(--st-v)" }}>Next round at {fmtClock(round.endMin)}</div></div></div>
         </div>
       )}
 
       {!data.alarm.onDuty && (
-        <div className="card slide-up" style={{ padding: 16 }}>
+        <div className="card slide-up" style={{ padding: 16, marginBottom: 14 }}>
           <div className="row"><span className="dim"><Ic d={icons.clock} s={22} /></span>
             <div><div style={{ fontWeight: 700 }}>Off shift</div>
               <div className="dim" style={{ fontSize: 12 }}>No alarms outside your shift hours</div></div></div>
         </div>
       )}
 
-      <div className="floor-head">My assigned shift</div>
-      <ShiftDisplay shift={data.alarm.shift} />
-
-      <div className="floor-head">Live snapshot</div>
+      {/* Row 2 — wards summary */}
+      <div className="floor-head">Wards summary</div>
       <div className="stat-grid">
-        <div className="stat"><div className="n" style={{ color: "var(--green)" }}>{reported ? s.v : "–"}</div><div className="l">VACANT</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--amber)" }}>{reported ? s.r : "–"}</div><div className="l">VAC+RES</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--red)" }}>{reported ? s.o : "–"}</div><div className="l">OCCUPIED</div></div>
-        <div className="stat"><div className="n" style={{ color: "#8B5CF6" }}>{reported ? s.or : "–"}</div><div className="l">OCC+RES</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-v)"  }}>{reported ? s.v  : "–"}</div><div className="l">VACANT</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-vr)" }}>{reported ? s.r  : "–"}</div><div className="l">VAC + RES</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-o)"  }}>{reported ? s.o  : "–"}</div><div className="l">OCCUPIED</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-or)" }}>{reported ? s.or : "–"}</div><div className="l">OCC + RES</div></div>
       </div>
 
       <div className="card" style={{ padding: 16, marginTop: 14 }}>
@@ -164,7 +210,7 @@ function Home({ data, setTab, alarmActive }) {
           <span className="h2">Round completion</span>
           <span className="chip">{s.wardsDone}/{s.wards} wards</span>
         </div>
-        <div className="bar"><span style={{ flex: pct, background: "var(--teal)" }} /><span style={{ flex: 100 - pct, background: "var(--panel-2)" }} /></div>
+        <div className="bar"><span style={{ flex: pct, background: "var(--primary)" }} /><span style={{ flex: 100 - pct, background: "var(--panel-2)" }} /></div>
         <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{s.total} beds across {s.wards} ward types</div>
       </div>
 
@@ -179,31 +225,10 @@ function Home({ data, setTab, alarmActive }) {
   );
 }
 
-// Shift is assigned by the Manager — PRE sees it read-only, cannot change it.
-function ShiftDisplay({ shift }) {
-  const isMorning = shift === "morning";
-  return (
-    <div className="card" style={{ padding: 14 }}>
-      <div className="row between">
-        <div className="row" style={{ gap: 10 }}>
-          <span style={{ color: isMorning ? "var(--amber)" : "var(--blue)" }}>
-            <Ic d={isMorning ? icons.sun : icons.moon} s={20} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>{isMorning ? "Morning / General" : "Night"}</div>
-            <div className="dim" style={{ fontSize: 11 }}>{isMorning ? "9:00 AM – 6:30 PM" : "8:00 PM – 8:00 AM"}</div>
-          </div>
-        </div>
-        <span className="chip">assigned</span>
-      </div>
-    </div>
-  );
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
-//  ENTRY TAB  — new card-based design (Image #8)
+//  ENTRY TAB — ward cards with live counts + View/Manage beds
 // ══════════════════════════════════════════════════════════════════════════════
-function Entry({ data, submitRound, alarmActive, onRefresh }) {
+function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
   const [bedModal, setBedModal] = useState(null); // { ward, tab } | null
 
   if (data.wards.length === 0)
@@ -228,80 +253,86 @@ function Entry({ data, submitRound, alarmActive, onRefresh }) {
         Open each ward to manage individual bed status, then submit.
       </div>
 
-      {data.wards.map((w, i) => {
-        const entered = w.vacant !== null;
-        return (
-          <div className="ward-card slide-up" key={w.id}
-            style={{
-              animationDelay: i * 0.03 + "s",
-              borderColor: entered ? "var(--teal-deep)" : "var(--line)",
-              padding: 16, marginBottom: 12,
-            }}>
-            {/* Header */}
-            <div className="row between" style={{ marginBottom: entered ? 14 : 12 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
-                <div className="dim" style={{ fontSize: 12 }}>
-                  {w.total} beds
-                  {entered && <span style={{ color: "var(--green)" }}> · complete</span>}
-                </div>
-              </div>
-              {entered
-                ? <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
-                : <span className="tag b">no data</span>}
-            </div>
-
-            {/* Stats block */}
-            {entered && (
-              <div style={{
-                display: "flex",
-                background: "var(--panel-2)",
-                borderRadius: 12,
-                overflow: "hidden",
-                marginBottom: 14,
+      <div className="card-grid">
+        {data.wards.map((w, i) => {
+          const entered = w.vacant !== null;
+          return (
+            <div className="ward-card slide-up" key={w.id}
+              style={{
+                animationDelay: i * 0.03 + "s",
+                borderColor: entered ? "var(--st-v)" : "var(--line)",
+                padding: 16,
+                display: "flex", flexDirection: "column",
               }}>
-                {[
-                  { label: "Vacant",   val: w.vacant,                 color: "var(--green)" },
-                  { label: "Vac+Res",  val: w.reserved ?? 0,          color: "var(--amber)" },
-                  { label: "Occupied", val: w.occupied ?? 0,          color: "var(--red)"   },
-                  { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "#8B5CF6"      },
-                ].map(({ label, val, color }, idx) => (
-                  <div key={label} style={{
-                    flex: 1,
-                    textAlign: "center",
-                    padding: "12px 6px",
-                    borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                      <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
-                    </div>
-                    <div style={{ fontSize: 26, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+              {/* Header */}
+              <div className="row between" style={{ marginBottom: entered ? 14 : 12 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
+                  <div className="dim" style={{ fontSize: 12 }}>
+                    {w.total} beds
+                    {entered && <span style={{ color: "var(--st-v)" }}> · complete</span>}
                   </div>
-                ))}
+                </div>
+                {entered
+                  ? <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
+                  : <span className="tag b">no data</span>}
               </div>
-            )}
 
-            {/* Action buttons */}
-            <div className="row" style={{ gap: 8 }}>
-              <button className="chip" style={{ flex: 1, justifyContent: "center" }}
-                onClick={() => setBedModal({ ward: w, tab: "view" })}>
-                <Ic d={icons.grid} s={13} /> View beds
-              </button>
-              <button className="chip" style={{ flex: 1, justifyContent: "center", color: "var(--teal)" }}
-                onClick={() => setBedModal({ ward: w, tab: "manage" })}>
-                <Ic d={icons.bed} s={13} /> Manage beds
-              </button>
+              {/* Stats block */}
+              {entered && (
+                <div style={{
+                  display: "flex",
+                  background: "var(--panel-2)",
+                  borderRadius: 10,
+                  overflow: "hidden",
+                  marginBottom: 14,
+                }}>
+                  {[
+                    { label: "Vacant",   val: w.vacant,             color: "var(--st-v)"  },
+                    { label: "Vac+Res",  val: w.reserved  ?? 0,     color: "var(--st-vr)" },
+                    { label: "Occupied", val: w.occupied  ?? 0,     color: "var(--st-o)"  },
+                    { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "var(--st-or)" },
+                  ].map(({ label, val, color }, idx) => (
+                    <div key={label} style={{
+                      flex: 1,
+                      textAlign: "center",
+                      padding: "12px 6px",
+                      borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
+                      </div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="row" style={{ gap: 8, marginTop: "auto" }}>
+                <button className="btn btn-ghost" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
+                  onClick={() => setBedModal({ ward: w, tab: "view" })}>
+                  <Ic d={icons.grid} s={13} /> View Beds
+                </button>
+                <button className="btn btn-primary" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
+                  onClick={() => setBedModal({ ward: w, tab: "manage" })}>
+                  <Ic d={icons.bed} s={13} /> Manage Beds
+                </button>
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       <button
         className={"btn btn-primary btn-block" + (alarmActive ? " pulse" : "")}
-        style={{ marginTop: 6 }}
-        onClick={submitRound}>
-        <Ic d={icons.check} s={18} /> Submit this round
+        style={{ marginTop: 16, maxWidth: 420, marginLeft: "auto", marginRight: "auto", display: "flex" }}
+        onClick={submitRound}
+        disabled={submitting}>
+        {submitting
+          ? <><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={18} /></span> Submitting…</>
+          : <><Ic d={icons.check} s={18} /> Submit this round</>}
       </button>
       {!allDone && (
         <div className="dim" style={{ fontSize: 11, textAlign: "center", marginTop: 6 }}>
@@ -323,8 +354,8 @@ function Entry({ data, submitRound, alarmActive, onRefresh }) {
 
 function MyMap({ data }) {
   const s = data.summary;
-  const enteredBeds = s.v + s.r + s.o + (s.or || 0);
-  const occPct = enteredBeds > 0 ? Math.round(((s.o + (s.or || 0)) / enteredBeds) * 100) : 0;
+  const enteredBeds = s.v + s.r + s.o + s.or;
+  const occPct = enteredBeds > 0 ? Math.round((s.o + s.or) / enteredBeds * 100) : 0;
 
   return (
     <div>
@@ -336,266 +367,243 @@ function MyMap({ data }) {
           <span className="h2">My occupancy</span>
           <span className="chip mono">{occPct}% full</span>
         </div>
-        <StatusBar v={s.v} r={s.r} o={s.o} or={s.or || 0} total={s.total} />
-        <div className="row" style={{ gap: 12, marginTop: 10 }}>
+        <StatusBar v={s.v} r={s.r} o={s.o} or={s.or} total={s.total} />
+        <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: "wrap" }}>
           <span className="tag v">{s.v} vacant</span>
           <span className="tag r">{s.r} vac+res</span>
           <span className="tag o">{s.o} occupied</span>
-          {(s.or || 0) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 6px" }}>{s.or} occ+res</span>}
+          {s.or > 0 && <span className="tag or">{s.or} occ+res</span>}
         </div>
       </div>
 
       <div className="floor-head">Wards ({s.wardsDone}/{s.wards} updated)</div>
-      {data.wards.map((w) => {
-        const entered = w.vacant !== null;
-        const wEntered = entered ? w.vacant + (w.occupied || 0) + (w.reserved || 0) + (w.occupied_reserved || 0) : 0;
-        const wPct = wEntered > 0 ? Math.round(((w.occupied || 0) + (w.occupied_reserved || 0)) / wEntered * 100) : 0;
-        const full = entered && (w.occupied || 0) + (w.occupied_reserved || 0) === w.total;
-        return (
-          <div className="ward-card" key={w.ward} style={{ borderColor: full ? "var(--red)" : entered ? "var(--teal-deep)" : "var(--line)" }}>
-            <div className="row between" style={{ marginBottom: entered ? 10 : 0 }}>
-              <div>
-                <div style={{ fontWeight: 700 }}>{w.ward}</div>
-                <div className="dim" style={{ fontSize: 11 }}>
-                  {w.total} beds{entered && w.updatedAt
-                    ? ` · updated ${new Date(w.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}`
-                    : ""}
+      <div className="card-grid">
+        {data.wards.map((w) => {
+          const entered = w.vacant !== null;
+          const wEntered = entered ? w.vacant + (w.occupied || 0) + (w.reserved || 0) + (w.occupied_reserved || 0) : 0;
+          const wPct = wEntered > 0 ? Math.round(((w.occupied || 0) + (w.occupied_reserved || 0)) / wEntered * 100) : 0;
+          const full = entered && (w.occupied || 0) === w.total;
+          return (
+            <div className="ward-card" key={w.ward} style={{ borderColor: full ? "var(--st-o)" : entered ? "var(--st-v)" : "var(--line)" }}>
+              <div className="row between" style={{ marginBottom: entered ? 10 : 0 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{w.ward}</div>
+                  <div className="dim" style={{ fontSize: 11 }}>
+                    {w.total} beds{entered && w.updatedAt
+                      ? ` · updated ${new Date(w.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}`
+                      : ""}
+                  </div>
                 </div>
+                {entered
+                  ? <span className="tag" style={{ background: full ? "var(--st-o-bg)" : "var(--panel-2)", color: full ? "var(--st-o)" : "var(--ink-2)" }}>
+                      {full ? "FULL" : wPct + "% full"}
+                    </span>
+                  : <span className="tag b">not entered</span>}
               </div>
-              {entered
-                ? <span className="tag" style={{ background: full ? "var(--red-bg)" : "var(--panel-2)", color: full ? "var(--red)" : "var(--ink-2)" }}>
-                    {full ? "FULL" : wPct + "% full"}
-                  </span>
-                : <span className="tag b">not entered</span>}
+              {entered && (
+                <>
+                  <StatusBar v={w.vacant} r={w.reserved} o={w.occupied} or={w.occupied_reserved ?? 0} total={w.total} />
+                  <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <span className="tag v">{w.vacant} vacant</span>
+                    <span className="tag r">{w.reserved} vac+res</span>
+                    <span className="tag o">{w.occupied} occupied</span>
+                    {(w.occupied_reserved ?? 0) > 0 && <span className="tag or">{w.occupied_reserved} occ+res</span>}
+                  </div>
+                </>
+              )}
             </div>
-            {entered && (
-              <>
-                <StatusBar v={w.vacant} r={w.reserved} o={w.occupied} or={w.occupied_reserved} total={w.total} />
-                <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                  <span className="tag v">{w.vacant} vacant</span>
-                  <span className="tag r">{w.reserved} vac+res</span>
-                  <span className="tag o">{w.occupied} occupied</span>
-                  {(w.occupied_reserved || 0) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#8B5CF6", background: "#8B5CF620", borderRadius: 8, padding: "2px 6px" }}>{w.occupied_reserved} occ+res</span>}
-                </div>
-              </>
-            )}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// ── bed classification badges (read-only, set by Manager only) ────────────────
-function BedBadges({ bed }) {
-  if (!bed) return null;
-  const isNC  = bed.bed_type === "Non-Census";
-  const isRv  = bed.unit_type === "Renova";
-  const notOp = !bed.operational_status;
-  return (
-    <div style={{ display: "flex", gap: 2, justifyContent: "center", marginTop: 3, alignItems: "center" }}>
-      <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: isNC ? "var(--ink-3)" : "#0EA5E9" }}>
-        {isNC ? "NC" : "C"}
-      </span>
-      {bed.unit_type && (
-        <>
-          <span style={{ fontSize: 6, color: "var(--line)" }}>·</span>
-          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: isRv ? "#F59E0B" : "var(--teal)" }}>
-            {isRv ? "Rv" : "K"}
-          </span>
-        </>
-      )}
-      {notOp && (
-        <>
-          <span style={{ fontSize: 6, color: "var(--line)" }}>·</span>
-          <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: "-0.3px", color: "var(--red)" }}>N/O</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── dual-state bed color/label helpers ────────────────────────────────────────
-function naturalSort(a, b) {
-  const re = /(\d+)/g;
-  const ap = a.split(re), bp = b.split(re);
-  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
-    const ai = ap[i] ?? "", bi = bp[i] ?? "";
-    const an = parseInt(ai, 10), bn = parseInt(bi, 10);
-    if (!isNaN(an) && !isNaN(bn) && an !== bn) return an - bn;
-    if (ai !== bi) return ai.localeCompare(bi);
-  }
-  return 0;
-}
-
-function bedStateColor(physical, reservation) {
-  if (physical === "VACANT"   && reservation === "NONE")     return "var(--green)";
-  if (physical === "VACANT"   && reservation === "RESERVED") return "var(--amber)";
-  if (physical === "OCCUPIED" && reservation === "NONE")     return "var(--red)";
-  if (physical === "OCCUPIED" && reservation === "RESERVED") return "#8B5CF6";
-  return "var(--ink-3)";
-}
-function bedStateLabel(physical, reservation) {
-  if (physical === "VACANT"   && reservation === "NONE")     return "Vacant";
-  if (physical === "VACANT"   && reservation === "RESERVED") return "Vacant · Reserved";
-  if (physical === "OCCUPIED" && reservation === "NONE")     return "Occupied";
-  if (physical === "OCCUPIED" && reservation === "RESERVED") return "Occupied · Reserved";
-  return "Unknown";
-}
-function bedStateCode(physical, reservation) {
-  if (physical === "VACANT"   && reservation === "NONE")     return "V";
-  if (physical === "VACANT"   && reservation === "RESERVED") return "V+R";
-  if (physical === "OCCUPIED" && reservation === "NONE")     return "O";
-  if (physical === "OCCUPIED" && reservation === "RESERVED") return "O+R";
-  return "?";
-}
-
-// ── Bed row cell — colored icon circle + name ─────────────────────────────────
+// ── Bed tile — name + status label, status-tinted ─────────────────────────────
 const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
   const color = bedStateColor(bed.physical_status, bed.reservation_status);
+  const bg    = bedStateBg(bed.physical_status, bed.reservation_status);
   const dimmed = bed.operational_status === false;
   return (
     <div
+      className={"bed-tile" + (onClick ? " tap" : "")}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
-      style={{
-        display: "flex", alignItems: "center", gap: 8,
-        padding: "10px 8px",
-        borderRight: "1px solid var(--line)",
-        borderBottom: "1px solid var(--line)",
-        cursor: onClick ? "pointer" : "default",
-        userSelect: "none",
-        opacity: dimmed ? 0.5 : 1,
-        WebkitTapHighlightColor: "transparent",
-        transition: "background 0.1s",
-      }}
-      onTouchStart={onClick ? (e) => { e.currentTarget.style.background = "var(--panel-2)"; } : undefined}
-      onTouchEnd={onClick   ? (e) => { e.currentTarget.style.background = "transparent"; }   : undefined}
+      style={{ borderColor: color, background: bg, opacity: dimmed ? 0.5 : 1 }}
     >
-      <div style={{
-        width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-        background: color,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        boxShadow: `0 2px 6px ${color}55`,
-      }}>
-        <Ic d={icons.bed} s={14} style={{ color: "#fff" }} />
-      </div>
-      <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {bed.bed_name}
-      </span>
+      <span className="bname">{bed.bed_name}</span>
+      <span className="bstate" style={{ color }}>{bedStateShort(bed.physical_status, bed.reservation_status)}</span>
+      {bed.physical_status === "OCCUPIED" && bed.payer_type && (
+        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--primary)", lineHeight: 1.1,
+          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {bed.payer_type}
+        </span>
+      )}
     </div>
   );
 });
 
-// ── Bed detail bottom sheet — opens when a bed card is tapped ─────────────────
+// ── Bed status dialog — centered popup ────────────────────────────────────────
 function BedDetailSheet({ bed, onSave, onClose }) {
   const [physical,    setPhysical]    = useState(bed.physical_status);
   const [reservation, setReservation] = useState(bed.reservation_status);
+  const [payer,       setPayer]       = useState(bed.payer_type || "");
+  const [payerTypes,  setPayerTypes]  = useState([]);
   const [saving,      setSaving]      = useState(false);
 
   const color = bedStateColor(physical, reservation);
 
+  useEffect(() => {
+    api.prePayerTypes().then(r => setPayerTypes(r.payerTypes || [])).catch(() => {});
+  }, []);
+
+  const handleSetPhysical = (val) => {
+    setPhysical(val);
+    if (val === "VACANT") setPayer("");
+  };
+
+  const needsPayer = physical === "OCCUPIED";
+  const payerLocked = physical === "OCCUPIED" && reservation === "RESERVED" && bed.physical_status === "OCCUPIED";
+
   async function handleSave() {
+    if (needsPayer && !payer && !payerLocked) return;
     setSaving(true);
-    await onSave(bed.id, physical, reservation);
+    const payerArg = physical === "VACANT" ? null : (payerLocked && payer === (bed.payer_type || "") ? undefined : payer || null);
+    await onSave(bed.id, physical, reservation, payerArg);
     setSaving(false);
     onClose();
   }
 
-  const classificationBadges = [
-    [bed.bed_type || "Census", bed.bed_type === "Non-Census" ? "var(--ink-3)" : "#0EA5E9"],
-    ...(bed.unit_type ? [[bed.unit_type, bed.unit_type === "Renova" ? "#F59E0B" : "var(--teal)"]] : []),
-    [bed.operational_status !== false ? "Operational" : "Non-Operational",
-     bed.operational_status !== false ? "var(--green)" : "var(--red)"],
+  const infoCols = [
+    ["Bed Type",    bed.bed_type || "Census"],
+    ...(bed.unit_type ? [["Unit", bed.unit_type]] : []),
+    ["Operational", bed.operational_status !== false ? "Yes" : "No"],
   ];
 
   return (
     <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+      position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)",
       display: "flex", alignItems: "center", justifyContent: "center",
       zIndex: 1100, padding: 20,
     }} onClick={onClose}>
       <div style={{
         background: "var(--panel)",
-        borderRadius: 20,
-        width: "100%", maxWidth: 340,
-        padding: "24px 20px 20px",
+        borderRadius: 16,
+        width: "100%", maxWidth: 400,
         maxHeight: "90vh", overflowY: "auto",
         animation: "slideUp .18s both",
         boxShadow: "0 8px 40px rgba(0,0,0,0.22)",
       }} onClick={(e) => e.stopPropagation()}>
 
-        {/* Bed hero */}
-        <div style={{ textAlign: "center", marginBottom: 22 }}>
+        {/* Header */}
+        <div className="row between" style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
+          <div style={{ fontWeight: 700, fontSize: 15 }}>Update Bed Status — {bed.bed_name}</div>
+          <button className="appbar-btn" onClick={onClose} aria-label="Close" style={{ width: 30, height: 30 }}>✕</button>
+        </div>
+
+        <div style={{ padding: "16px 20px 20px" }}>
+          {/* Info strip */}
           <div style={{
-            display: "inline-flex", alignItems: "center", justifyContent: "center",
-            minWidth: 72, height: 72, borderRadius: 18, padding: "0 12px",
-            background: color + "1a", border: `3px solid ${color}`,
-            fontSize: 26, fontWeight: 900, color, marginBottom: 10,
-            letterSpacing: "-0.5px",
-          }}>{bed.bed_name}</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color }}>{bedStateLabel(physical, reservation)}</div>
-        </div>
-
-        {/* Classification — read-only */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 24, flexWrap: "wrap", justifyContent: "center" }}>
-          {classificationBadges.map(([label, badgeColor]) => (
-            <span key={label} style={{
-              fontSize: 12, fontWeight: 700, padding: "4px 10px", borderRadius: 8,
-              background: badgeColor + "18", color: badgeColor, border: `1px solid ${badgeColor}40`,
-            }}>{label}</span>
-          ))}
-        </div>
-
-        {/* Physical Status */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-            Physical Status
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {[["VACANT","var(--green)","Vacant"],["OCCUPIED","var(--red)","Occupied"]].map(([val, c, lbl]) => (
-              <button key={val} onClick={() => setPhysical(val)} style={{
-                flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 700,
-                border: `2px solid ${c}`,
-                background: physical === val ? c : "transparent",
-                color: physical === val ? "#fff" : c,
-                cursor: "pointer", transition: "all 0.15s",
-              }}>{lbl}</button>
+            display: "flex", borderRadius: 10, overflow: "hidden",
+            background: "var(--panel-2)", marginBottom: 18,
+          }}>
+            {infoCols.map(([label, val], i) => (
+              <div key={label} style={{
+                flex: 1, padding: "9px 8px", textAlign: "center",
+                borderLeft: i > 0 ? "1px solid var(--line)" : "none",
+              }}>
+                <div style={{ fontSize: 9.5, color: "var(--ink-3)", fontWeight: 700, letterSpacing: .4, textTransform: "uppercase" }}>{label}</div>
+                <div style={{
+                  fontSize: 12, fontWeight: 700, marginTop: 3,
+                  color: label === "Operational" ? (val === "Yes" ? "var(--st-v)" : "var(--st-or)") : "var(--ink)",
+                }}>{val}</div>
+              </div>
             ))}
+            <div style={{ flex: 1.2, padding: "9px 8px", textAlign: "center", borderLeft: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 9.5, color: "var(--ink-3)", fontWeight: 700, letterSpacing: .4, textTransform: "uppercase" }}>Current</div>
+              <div style={{ fontSize: 12, fontWeight: 700, marginTop: 3, color }}>{bedStateShort(physical, reservation)}</div>
+            </div>
           </div>
-        </div>
 
-        {/* Reservation Status */}
-        <div style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-            Reservation
+          {/* Physical Status */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Physical Status
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[["VACANT","var(--st-v)","Vacant"],["OCCUPIED","var(--st-o)","Occupied"]].map(([val, c, lbl]) => (
+                <button key={val} onClick={() => handleSetPhysical(val)} style={{
+                  flex: 1, padding: "11px 0", borderRadius: 10, fontSize: 14, fontWeight: 700,
+                  border: `2px solid ${physical === val ? c : "var(--line)"}`,
+                  background: physical === val ? c : "transparent",
+                  color: physical === val ? "#fff" : "var(--ink-2)",
+                  cursor: "pointer", transition: "all 0.15s",
+                }}>{lbl}</button>
+              ))}
+            </div>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {[["NONE","var(--ink-3)","None"],["RESERVED","var(--amber)","Reserved"]].map(([val, c, lbl]) => (
-              <button key={val} onClick={() => setReservation(val)} style={{
-                flex: 1, padding: "11px 0", borderRadius: 12, fontSize: 14, fontWeight: 700,
-                border: `2px solid ${c}`,
-                background: reservation === val ? c : "transparent",
-                color: reservation === val ? "#fff" : c,
-                cursor: "pointer", transition: "all 0.15s",
-              }}>{lbl}</button>
-            ))}
-          </div>
-        </div>
 
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 10 }}>
-          <button className="chip" style={{ flex: 1, justifyContent: "center", padding: "11px 0", fontSize: 14 }} onClick={onClose}>
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving} style={{
-            flex: 2, padding: "11px 0", borderRadius: 12, fontWeight: 700,
-            fontSize: 14, background: "var(--teal)", color: "#fff",
-            border: "none", cursor: saving ? "not-allowed" : "pointer",
-            opacity: saving ? 0.7 : 1, transition: "opacity 0.15s",
-          }}>{saving ? "Saving…" : "Save changes"}</button>
+          {/* Reservation Status */}
+          <div style={{ marginBottom: physical === "OCCUPIED" ? 16 : 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Reservation Status
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {[["NONE","var(--ink-2)","None"],["RESERVED","var(--st-vr)","Reserved"]].map(([val, c, lbl]) => (
+                <button key={val} onClick={() => setReservation(val)} style={{
+                  flex: 1, padding: "11px 0", borderRadius: 10, fontSize: 14, fontWeight: 700,
+                  border: `2px solid ${reservation === val ? c : "var(--line)"}`,
+                  background: reservation === val ? c : "transparent",
+                  color: reservation === val ? "#fff" : "var(--ink-2)",
+                  cursor: "pointer", transition: "all 0.15s",
+                }}>{lbl}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Payer type — shown only when OCCUPIED */}
+          {physical === "OCCUPIED" && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+                Payer Type {!payerLocked && <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>}
+              </div>
+              {payerLocked ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: "var(--primary)" }}>{payer || "—"}</span>
+                  <span className="dim" style={{ fontSize: 11 }}>(same patient — change if needed)</span>
+                  <select className="field" value={payer} style={{ flex: 1, minWidth: 160, fontSize: 13 }}
+                    onChange={(e) => setPayer(e.target.value)}>
+                    <option value="">— Keep current —</option>
+                    {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <select className="field" value={payer}
+                  onChange={(e) => setPayer(e.target.value)}
+                  style={{ borderColor: needsPayer && !payer ? "var(--red)" : undefined }}>
+                  <option value="">— Select payer type —</option>
+                  {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
+                </select>
+              )}
+              {needsPayer && !payer && !payerLocked && (
+                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Payer type is required for occupied beds.</div>
+              )}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <button className="btn btn-ghost" style={{ padding: "10px 18px" }} onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" style={{ padding: "10px 18px" }}
+              disabled={saving || (needsPayer && !payer && !payerLocked)}
+              onClick={handleSave}>
+              {saving ? "Saving…" : "Update Status"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -603,7 +611,7 @@ function BedDetailSheet({ bed, onSave, onClose }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  PRE BED MODAL  (View + Manage tabs — compact grid layout)
+//  PRE BED MODAL  (View + Manage tabs — bed tile grid)
 // ══════════════════════════════════════════════════════════════════════════════
 function PreBedModal({ ward, initialTab, onClose }) {
   useModal(onClose);
@@ -638,7 +646,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
 
   const displayed = sortedBeds.filter(b => {
     if (filter === "KIMS")     return b.unit_type === "KIMS";
-    if (filter === "Renova")   return b.unit_type === "Renova";
+    if (filter === "Renova")   return b.unit_type?.includes("Renova");
     if (filter === "Op")       return !!b.operational_status;
     if (filter === "Non-Op")   return !b.operational_status;
     if (filter === "Vacant")   return b.physical_status === "VACANT";
@@ -648,16 +656,16 @@ function PreBedModal({ ward, initialTab, onClose }) {
   });
 
   // Optimistic update — snapshot restored on failure; unit_type preserved via spread
-  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus) => {
+  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus, payerType) => {
     let snapshot;
     setBeds(prev => {
       snapshot = prev;
       return prev.map(b => b.id === bedId
-        ? { ...b, physical_status: physicalStatus, reservation_status: reservationStatus }
+        ? { ...b, physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: physicalStatus === "VACANT" ? null : (payerType ?? b.payer_type) }
         : b);
     });
     try {
-      await api.preUpdateBedStatus(bedId, physicalStatus, reservationStatus);
+      await api.preUpdateBedStatus(bedId, physicalStatus, reservationStatus, payerType);
     } catch (e) {
       setBeds(snapshot);
       showToast(toastErr(e));
@@ -681,34 +689,28 @@ function PreBedModal({ ward, initialTab, onClose }) {
   function BedGrid({ clickable }) {
     const fc = { ALL: sortedBeds.length, KIMS: 0, Renova: 0, Op: 0, "Non-Op": 0, Vacant: 0, Occupied: 0, Reserved: 0 };
     for (const b of sortedBeds) {
-      if (b.unit_type === "Renova") fc["Renova"]++;
+      if (b.unit_type?.includes("Renova")) fc["Renova"]++;
       else if (b.unit_type === "KIMS") fc["KIMS"]++;
       if (b.operational_status !== false) fc["Op"]++; else fc["Non-Op"]++;
       if (b.physical_status === "VACANT") fc["Vacant"]++; else fc["Occupied"]++;
       if (b.reservation_status === "RESERVED") fc["Reserved"]++;
     }
     const CHIPS = [
-      { key: "ALL",      label: "All",         color: "var(--ink)"  },
-      { key: "KIMS",     label: "KIMS",        color: "var(--teal)" },
-      { key: "Renova",   label: "Renova",      color: "#F59E0B"     },
-      { key: "Op",       label: "Operational", color: "var(--green)"},
-      { key: "Non-Op",   label: "Non-Op",      color: "var(--red)"  },
-      { key: "Vacant",   label: "Vacant",      color: "var(--green)"},
-      { key: "Occupied", label: "Occupied",    color: "var(--red)"  },
-      { key: "Reserved", label: "Reserved",    color: "var(--amber)"},
+      { key: "ALL",      label: "All"         },
+      { key: "KIMS",     label: "KIMS"        },
+      { key: "Renova",   label: "Renova"      },
+      { key: "Op",       label: "Operational" },
+      { key: "Non-Op",   label: "Non-Op"      },
+      { key: "Vacant",   label: "Vacant"      },
+      { key: "Occupied", label: "Occupied"    },
+      { key: "Reserved", label: "Reserved"    },
     ];
     return (
       <>
-        {/* Filter pills — wrap, evenly spaced */}
+        {/* Filter chips — compact, wrap automatically */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-          {CHIPS.map(({ key, label, color }) => (
-            <button key={key} onClick={() => setFilter(key)} style={{
-              padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 600,
-              border: `1.5px solid ${color}`,
-              background: filter === key ? color : "transparent",
-              color: filter === key ? "#fff" : color,
-              cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-            }}>
+          {CHIPS.map(({ key, label }) => (
+            <button key={key} className={"fchip" + (filter === key ? " on" : "")} onClick={() => setFilter(key)}>
               {label}{fc[key] > 0 ? ` (${fc[key]})` : ""}
             </button>
           ))}
@@ -720,12 +722,7 @@ function PreBedModal({ ward, initialTab, onClose }) {
             No beds in this filter
           </div>
         ) : (
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            borderTop: "1px solid var(--line)",
-            borderLeft: "1px solid var(--line)",
-          }}>
+          <div className="bed-grid">
             {displayed.map((bed) => (
               <BedGridCard
                 key={bed.id}
@@ -735,6 +732,18 @@ function PreBedModal({ ward, initialTab, onClose }) {
             ))}
           </div>
         )}
+
+        {/* Legend */}
+        <div className="row" style={{ gap: 14, marginTop: 14, flexWrap: "wrap" }}>
+          {[
+            ["Vacant", "var(--st-v)"], ["Vacant + Reserved", "var(--st-vr)"],
+            ["Occupied", "var(--st-o)"],
+          ].map(([lbl, c]) => (
+            <span key={lbl} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--ink-2)", fontWeight: 600 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: c }} />{lbl}
+            </span>
+          ))}
+        </div>
       </>
     );
   }
@@ -754,11 +763,11 @@ function PreBedModal({ ward, initialTab, onClose }) {
                 {beds.length} bed{beds.length !== 1 ? "s" : ""}
               </div>
             </div>
-            <button className="chip" onClick={onClose}>Close</button>
+            <button className="chip" onClick={onClose}>✕ Close</button>
           </div>
 
           {/* Tab bar */}
-          <div className="seg" style={{ marginBottom: 14 }}>
+          <div className="seg" style={{ marginBottom: 14, maxWidth: 320 }}>
             <button className={tab === "view" ? "on" : ""} onClick={() => setTab("view")}>
               <Ic d={icons.grid} s={14} /> View
             </button>
@@ -766,8 +775,6 @@ function PreBedModal({ ward, initialTab, onClose }) {
               <Ic d={icons.bed} s={14} /> Manage
             </button>
           </div>
-
-
 
           {/* Tab content */}
           {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} />}
@@ -778,9 +785,9 @@ function PreBedModal({ ward, initialTab, onClose }) {
       {editingBed && (
         <BedDetailSheet
           bed={editingBed}
-          onSave={async (bedId, physical, reservation) => {
-            setEditingBed(prev => ({ ...prev, physical_status: physical, reservation_status: reservation }));
-            await changeStatus(bedId, physical, reservation);
+          onSave={async (bedId, physical, reservation, payer) => {
+            setEditingBed(prev => ({ ...prev, physical_status: physical, reservation_status: reservation, payer_type: physical === "VACANT" ? null : (payer ?? prev.payer_type) }));
+            await changeStatus(bedId, physical, reservation, payer);
           }}
           onClose={() => setEditingBed(null)}
         />

@@ -1,4 +1,4 @@
-import html2canvas from "html2canvas";
+import { toPng, toBlob } from "html-to-image";
 
 const FILE_PREFIX = "bedflow-report";
 
@@ -8,36 +8,22 @@ function fileName() {
   return `${FILE_PREFIX}-${stamp}.png`;
 }
 
-async function elementToCanvas(el) {
-  return html2canvas(el, {
-    scale: window.devicePixelRatio > 1 ? 2 : 1.5,
-    backgroundColor: "#ffffff",
-    useCORS: true,
-    logging: false,
-    windowWidth: el.scrollWidth,
-    windowHeight: el.scrollHeight,
-  });
-}
-
-function canvasToBlob(canvas) {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Canvas export failed"))), "image/png", 1);
-  });
+function getOpts() {
+  return { pixelRatio: Math.max(window.devicePixelRatio ?? 1, 2), backgroundColor: "#ffffff" };
 }
 
 export async function snapshotDownload(el) {
-  const canvas = await elementToCanvas(el);
+  const dataUrl = await toPng(el, getOpts());
   const link = document.createElement("a");
   link.download = fileName();
-  link.href = canvas.toDataURL("image/png");
+  link.href = dataUrl;
   link.click();
 }
 
 export async function snapshotCopy(el) {
   if (!navigator.clipboard || typeof window.ClipboardItem === "undefined")
     throw new Error("Clipboard image copy not supported on this device");
-  const canvas = await elementToCanvas(el);
-  const blob = await canvasToBlob(canvas);
+  const blob = await toBlob(el, getOpts());
   await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
 }
 
@@ -52,8 +38,7 @@ export function snapshotCanShare() {
 
 export async function snapshotShare(el) {
   if (!snapshotCanShare()) throw new Error("Sharing not supported on this device");
-  const canvas = await elementToCanvas(el);
-  const blob = await canvasToBlob(canvas);
+  const blob = await toBlob(el, getOpts());
   const file = new File([blob], fileName(), { type: "image/png" });
   await navigator.share({
     files: [file],
