@@ -333,6 +333,44 @@ function WardCard({ ward, index, onManage }) {
   const total  = ward.total_beds ?? 0;
   const allVacant = counts.vn === total && total > 0;
 
+  // No beds assigned to this nurse for this ward — show warning, block manage
+  if (ward.beds_warning) {
+    return (
+      <div className="ward-card slide-up" style={{
+        animationDelay: index * 0.03 + "s",
+        padding: 16,
+        display: "flex", flexDirection: "column",
+      }}>
+        <div className="row between" style={{ marginBottom: 14 }}>
+          <div>
+            {(ward.block_name || ward.floor_name) && (
+              <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>
+                {[ward.block_name, ward.floor_name].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{ward.name}</div>
+            <div className="dim" style={{ fontSize: 12 }}>{total} beds</div>
+          </div>
+          <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
+            <Ic d={icons.alert} s={12} /> No access
+          </span>
+        </div>
+        <div style={{
+          background: "var(--panel-2)", borderRadius: 10, padding: "14px 16px",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <Ic d={icons.alert} s={16} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "var(--warn, #b45309)" }}>No beds assigned</div>
+            <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
+              Contact your manager to assign beds to your account for this ward.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="ward-card slide-up" style={{
       animationDelay: index * 0.03 + "s",
