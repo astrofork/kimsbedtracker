@@ -2207,9 +2207,14 @@ function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStatio
                       color: w.bed_type === "Non-Census" ? "#8a7000" : "var(--teal)",
                       border: `1px solid ${w.bed_type === "Non-Census" ? "#d4c060" : "var(--teal)"}`,
                     }}>{w.bed_type || "Census"}</span>
-                    <span className="dim" style={{ fontSize: 10 }}>
-                      {w.bed_count ?? w.total_beds ?? 0} beds
-                    </span>
+                    {(w.bed_count ?? w.total_beds ?? 0) === 0
+                      ? <span style={{ fontSize: 10, fontWeight: 700, color: "var(--warn, #b45309)" }}>
+                          ⚠ No beds
+                        </span>
+                      : <span className="dim" style={{ fontSize: 10 }}>
+                          {w.bed_count ?? w.total_beds ?? 0} beds
+                        </span>
+                    }
                   </div>
                 </div>
               </div>
@@ -2503,24 +2508,37 @@ function PreBlockEditor({ block, allWards, onClose, onSaved, showToast }) {
                 </div>
               ) : (
                 <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", marginBottom: 4 }}>
-                  {pickedWards.map((w, i) => (
-                    <div key={w.id} style={{
-                      padding: "10px 12px", display: "flex", alignItems: "center", gap: 10,
-                      borderBottom: i < pickedWards.length - 1 ? "1px solid var(--line)" : "none",
-                    }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{w.name}</div>
-                        <div className="dim" style={{ fontSize: 11 }}>
-                          {[w.block_name && `Block ${w.block_name}`, w.floor_name]
-                            .filter(Boolean).join(" · ")}
+                  {pickedWards.map((w, i) => {
+                    const noBeds = (w.bed_count ?? w.total_beds ?? 0) === 0;
+                    return (
+                      <div key={w.id} style={{
+                        padding: "10px 12px", display: "flex", alignItems: "center", gap: 10,
+                        borderBottom: i < pickedWards.length - 1 ? "1px solid var(--line)" : "none",
+                        background: noBeds ? "var(--warn-bg, #fff3cd)" : undefined,
+                      }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                            {w.name}
+                            {noBeds && (
+                              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--warn, #b45309)",
+                                background: "rgba(180,83,9,0.12)", borderRadius: 4, padding: "1px 5px" }}>
+                                NO BEDS
+                              </span>
+                            )}
+                          </div>
+                          <div className="dim" style={{ fontSize: 11 }}>
+                            {noBeds
+                              ? "Add beds to this ward before saving"
+                              : [w.block_name && `Block ${w.block_name}`, w.floor_name].filter(Boolean).join(" · ")}
+                          </div>
                         </div>
+                        <button className="chip" style={{ fontSize: 11, color: "var(--red)", padding: "2px 8px" }}
+                          onClick={() => setWardIds(ids => ids.filter(id => id !== w.id))}>
+                          ✕
+                        </button>
                       </div>
-                      <button className="chip" style={{ fontSize: 11, color: "var(--red)", padding: "2px 8px" }}
-                        onClick={() => setWardIds(ids => ids.filter(id => id !== w.id))}>
-                        ✕
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
