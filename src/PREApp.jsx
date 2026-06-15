@@ -38,10 +38,11 @@ export default function PREApp({ user, meta, onLogout }) {
   useEffect(() => {
     const socket = createSocket();
     const refresh = () => { loadRef.current(); };
-    socket.on("bed:update",   refresh); // ward counts changed
-    socket.on("round:submit", refresh); // round submitted → alarm clears
-    socket.on("alarm:active", refresh); // scheduler fired → alarm state changed
-    socket.on("connect",      refresh); // reconnect → catch missed updates
+    socket.on("bed:update",       refresh); // ward counts changed
+    socket.on("round:submit",     refresh); // round submitted → alarm clears
+    socket.on("alarm:active",     refresh); // scheduler fired → alarm state changed
+    socket.on("ward:operational", refresh); // manager toggled ward operational status
+    socket.on("connect",          refresh); // reconnect → catch missed updates
     return () => { socket.disconnect(); };
   }, []);
 
