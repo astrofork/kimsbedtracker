@@ -10,9 +10,13 @@ const BedCard = React.memo(function BedCard({ bed, onClick }) {
   const bg    = bedStateBg(bed.physical_status, bed.reservation_status);
   const dimmed = bed.operational_status === false;
   return (
-    <div className="bed-tile tap" role="button" tabIndex={0} onClick={onClick}
-      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClick()}
-      style={{ borderColor: color, background: bg, opacity: dimmed ? 0.5 : 1 }}
+    <div
+      className={"bed-tile" + (onClick ? " tap" : "")}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
+      style={{ borderColor: color, background: bg, opacity: dimmed ? 0.5 : 1, cursor: onClick ? undefined : "default" }}
     >
       <span className="bname">{bed.bed_name}</span>
       <span className="bstate" style={{ color }}>{bedStateShort(bed.physical_status, bed.reservation_status)}</span>
@@ -296,7 +300,8 @@ function NurseBedModal({ ward, onSave, onClose }) {
           ) : (
             <div className="bed-grid">
               {displayed.map((bed) => (
-                <BedCard key={bed.id} bed={bed} onClick={() => setEditingBed(bed)} />
+                <BedCard key={bed.id} bed={bed}
+                  onClick={bed.operational_status !== false ? () => setEditingBed(bed) : undefined} />
               ))}
             </div>
           )}
@@ -332,6 +337,44 @@ function WardCard({ ward, index, onManage }) {
   const counts = { vn: ward.vacant ?? 0, vr: ward.reserved ?? 0, on: ward.occupied ?? 0 };
   const total  = ward.total_beds ?? 0;
   const allVacant = counts.vn === total && total > 0;
+
+  // Ward is non-operational — show warning, block manage
+  if (ward.operational === false) {
+    return (
+      <div className="ward-card slide-up" style={{
+        animationDelay: index * 0.03 + "s",
+        padding: 16, display: "flex", flexDirection: "column",
+        opacity: 0.75,
+      }}>
+        <div className="row between" style={{ marginBottom: 14 }}>
+          <div>
+            {(ward.block_name || ward.floor_name) && (
+              <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>
+                {[ward.block_name, ward.floor_name].filter(Boolean).join(" · ")}
+              </div>
+            )}
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{ward.name}</div>
+            <div className="dim" style={{ fontSize: 12 }}>{ward.total_beds ?? 0} beds</div>
+          </div>
+          <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
+            <Ic d={icons.alert} s={12} /> Non-op
+          </span>
+        </div>
+        <div style={{
+          background: "var(--panel-2)", borderRadius: 10, padding: "14px 16px",
+          display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <Ic d={icons.alert} s={16} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 13, color: "var(--warn, #b45309)" }}>Ward non-operational</div>
+            <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
+              This ward has been marked non-operational by the manager. Beds cannot be updated.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // No beds assigned to this nurse for this ward — show warning, block manage
   if (ward.beds_warning) {
