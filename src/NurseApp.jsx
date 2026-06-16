@@ -478,7 +478,8 @@ function WardCard({ ward, index, onManage }) {
 // ══════════════════════════════════════════════════════════════════════════════
 export default function NurseApp({ user, onLogout }) {
   const [wards,       setWards]       = useState(null);
-  const [loadError,   setLoadError]   = useState(false);
+  const [loadError,   setLoadError]   = useState(null); // null | string — real network errors only
+  const [configError, setConfigError] = useState(null); // null | string — account config issues
   const [modalWardId, setModalWardId] = useState(null);
   const [stationName, setStationName] = useState(user.nursing_station || "");
   const [toast,       setToast]       = useState("");
@@ -494,19 +495,24 @@ export default function NurseApp({ user, onLogout }) {
   }, []);
 
   const load = useCallback(async () => {
-    setLoadError(false);
+    setLoadError(null);
     try {
       const data = await api.nurseMe();
+      setConfigError(null);
       setWards(data.wards || []);
       setStationName(data.nursing_station || "");
       setLastSync(new Date());
     } catch (e) {
-      if ((e?.message ?? "") !== "Unauthorized") {
-        setLoadError(true);
-        showToast(toastErr(e));
+      const msg = e?.message ?? "";
+      if (msg === "Unauthorized") return;
+      if (msg.includes("No nursing station")) {
+        setConfigError(msg);
+        setWards([]);
+      } else {
+        setLoadError(msg || "Unable to connect to server");
       }
     }
-  }, [showToast]);
+  }, []);
 
   // Always keep loadRef pointing at the current load function
   loadRef.current = load;
@@ -610,9 +616,11 @@ export default function NurseApp({ user, onLogout }) {
       {wards.length === 0 ? (
         <div className="card empty" style={{ marginTop: 20 }}>
           <Ic d={icons.grid} s={32} />
-          <div style={{ marginTop: 10, fontWeight: 600 }}>No wards in this station</div>
+          <div style={{ marginTop: 10, fontWeight: 600 }}>
+            {configError ? "No nursing station assigned" : "No wards in this station"}
+          </div>
           <div style={{ fontSize: 12, marginTop: 4, color: "var(--ink-3)" }}>
-            Ask the Manager to assign wards to {stationName || "your nursing station"}.
+            {configError ?? `Ask the Manager to assign wards to ${stationName || "your nursing station"}.`}
           </div>
         </div>
       ) : (

@@ -177,6 +177,9 @@ function Reporting() {
   const [bedsBlock,  setBedsBlock]  = useState(null); // { pre, wards } | null
   const [toast,      setToast]      = useState("");
   const [expanded,   setExpanded]   = useState({});
+  const [openBlocks, setOpenBlocks] = useState({});
+  const [blockPages, setBlockPages] = useState({});
+  const STALE_PAGE = 5;
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
@@ -245,6 +248,15 @@ function Reporting() {
     }
   stale.sort((a, b) => b.age - a.age);
 
+  const staleByBlock = Object.values(
+    stale.reduce((acc, s) => {
+      if (!acc[s.pre]) acc[s.pre] = { pre: s.pre, wards: [], oldest: 0 };
+      acc[s.pre].wards.push(s);
+      if (s.age > acc[s.pre].oldest) acc[s.pre].oldest = s.age;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.oldest - a.oldest);
+
   return (
     <div>
       <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Team Report</div>
@@ -304,9 +316,10 @@ function Reporting() {
         </div>
       </div>
 
-      {/* ── Stale ward warnings ── */}
+      {/* ── Stale ward warnings — grouped by PRE block ── */}
       {stale.length > 0 && (
         <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 12, borderColor: "var(--red)" }}>
+          {/* Header */}
           <div style={{ padding: "12px 14px", background: "var(--red-bg)" }}>
             <div className="row" style={{ gap: 8, marginBottom: 4 }}>
               <span style={{ color: "var(--red)" }}><Ic d={icons.bell} s={17} /></span>
@@ -318,31 +331,78 @@ function Reporting() {
               These wards haven't been updated in over 3 hours. The PRE team may need a prompt.
             </div>
           </div>
-          <div style={{ padding: "0 14px" }}>
-            {stale.map((s, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", justifyContent: "space-between",
-                padding: "10px 0",
-                borderBottom: i < stale.length - 1 ? "1px solid var(--line)" : "none",
-              }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>
-                    {s.pre} · <span style={{ color: "var(--ink-2)" }}>{s.ward}</span>
+
+          {/* PRE block groups */}
+          {staleByBlock.map((group, gi) => {
+            const isOpen = !!openBlocks[group.pre];
+            const page   = blockPages[group.pre] || 0;
+            const pages  = Math.ceil(group.wards.length / STALE_PAGE);
+            const slice  = group.wards.slice(page * STALE_PAGE, (page + 1) * STALE_PAGE);
+            return (
+              <div key={group.pre} style={{ borderTop: "1px solid var(--line)" }}>
+                {/* Group row — tap to expand */}
+                <button onClick={() => setOpenBlocks(p => ({ ...p, [group.pre]: !p[group.pre] }))}
+                  style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "11px 14px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
+                  <div>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{group.pre}</span>
+                    <span style={{ fontSize: 11, color: "var(--ink-3)", marginLeft: 8 }}>
+                      {group.wards.length} ward{group.wards.length !== 1 ? "s" : ""}
+                    </span>
                   </div>
-                  <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-                    Last updated at {fmtTime(s.updatedAt)}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 20,
+                      background: "var(--red-bg)", color: "var(--red)", border: "1px solid var(--red)", whiteSpace: "nowrap" }}>
+                      oldest: {elapsed(group.wards[0].updatedAt)}
+                    </span>
+                    <span style={{ color: "var(--ink-3)", display: "flex", transform: isOpen ? "rotate(90deg)" : "rotate(-90deg)", transition: "transform 0.15s" }}>
+                      <Ic d={icons.chevron} s={14} />
+                    </span>
                   </div>
-                </div>
-                <span style={{
-                  fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 20,
-                  background: "var(--red-bg)", color: "var(--red)", border: "1px solid var(--red)",
-                  whiteSpace: "nowrap",
-                }}>
-                  {elapsed(s.updatedAt)}
-                </span>
+                </button>
+
+                {/* Ward list (paginated) */}
+                {isOpen && (
+                  <div style={{ padding: "0 14px 10px" }}>
+                    {slice.map((s, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "8px 0", borderBottom: i < slice.length - 1 ? "1px solid var(--line)" : "none" }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{s.ward}</div>
+                          <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>Last updated at {fmtTime(s.updatedAt)}</div>
+                        </div>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 20,
+                          background: "var(--red-bg)", color: "var(--red)", border: "1px solid var(--red)", whiteSpace: "nowrap" }}>
+                          {elapsed(s.updatedAt)}
+                        </span>
+                      </div>
+                    ))}
+                    {/* Pagination within group */}
+                    {pages > 1 && (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                        paddingTop: 8, marginTop: 6, borderTop: "1px solid var(--line)" }}>
+                        <button disabled={page === 0}
+                          onClick={() => setBlockPages(p => ({ ...p, [group.pre]: page - 1 }))}
+                          style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6,
+                            border: "1px solid var(--line)", background: "none",
+                            cursor: page === 0 ? "default" : "pointer", opacity: page === 0 ? 0.35 : 1 }}>
+                          ← Prev
+                        </button>
+                        <span style={{ fontSize: 11, color: "var(--ink-3)" }}>{page + 1} / {pages}</span>
+                        <button disabled={page >= pages - 1}
+                          onClick={() => setBlockPages(p => ({ ...p, [group.pre]: page + 1 }))}
+                          style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6,
+                            border: "1px solid var(--line)", background: "none",
+                            cursor: page >= pages - 1 ? "default" : "pointer", opacity: page >= pages - 1 ? 0.35 : 1 }}>
+                          Next →
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       )}
 
@@ -1018,7 +1078,7 @@ function HierarchyManager({ showToast }) {
                   const ok = await confirm({
                     title: `Delete ward "${w.name}"?`,
                     message: bc > 0
-                      ? `Removes all ${bc} bed${bc === 1 ? "" : "s"} and their history. This cannot be undone.`
+                      ? `Removes all ${bc} bed${bc === 1 ? "" : "s"}. Bed history is preserved in the audit log. This cannot be undone.`
                       : "This cannot be undone.",
                     confirmLabel: "Delete ward", danger: true,
                   });

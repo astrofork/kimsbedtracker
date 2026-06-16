@@ -10,7 +10,8 @@ export default function PREApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("home");
   const [data,      setData]      = useState(null);
   const [loading,   setLoading]   = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError,   setLoadError]   = useState(null); // null | string — real network errors
+  const [configError, setConfigError] = useState(null); // null | string — account config issues
   const [toast,     setToast]     = useState("");
   const loadRef = useRef(null);
 
@@ -18,13 +19,15 @@ export default function PREApp({ user, meta, onLogout }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setLoadError(false);
-    try { setData(await api.preMe()); }
-    catch (e) {
-      if ((e?.message ?? "") !== "Unauthorized") {
-        setLoadError(true);
-        showToast(toastErr(e));
-      }
+    setLoadError(null);
+    try {
+      setConfigError(null);
+      setData(await api.preMe());
+    } catch (e) {
+      const msg = e?.message ?? "";
+      if (msg === "Unauthorized") return;
+      if (msg.includes("No PRE Block")) setConfigError(msg);
+      else setLoadError(msg || "Unable to connect to server");
     }
     finally { setLoading(false); }
   }, [showToast]);
@@ -72,25 +75,44 @@ export default function PREApp({ user, meta, onLogout }) {
     finally { setSubmitting(false); }
   };
 
-  if (!data) return (
-    <div className="empty" style={{ paddingTop: 120 }}>
-      {loadError ? (
-        <>
-          <div style={{ fontWeight: 600 }}>Unable to connect to server</div>
-          <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>Check your network and try again.</div>
-          <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={load}>
-            <Ic d={icons.refresh} s={15} /> Retry
-          </button>
-        </>
-      ) : (
-        <>
-          <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
-          <div className="dim" style={{ marginTop: 12 }}>Loading…</div>
-        </>
-      )}
-      {toast && <div className="toast">{toast}</div>}
-    </div>
-  );
+  if (!data) {
+    if (configError) return (
+      <AppShell
+        menu={[]}
+        active=""
+        onSelect={() => {}}
+        title="PRE Dashboard"
+        user={{ name: user.username, role: "PRE" }}
+        onLogout={onLogout}
+      >
+        <div className="card empty" style={{ marginTop: 40 }}>
+          <Ic d={icons.bed} s={32} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No PRE Block assigned</div>
+          <div style={{ fontSize: 12, marginTop: 4, color: "var(--ink-3)" }}>{configError}. Contact your manager.</div>
+        </div>
+        {toast && <div className="toast">{toast}</div>}
+      </AppShell>
+    );
+    return (
+      <div className="empty" style={{ paddingTop: 120 }}>
+        {loadError ? (
+          <>
+            <div style={{ fontWeight: 600 }}>Unable to connect to server</div>
+            <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>Check your network and try again.</div>
+            <button className="btn btn-primary" style={{ marginTop: 16 }} onClick={load}>
+              <Ic d={icons.refresh} s={15} /> Retry
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+            <div className="dim" style={{ marginTop: 12 }}>Loading…</div>
+          </>
+        )}
+        {toast && <div className="toast">{toast}</div>}
+      </div>
+    );
+  }
 
   const menu = [
     { key: "home",  icon: icons.home, label: "Home" },
