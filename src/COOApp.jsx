@@ -924,7 +924,7 @@ function PreActivityTab({ data }) {
               </div>
               {b.status !== "active"
                 ? <span className="tag b">{b.status}</span>
-                : <span className="tag" style={{ background: score >= 80 ? "var(--st-v-bg)" : score >= 50 ? "#FEF3C7" : "var(--st-or-bg)", color: scoreColor, border: `1px solid ${scoreColor}` }}>{score}%</span>}
+                : <span className="tag" title="On-time round compliance — rounds submitted vs expected by now (not occupancy)" style={{ background: score >= 80 ? "var(--st-v-bg)" : score >= 50 ? "#FEF3C7" : "var(--st-or-bg)", color: scoreColor, border: `1px solid ${scoreColor}` }}>{score}% on-time</span>}
               <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)", transform: isOpen ? "rotate(90deg)" : "none", transition: ".15s", flexShrink: 0 }} />
             </button>
 
@@ -1100,7 +1100,7 @@ function WardTableActivity({ wards, showUpdatedBy = false }) {
                 <td style={{ ...cell, color: "var(--st-v)"  }}>{d(v)}</td>
                 <td style={{ ...cell, color: "var(--st-vr)", borderRight: div }}>{d(r)}</td>
                 <td style={{ ...cell, borderRight: showUpdatedBy ? div : "none", whiteSpace: "nowrap" }}>
-                  {w.updatedAt ? <span style={{ color: "var(--ink-2)" }}>{fmtTime(w.updatedAt)}</span> : <span className="dim">–</span>}
+                  <LastUpdatedCell ts={w.updatedAt} />
                 </td>
                 {showUpdatedBy && (
                   <td style={{ ...cell, whiteSpace: "nowrap", color: "var(--ink-2)" }}>
