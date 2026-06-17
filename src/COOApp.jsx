@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { api, fmtTime, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
+import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
 import {
   Ic, icons, StatusBar, useModal, AppError, useConfirm, BlockAvatar,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
@@ -9,7 +9,7 @@ import { HistoryViewer, actionLabel } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
 } from "./snapshot.js";
-import { naturalSort } from "./bedUtils.js";
+import { naturalSort, calculateWardTotals } from "./bedUtils.js";
 
 const HOSPITAL_NAME = "KIMS Hospitals";
 
@@ -28,7 +28,6 @@ const ADMIN_TITLES = {
   reports:    "Reports",
   savedviews: "Saved Views",
   alerts:     "Alerts",
-  audit:      "Audit Log",
   settings:   "Settings",
 };
 
@@ -46,6 +45,7 @@ export default function COOApp({ user, meta, onLogout }) {
   const [dates, setDates] = useState([]);
   const [selDate, setSelDate] = useState("live");
   const [history, setHistory] = useState(null);
+  const [reportsView, setReportsView] = useState("activity"); // "activity" | "history" | "census"
   const loadRef    = useRef(null);
   const [liveKey,  setLiveKey]  = useState(0);
 
@@ -80,9 +80,11 @@ export default function COOApp({ user, meta, onLogout }) {
   useEffect(() => {
     const socket = createSocket();
     const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
-    socket.on("bed:update",   refresh);
-    socket.on("round:submit", refresh);
-    socket.on("connect",      refresh); // catch missed updates on reconnect
+    socket.on("bed:update",       refresh);
+    socket.on("round:submit",     refresh);
+    socket.on("ward:operational", refresh);
+    socket.on("alarm:active",     refresh); // overdue PRE round → refresh compliance badge
+    socket.on("connect",          refresh); // catch missed updates on reconnect
     return () => { socket.disconnect(); };
   }, []);
   useEffect(() => { api.mgrHistoryDates().then((d) => setDates(d.dates || [])).catch(() => { }); }, []);
@@ -123,7 +125,6 @@ export default function COOApp({ user, meta, onLogout }) {
     { key: "reports",    icon: icons.clock,    label: "Reports" },
     { key: "savedviews", icon: icons.layers,   label: "Saved Views" },
     { key: "alerts",     icon: icons.bell,     label: "Alerts", dot: !!(due && !dismissed[due]) },
-    { key: "audit",      icon: icons.list,     label: "Audit Log" },
     { key: "settings",   icon: icons.settings, label: "Settings" },
   ];
 
@@ -162,10 +163,25 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "activity"   && <ActivityPage />}
       {tab === "matrix"     && <Matrix data={data} selDate={selDate} history={history} userId={user?.id} />}
       {tab === "analytics"  && <Overview data={data} compliance={compliance} selDate={selDate} history={history} onViewBeds={setBedsBlock} />}
-      {tab === "reports"    && <HistoryViewer />}
+      {tab === "reports"    && (
+        <div>
+          <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+            {[["activity", "Activity"], ["history", "PRE Rounds"], ["census", "Midnight Census"]].map(([key, label]) => (
+              <button key={key}
+                className={"fchip" + (reportsView === key ? " on" : "")}
+                style={{ padding: "8px 18px", fontSize: 13 }}
+                onClick={() => setReportsView(key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {reportsView === "activity" && <ActivityHistoryPage />}
+          {reportsView === "history"  && <HistoryViewer showCensusCard={false} />}
+          {reportsView === "census"   && <MidnightCensusMatrix userId={user?.id} />}
+        </div>
+      )}
       {tab === "savedviews" && <SavedViewsPage data={data} userId={user?.id} onOpenInMatrix={() => setTab("matrix")} />}
       {tab === "alerts"     && <AlertsPage data={data} compliance={compliance} due={due} dismissed={dismissed} setDismissed={setDismissed} />}
-      {tab === "audit"      && <AuditPage />}
       {tab === "settings"   && <SettingsPage user={user} />}
 
       {sheet     && <WardSheet    pre={sheet}      onClose={() => setSheet(null)} />}
@@ -255,6 +271,7 @@ function LiveBedDashboard({ refreshKey = 0 }) {
     room_type:  w.room_type  || null,
     block_name: w.block_name || null,
     floor_name: w.floor_name || null,
+    updatedAt:  w.updatedAt  || null,
   }));
 
   const rows = allRows.filter((r) => {
@@ -274,14 +291,14 @@ function LiveBedDashboard({ refreshKey = 0 }) {
   const vacRes_r  = sum(rows, (r) => r.reserved);
   const occupied  = sum(rows, (r) => r.occupied || 0);
   const occRes    = sum(rows, (r) => r.occupied_reserved || 0);
-  const totalOcc  = occupied + occRes;
-  const totalVac  = vacant + vacRes_r;
+  const { totalOccupied: totalOcc, totalVacant: totalVac } = calculateWardTotals(rows);
   const allBeds   = liveData.allBeds   || totalBeds;
   const nonOpBeds = liveData.nonOpBeds || 0;
   const pct = (n) => totalBeds > 0 ? Math.round((n / totalBeds) * 100) + "%" : "0%";
 
   const KPIS = [
-    { label: "TOTAL BEDS",      val: allBeds,   sub: `${totalBeds} operational · ${nonOpBeds} non-operational`, color: "var(--ink)"     },
+    { label: "TOTAL BEDS",       val: allBeds,   sub: `${nonOpBeds} non-operational`, color: "var(--ink)" },
+    { label: "OPERATIONAL BEDS", val: totalBeds, sub: pct(totalBeds), color: "var(--st-v)" },
     { label: "CENSUS BEDS",     val: census,    sub: pct(census),      color: "var(--st-v)"    },
     { label: "NON-CENSUS BEDS", val: nonCensus, sub: pct(nonCensus),   color: "var(--st-o)"    },
     { label: "TOTAL OCCUPIED",  val: totalOcc,  sub: pct(totalOcc),    color: "var(--st-o)"    },
@@ -312,32 +329,20 @@ function LiveBedDashboard({ refreshKey = 0 }) {
         </div>
       </div>
 
-      {/* View By + info banner */}
-      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-        <div className="card row" style={{ padding: "8px 12px", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>View By</span>
-          {["TOTAL", "KIMS", "RENOVA"].map((k) => (
-            <button key={k} className={"fchip" + (viewBy === k ? " on" : "")}
-              style={{ padding: "6px 16px", fontSize: 12 }}
-              onClick={() => setViewBy(k)}>{k}</button>
-          ))}
-        </div>
-        <div className="card row" style={{
-          padding: "8px 14px", flex: 1, minWidth: 0, gap: 10,
-          background: "var(--blue-bg)", borderColor: "var(--blue)",
-        }}>
-          <span style={{ color: "var(--blue)", flexShrink: 0 }}><Ic d={icons.alert} s={16} /></span>
-          <span style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.45 }}>
-            Select KIMS, RENOVA or TOTAL to view corresponding bed status.
-            Census and Non-Census beds are shown separately.
-          </span>
-        </div>
+      {/* View By */}
+      <div className="card row" style={{ padding: "8px 12px", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>View By</span>
+        {["TOTAL", "KIMS", "RENOVA"].map((k) => (
+          <button key={k} className={"fchip" + (viewBy === k ? " on" : "")}
+            style={{ padding: "6px 16px", fontSize: 12 }}
+            onClick={() => setViewBy(k)}>{k}</button>
+        ))}
       </div>
 
       {/* KPI cards */}
       <div style={{
         display: "grid", gap: 10, marginBottom: 16,
-        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        gridTemplateColumns: "repeat(auto-fit, minmax(min(140px, 100%), 1fr))",
       }}>
         {KPIS.map(({ label, val, sub, color }) => (
           <div key={label} className="card" style={{ padding: "12px 14px" }}>
@@ -458,12 +463,23 @@ const GROUP_BY_OPTIONS = [
 // Defined outside table components so function references are stable across renders
 function OccBar({ p }) {
   return (
-    <div className="row" style={{ gap: 8 }}>
-      <div style={{ flex: 1, height: 7, borderRadius: 6, background: "var(--panel-2)", overflow: "hidden", minWidth: 60 }}>
-        <div style={{ width: `${Math.min(100, p)}%`, height: "100%", borderRadius: 6, background: "var(--st-o)" }} />
-      </div>
-      <span className="mono" style={{ fontSize: 12, fontWeight: 700, minWidth: 44, textAlign: "right" }}>{Math.round(p)}%</span>
-    </div>
+    <span className="mono" style={{ fontSize: 12, fontWeight: 700 }}>{Math.round(p)}%</span>
+  );
+}
+
+// Click to toggle between relative ("5m ago") and absolute (date + time) display.
+function LastUpdatedCell({ ts }) {
+  const [open, setOpen] = useState(false);
+  if (!ts) return <span className="dim">–</span>;
+  return (
+    <span
+      className="dim"
+      style={{ fontSize: 11, cursor: "pointer", userSelect: "none" }}
+      title="Click to toggle date/time"
+      onClick={() => setOpen(o => !o)}
+    >
+      {open ? fmtDateTime(ts) : fmtRelative(ts)}
+    </span>
   );
 }
 
@@ -476,8 +492,7 @@ function renderWardRow(r, showBadge) {
   const or_ = r.occupied_reserved || 0;
   const v   = r.vacant            || 0;
   const vr  = r.reserved          || 0;
-  const occ = o + or_;
-  const vac = v + vr;
+  const { totalOccupied: occ, totalVacant: vac } = calculateWardTotals(r);
   const p   = reported && r.total > 0 ? (occ / r.total) * 100 : 0;
   const d   = (n) => reported ? n : "–";
   const isCensus = r.bed_type !== "Non-Census";
@@ -504,34 +519,21 @@ function renderWardRow(r, showBadge) {
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)"  }}>{d(v)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>
       <td>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>
+      <td><LastUpdatedCell ts={r.updatedAt} /></td>
     </tr>
   );
 }
 
-function renderSubtotalRow(grpRows) {
+function groupAggregates(grpRows) {
   const gb   = wstSum(grpRows, r => r.total);
   const go   = wstSum(grpRows, r => r.occupied || 0);
   const gor  = wstSum(grpRows, r => r.occupied_reserved || 0);
   const gv   = wstSum(grpRows, r => r.vacant || 0);
   const gvr  = wstSum(grpRows, r => r.reserved || 0);
-  const gocc = go + gor;
-  const gvac = gv + gvr;
+  const { totalOccupied: gocc, totalVacant: gvac } = calculateWardTotals(grpRows);
   const gp   = gb > 0 ? Math.round((gocc / gb) * 100) : 0;
-  return (
-    <tr key="__sub__" style={{ background: "var(--panel-2)", fontSize: 12 }}>
-      <td style={{ fontWeight: 700, color: "var(--ink-2)", paddingLeft: 28 }}>
-        Subtotal ({grpRows.length} ward{grpRows.length !== 1 ? "s" : ""})
-      </td>
-      <td style={{ ...wstC, fontWeight: 700 }}>{gb}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)"  }}>{gocc}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)"  }}>{go}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-or)" }}>{gor}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)"  }}>{gvac}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)"  }}>{gv}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{gvr}</td>
-      <td><OccBar p={gp} /></td>
-    </tr>
-  );
+  const gUpdatedAt = grpRows.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null);
+  return { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt };
 }
 
 // Flat table — shown when Group by = None
@@ -543,8 +545,7 @@ function WardStatusTable({ title, accent, rows, totalLabel, searchFilter }) {
   const totR    = wstSum(filtered, r => r.reserved);
   const totO    = wstSum(filtered, r => r.occupied || 0);
   const totOR   = wstSum(filtered, r => r.occupied_reserved || 0);
-  const totOcc  = totO + totOR;
-  const totVac  = totV + totR;
+  const { totalOccupied: totOcc, totalVacant: totVac } = calculateWardTotals(filtered);
   const totPct  = totBeds > 0 ? Math.round((totOcc / totBeds) * 100) : 0;
 
   return (
@@ -565,12 +566,13 @@ function WardStatusTable({ title, accent, rows, totalLabel, searchFilter }) {
               <th style={{ ...wstC, color: "var(--st-v)"  }}>TOTAL VAC</th>
               <th style={{ ...wstC, color: "var(--st-v)"  }}>VACANT</th>
               <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC+RES</th>
-              <th style={{ minWidth: 160 }}>OCCUPANCY %</th>
+              <th style={wstC}>OCCUPANCY %</th>
+              <th>LAST UPDATED</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
+              <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
             ) : (
@@ -586,6 +588,7 @@ function WardStatusTable({ title, accent, rows, totalLabel, searchFilter }) {
                   <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totV}</td>
                   <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
                   <td><OccBar p={totPct} /></td>
+                  <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
                 </tr>
               </>
             )}
@@ -612,8 +615,7 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
   const totR    = wstSum(filtered, r => r.reserved);
   const totO    = wstSum(filtered, r => r.occupied || 0);
   const totOR   = wstSum(filtered, r => r.occupied_reserved || 0);
-  const totOcc  = totO + totOR;
-  const totVac  = totV + totR;
+  const { totalOccupied: totOcc, totalVacant: totVac } = calculateWardTotals(filtered);
   const totPct  = totBeds > 0 ? Math.round((totOcc / totBeds) * 100) : 0;
 
   const groups = (() => {
@@ -653,32 +655,42 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
               <th style={{ ...wstC, color: "var(--st-v)"  }}>TOTAL VAC</th>
               <th style={{ ...wstC, color: "var(--st-v)"  }}>VACANT</th>
               <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC+RES</th>
-              <th style={{ minWidth: 160 }}>OCCUPANCY %</th>
+              <th style={wstC}>OCCUPANCY %</th>
+              <th>LAST UPDATED</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
+              <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
             ) : (
               <>
                 {groups.map(({ key, grpRows }) => {
                   const isOpen = expanded.has(key);
+                  const { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt } = groupAggregates(grpRows);
                   return (
                     <React.Fragment key={key}>
                       <tr onClick={() => toggleSection(key)}
-                        style={{ cursor: "pointer", background: "var(--panel)", userSelect: "none" }}>
-                        <td colSpan={9} style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
+                        style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
+                        <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
                           <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
                           {key}
                           <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
-                            {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""} · {wstSum(grpRows, r => r.total)} beds
+                            {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""} · totals shown
                           </span>
                         </td>
+                        <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
+                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{gocc}</td>
+                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{go}</td>
+                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{gor}</td>
+                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{gvac}</td>
+                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{gv}</td>
+                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{gvr}</td>
+                        <td><OccBar p={gp} /></td>
+                        <td><LastUpdatedCell ts={gUpdatedAt} /></td>
                       </tr>
                       {isOpen && grpRows.map(r => renderWardRow(r, true))}
-                      {isOpen && grpRows.length > 1 && renderSubtotalRow(grpRows)}
                     </React.Fragment>
                   );
                 })}
@@ -692,6 +704,7 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
                   <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totV}</td>
                   <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
                   <td><OccBar p={totPct} /></td>
+                  <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
                 </tr>
               </>
             )}
@@ -877,10 +890,12 @@ function PreActivityTab({ data }) {
     <div className="card empty"><Ic d={icons.list} s={28} /><div style={{ marginTop: 10 }}>No PRE blocks configured.</div></div>
   );
 
+  const toggle = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
+
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12, marginBottom: 14 }}>
-        {blocks.length} PRE block{blocks.length !== 1 ? "s" : ""} · rounds and ward counts for today
+      <div className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
+        {blocks.length} PRE block{blocks.length !== 1 ? "s" : ""} · today's rounds &amp; ward entry — tap a block to expand
       </div>
       {blocks.map((b) => {
         const isOpen  = !!expanded[b.id];
@@ -891,63 +906,47 @@ function PreActivityTab({ data }) {
         const doneW   = b.wards.filter(w => w.vacant !== null).length;
 
         return (
-          <div key={b.id} className="card" style={{ padding: 14, marginBottom: 10 }}>
-            {/* Header */}
-            <div className="row between" style={{ marginBottom: 12 }}>
-              <div className="row" style={{ gap: 10 }}>
-                <BlockAvatar code={b.name} size={38} />
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{b.name}</div>
-                  <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-                    {noUser
-                      ? <span style={{ color: "var(--amber)" }}>⚠ No PRE assigned</span>
-                      : <>{b.assignedUser.name} · {b.assignedUser.shift} shift</>}
-                    {" · "}{totalW} ward{totalW !== 1 ? "s" : ""}
-                  </div>
+          <div key={b.id} className="card" style={{ padding: 0, marginBottom: 8, overflow: "hidden" }}>
+            {/* Slim header row (always visible) */}
+            <button onClick={() => toggle(b.id)} style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 10,
+              padding: "11px 14px", background: "transparent", textAlign: "left", cursor: "pointer",
+            }}>
+              <BlockAvatar code={b.name} size={34} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{b.name}</div>
+                <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                  {noUser
+                    ? <span style={{ color: "var(--amber)" }}>⚠ No PRE assigned</span>
+                    : <>{b.assignedUser.name} · {b.assignedUser.shift}</>}
+                  {" · "}{doneW}/{totalW} wards · {b.roundsToday} round{b.roundsToday !== 1 ? "s" : ""}
                 </div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                {b.status !== "active"
-                  ? <span className="tag b">{b.status}</span>
-                  : <span className="tag" style={{ background: score >= 80 ? "var(--st-v-bg)" : score >= 50 ? "#FEF3C7" : "var(--st-or-bg)", color: scoreColor, border: `1px solid ${scoreColor}` }}>
-                      {score}% on-time
-                    </span>}
-              </div>
-            </div>
+              {b.status !== "active"
+                ? <span className="tag b">{b.status}</span>
+                : <span className="tag" style={{ background: score >= 80 ? "var(--st-v-bg)" : score >= 50 ? "#FEF3C7" : "var(--st-or-bg)", color: scoreColor, border: `1px solid ${scoreColor}` }}>{score}%</span>}
+              <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)", transform: isOpen ? "rotate(90deg)" : "none", transition: ".15s", flexShrink: 0 }} />
+            </button>
 
-            {/* Round summary row */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--panel-2)", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
-              {[
-                { label: "ROUNDS TODAY",  val: b.roundsToday },
-                { label: "EXPECTED",      val: b.compliance.expected },
-                { label: "WARDS ENTERED", val: `${doneW}/${totalW}` },
-              ].map(({ label, val }, i) => (
-                <div key={label} style={{ textAlign: "center", padding: "9px 4px", borderLeft: i > 0 ? "1px solid var(--line)" : "none" }}>
-                  <div style={{ fontSize: 9, color: "var(--ink-3)", fontWeight: 600, marginBottom: 4 }}>{label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{val}</div>
+            {isOpen && (
+              <div style={{ padding: "0 14px 14px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 1, background: "var(--panel-2)", borderRadius: 10, overflow: "hidden", marginBottom: 10 }}>
+                  {[
+                    { label: "ROUNDS TODAY",  val: b.roundsToday },
+                    { label: "EXPECTED",      val: b.compliance.expected },
+                    { label: "WARDS ENTERED", val: `${doneW}/${totalW}` },
+                  ].map(({ label, val }, i) => (
+                    <div key={label} style={{ textAlign: "center", padding: "9px 4px", borderLeft: i > 0 ? "1px solid var(--line)" : "none" }}>
+                      <div style={{ fontSize: 9, color: "var(--ink-3)", fontWeight: 600, marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{val}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-
-            {b.lastSubmittedAt && (
-              <div className="dim" style={{ fontSize: 11, marginBottom: 8 }}>
-                Last round submitted {fmtTime(b.lastSubmittedAt)}
+                {b.lastSubmittedAt && (
+                  <div className="dim" style={{ fontSize: 11, marginBottom: 8 }}>Last round submitted {fmtTime(b.lastSubmittedAt)}</div>
+                )}
+                {b.wards.length > 0 && <WardTableActivity wards={b.wards} />}
               </div>
-            )}
-
-            {/* Ward breakdown toggle */}
-            {b.wards.length > 0 && (
-              <>
-                <button style={{
-                  width: "100%", padding: "7px 0", borderRadius: 8,
-                  background: "var(--panel-2)", border: "none", cursor: "pointer",
-                  fontSize: 12, color: "var(--ink-2)",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                }} onClick={() => setExpanded(p => ({ ...p, [b.id]: !p[b.id] }))}>
-                  {isOpen ? "▲ Hide" : "▼ Show"} ward breakdown ({b.wards.length})
-                </button>
-                {isOpen && <WardTableActivity wards={b.wards} />}
-              </>
             )}
           </div>
         );
@@ -961,89 +960,100 @@ function NurseActivityTab({ data }) {
   if (!data) return <div className="card empty">No nurse data available.</div>;
   const { stations = [], unassignedNurses = [], unassignedWards = [] } = data;
 
-  const StationCard = ({ id, name, nurses, wards }) => {
-    const isOpen = !!expanded[id ?? name];
-    return (
-      <div className="card" style={{ padding: 14, marginBottom: 10 }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>{name}</div>
-            <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-              {nurses.length} nurse{nurses.length !== 1 ? "s" : ""} · {wards.length} ward{wards.length !== 1 ? "s" : ""}
-            </div>
-          </div>
-          {nurses.length === 0 && <span className="tag o">No nurses</span>}
-        </div>
+  const [showAttn, setShowAttn] = useState(false);
+  const toggle = (k) => setExpanded(p => ({ ...p, [k]: !p[k] }));
+  const hasNurseGap = unassignedNurses.length > 0;
+  const hasWardGap  = unassignedWards.length > 0;
+  const attn = hasNurseGap || hasWardGap;
 
-        {/* Nurse roster */}
-        {nurses.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-            {nurses.map(n => (
-              <span key={n.id} className="chip" style={{ fontSize: 11 }}>
-                <Ic d={icons.user} s={11} /> {n.name} <span className="dim">@{n.username}</span>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Ward toggle */}
-        {wards.length > 0 && (
-          <>
-            <button style={{
-              width: "100%", padding: "7px 0", borderRadius: 8,
-              background: "var(--panel-2)", border: "none", cursor: "pointer",
-              fontSize: 12, color: "var(--ink-2)",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            }} onClick={() => setExpanded(p => ({ ...p, [id ?? name]: !p[id ?? name] }))}>
-              {isOpen ? "▲ Hide" : "▼ Show"} ward breakdown ({wards.length})
-            </button>
-            {isOpen && <WardTableActivity wards={wards} showUpdatedBy />}
-          </>
-        )}
-        {wards.length === 0 && <div className="dim" style={{ fontSize: 12 }}>No wards assigned to this station.</div>}
-      </div>
-    );
-  };
+  if (stations.length === 0 && !attn) return (
+    <div className="card empty"><Ic d={icons.user} s={28} /><div style={{ marginTop: 10 }}>No nursing stations configured.</div></div>
+  );
 
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12, marginBottom: 14 }}>
-        {stations.length} nursing station{stations.length !== 1 ? "s" : ""}
-        {unassignedNurses.length > 0 && ` · ${unassignedNurses.length} unassigned nurse${unassignedNurses.length !== 1 ? "s" : ""}`}
-        {unassignedWards.length > 0  && ` · ${unassignedWards.length} ward${unassignedWards.length !== 1 ? "s" : ""} without station`}
+      {/* ── Attention banner — moved to the TOP, collapsed by default ────────── */}
+      {attn && (
+        <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 12, borderColor: "var(--amber)" }}>
+          <button onClick={() => setShowAttn(s => !s)} style={{
+            width: "100%", display: "flex", alignItems: "center", gap: 10,
+            padding: "11px 14px", background: "var(--amber-bg)", textAlign: "left", cursor: "pointer",
+          }}>
+            <span style={{ color: "var(--amber)", display: "flex" }}><Ic d={icons.bell} s={17} /></span>
+            <span style={{ fontWeight: 700, fontSize: 13.5, color: "var(--amber)" }}>Needs attention</span>
+            <span className="dim" style={{ fontSize: 11.5, color: "var(--amber)" }}>
+              {hasNurseGap && `${unassignedNurses.length} nurse${unassignedNurses.length !== 1 ? "s" : ""} without a station`}
+              {hasNurseGap && hasWardGap && " · "}
+              {hasWardGap && `${unassignedWards.length} ward${unassignedWards.length !== 1 ? "s" : ""} without a station`}
+            </span>
+            <Ic d={icons.chevron} s={14} style={{ color: "var(--amber)", marginLeft: "auto", transform: showAttn ? "rotate(90deg)" : "none", transition: ".15s" }} />
+          </button>
+          {showAttn && (
+            <div style={{ padding: "12px 14px" }}>
+              {hasNurseGap && (
+                <div style={{ marginBottom: hasWardGap ? 12 : 0 }}>
+                  <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".04em" }}>Nurses without a station</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {unassignedNurses.map(n => (
+                      <span key={n.id} className="chip" style={{ fontSize: 11 }}><Ic d={icons.user} s={11} /> {n.name} <span className="dim">@{n.username}</span></span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {hasWardGap && (
+                <div>
+                  <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: ".04em" }}>Wards without a station</div>
+                  <WardTableActivity wards={unassignedWards} showUpdatedBy />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
+        {stations.length} nursing station{stations.length !== 1 ? "s" : ""} — tap a station to expand
       </div>
 
-      {stations.map(s => <StationCard key={s.id} {...s} />)}
-
-      {/* Unassigned nurses */}
-      {unassignedNurses.length > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 10, borderColor: "var(--amber)" }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--amber)", marginBottom: 8 }}>
-            ⚠ Nurses without a station ({unassignedNurses.length})
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {unassignedNurses.map(n => (
-              <span key={n.id} className="chip" style={{ fontSize: 11 }}>
-                <Ic d={icons.user} s={11} /> {n.name} <span className="dim">@{n.username}</span>
+      {/* ── Slim collapsible station rows ────────────────────────────────────── */}
+      {stations.map(s => {
+        const key = s.id ?? s.name;
+        const isOpen = !!expanded[key];
+        return (
+          <div key={key} className="card" style={{ padding: 0, marginBottom: 8, overflow: "hidden" }}>
+            <button onClick={() => toggle(key)} style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 10,
+              padding: "11px 14px", background: "transparent", textAlign: "left", cursor: "pointer",
+            }}>
+              <span style={{ flexShrink: 0, width: 32, height: 32, borderRadius: 9, background: "var(--panel-2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Ic d={icons.user} s={16} style={{ color: "var(--ink-2)" }} />
               </span>
-            ))}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{s.name}</div>
+                <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                  {s.nurses.length} nurse{s.nurses.length !== 1 ? "s" : ""} · {s.wards.length} ward{s.wards.length !== 1 ? "s" : ""}
+                </div>
+              </div>
+              {s.nurses.length === 0 && <span className="tag o">No nurses</span>}
+              <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)", transform: isOpen ? "rotate(90deg)" : "none", transition: ".15s", flexShrink: 0 }} />
+            </button>
+            {isOpen && (
+              <div style={{ padding: "0 14px 14px" }}>
+                {s.nurses.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                    {s.nurses.map(n => (
+                      <span key={n.id} className="chip" style={{ fontSize: 11 }}><Ic d={icons.user} s={11} /> {n.name} <span className="dim">@{n.username}</span></span>
+                    ))}
+                  </div>
+                )}
+                {s.wards.length > 0
+                  ? <WardTableActivity wards={s.wards} showUpdatedBy />
+                  : <div className="dim" style={{ fontSize: 12 }}>No wards assigned to this station.</div>}
+              </div>
+            )}
           </div>
-        </div>
-      )}
-
-      {/* Unassigned wards */}
-      {unassignedWards.length > 0 && (
-        <div className="card" style={{ padding: 14, marginBottom: 10, borderColor: "var(--amber)" }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--amber)", marginBottom: 8 }}>
-            ⚠ Wards without a nursing station ({unassignedWards.length})
-          </div>
-          <WardTableActivity wards={unassignedWards} showUpdatedBy />
-        </div>
-      )}
-
-      {stations.length === 0 && unassignedNurses.length === 0 && (
-        <div className="card empty"><Ic d={icons.user} s={28} /><div style={{ marginTop: 10 }}>No nursing stations configured.</div></div>
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -1113,6 +1123,9 @@ const STALE_MS = 3 * 60 * 60 * 1000;
 
 function AlertsPage({ data, compliance, due, dismissed, setDismissed }) {
   const now = Date.now();
+  const [openBlocks, setOpenBlocks] = useState(() => new Set());
+  const toggleBlock = (k) => setOpenBlocks((prev) => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s; });
+
   const stale = [];
   for (const f of data.floors) for (const p of f.pres)
     for (const w of p.wards || []) {
@@ -1121,6 +1134,14 @@ function AlertsPage({ data, compliance, due, dismissed, setDismissed }) {
         stale.push({ pre: p.pre, ward: w.ward, updatedAt: ts });
     }
   stale.sort((a, b) => a.updatedAt - b.updatedAt);
+
+  // Group stale wards by PRE block so the list collapses from dozens of rows to
+  // one row per block (expandable), sorted by the most overdue block first.
+  const staleByBlock = new Map();
+  for (const s of stale) { if (!staleByBlock.has(s.pre)) staleByBlock.set(s.pre, []); staleByBlock.get(s.pre).push(s); }
+  const staleGroups = [...staleByBlock.entries()]
+    .map(([pre, wards]) => ({ pre, wards, count: wards.length, oldest: wards[0].updatedAt }))
+    .sort((a, b) => a.oldest - b.oldest);
 
   const lagging = (compliance || []).filter((c) => c.expected > 0 && c.hasPre !== false && c.score < 100);
   const showDue = due && !dismissed[due];
@@ -1154,29 +1175,42 @@ function AlertsPage({ data, compliance, due, dismissed, setDismissed }) {
 
       {stale.length > 0 && (
         <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 14, borderColor: "var(--red)" }}>
-          <div style={{ padding: "12px 14px", background: "var(--red-bg)" }}>
+          <div className="row between" style={{ padding: "12px 14px", background: "var(--red-bg)", flexWrap: "wrap", gap: 6 }}>
             <div className="row" style={{ gap: 8 }}>
               <span style={{ color: "var(--red)" }}><Ic d={icons.bell} s={17} /></span>
               <span style={{ fontWeight: 700, fontSize: 14, color: "var(--red)" }}>
                 {stale.length} ward{stale.length > 1 ? "s" : ""} not updated in over 3 hours
               </span>
             </div>
+            <span className="dim" style={{ fontSize: 11.5, color: "var(--red)" }}>across {staleGroups.length} PRE block{staleGroups.length > 1 ? "s" : ""}</span>
           </div>
           <div style={{ padding: "0 14px" }}>
-            {stale.map((s, i) => (
-              <div key={i} className="row between" style={{
-                padding: "10px 0",
-                borderBottom: i < stale.length - 1 ? "1px solid var(--line)" : "none",
-              }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>
-                    {s.pre} · <span style={{ color: "var(--ink-2)" }}>{s.ward}</span>
-                  </div>
-                  <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>Last updated {fmtTime(s.updatedAt)}</div>
+            {staleGroups.map((g, i) => {
+              const open = openBlocks.has(g.pre);
+              return (
+                <div key={g.pre} style={{ borderBottom: i < staleGroups.length - 1 ? "1px solid var(--line)" : "none" }}>
+                  <button onClick={() => toggleBlock(g.pre)} style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 10,
+                    padding: "11px 0", background: "transparent", textAlign: "left", cursor: "pointer",
+                  }}>
+                    <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)", transform: open ? "rotate(90deg)" : "none", transition: ".15s", flexShrink: 0 }} />
+                    <span style={{ fontWeight: 700, fontSize: 13.5 }}>{g.pre}</span>
+                    <span className="tag or" style={{ marginLeft: 2 }}>{g.count} stale</span>
+                    <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>oldest {fmtTime(g.oldest)}</span>
+                  </button>
+                  {open && (
+                    <div style={{ paddingLeft: 24 }}>
+                      {g.wards.map((s, j) => (
+                        <div key={j} className="row between" style={{ padding: "8px 0", borderTop: "1px solid var(--line)" }}>
+                          <span style={{ fontSize: 12.5, color: "var(--ink-2)", fontWeight: 600 }}>{s.ward}</span>
+                          <span className="dim" style={{ fontSize: 11 }}>Last updated {fmtTime(s.updatedAt)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <span className="tag or">stale</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -1209,60 +1243,305 @@ function AlertsPage({ data, compliance, due, dismissed, setDismissed }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-//  AUDIT LOG — organization-wide activity (existing /coo/audit API)
+//  ACTIVITY HISTORY — unified, filterable, paginated log of every PRE/Nurse/
+//  Manager/Admin move (backed by /coo/activity). Replaces the old flat Audit Log.
 // ══════════════════════════════════════════════════════════════════════════════
-function AuditPage() {
-  const [logs, setLogs] = useState(null);
+const ACT_CATS = [
+  { key: "bed",    label: "Bed updates", color: "var(--st-o)",   icon: icons.bed },
+  { key: "round",  label: "Rounds",      color: "var(--blue)",   icon: icons.clock },
+  { key: "config", label: "Config",      color: "var(--amber)",  icon: icons.settings },
+  { key: "login",  label: "Logins",      color: "var(--ink-3)",  icon: icons.user },
+];
+const ACT_ROLES = [
+  { key: "PRE",     label: "PRE",     color: "var(--blue)" },
+  { key: "NURSE",   label: "Nurse",   color: "var(--green)" },
+  { key: "MANAGER", label: "Manager", color: "var(--amber)" },
+  { key: "COO",     label: "Admin",   color: "var(--primary)" },
+];
+const ACT_BED = ["bed_status_update", "bed_add", "bed_delete", "bed_rename", "beds_generate", "bed_master_edit", "ward_update"];
+const ACT_LOGIN = ["login", "login_failed"];
+function actCategory(action) {
+  if (ACT_BED.includes(action))   return "bed";
+  if (action === "round_submit")  return "round";
+  if (ACT_LOGIN.includes(action)) return "login";
+  return "config";
+}
+function bedStateText(p, res) {
+  if (p === "OCCUPIED") return res === "RESERVED" ? "Occ + Res" : "Occupied";
+  if (p === "VACANT")   return res === "RESERVED" ? "Vac + Res" : "Vacant";
+  return p || "—";
+}
+
+// Reusable numbered pagination (Prev · 1 2 … N · Next), shared by Activity + Bed History.
+function Pagination({ page, pages, onPage }) {
+  if (!pages || pages <= 1) return null;
+  const nums = [];
+  const win = 2;
+  const start = Math.max(1, page - win), end = Math.min(pages, page + win);
+  if (start > 1) { nums.push(1); if (start > 2) nums.push("…l"); }
+  for (let i = start; i <= end; i++) nums.push(i);
+  if (end < pages) { if (end < pages - 1) nums.push("…r"); nums.push(pages); }
+  const btn = (label, target, { disabled, active, key } = {}) => (
+    <button key={key || label} disabled={disabled}
+      onClick={() => !disabled && target != null && onPage(target)}
+      className="chip" style={{
+        minWidth: 36, justifyContent: "center", padding: "7px 11px", fontSize: 13,
+        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1,
+        background: active ? "var(--primary)" : "var(--panel)",
+        color: active ? "#fff" : "var(--ink-2)",
+        borderColor: active ? "var(--primary)" : "var(--line)",
+      }}>{label}</button>
+  );
+  return (
+    <div className="row" style={{ gap: 6, justifyContent: "center", flexWrap: "wrap", marginTop: 16 }}>
+      {btn("‹ Prev", page - 1, { disabled: page <= 1, key: "prev" })}
+      {nums.map((n, i) => typeof n === "string"
+        ? <span key={n + i} className="dim" style={{ padding: "0 4px", alignSelf: "center" }}>…</span>
+        : btn(String(n), n, { active: n === page, key: "p" + n }))}
+      {btn("Next ›", page + 1, { disabled: page >= pages, key: "next" })}
+    </div>
+  );
+}
+
+// Friendly (non-raw) detail panel — renders the server-resolved `info` list.
+function ActivityDetail({ r }) {
+  const info = Array.isArray(r.info) ? r.info : [];
+  return (
+    <div style={{ padding: "0 14px 12px 60px", borderTop: "1px solid var(--line)" }}>
+      <div className="dim" style={{ fontSize: 11, margin: "8px 0 6px" }}>{fmtDateTime(r.ts)} IST · @{r.username || "—"}</div>
+      {info.length ? info.map((it, i) => (
+        <div key={i} className="row" style={{ gap: 10, fontSize: 12.5, padding: "3px 0", alignItems: "baseline" }}>
+          <span className="dim" style={{ minWidth: 96, flexShrink: 0 }}>{it.label}</span>
+          <span style={{ fontWeight: 600, color: "var(--ink)" }}>{it.value}</span>
+        </div>
+      )) : <div className="dim" style={{ fontSize: 12 }}>No additional detail recorded.</div>}
+    </div>
+  );
+}
+
+function ActivityRow({ r, open, onToggle }) {
+  const cat  = actCategory(r.action);
+  const cm   = ACT_CATS.find(c => c.key === cat) || ACT_CATS[3];
+  const rm   = ACT_ROLES.find(x => x.key === r.role);
+  const who  = r.name || r.username || (r.action === "login_failed" ? "Unknown" : "System");
+  const chg  = r.change;
+  const failed  = r.action === "login_failed";
+  const showWard = r.wardName && r.wardName !== r.target;
+
+  return (
+    <div className="card" style={{ padding: 0, marginBottom: 8, overflow: "hidden", borderColor: failed ? "var(--red)" : undefined }}>
+      <button onClick={onToggle} style={{
+        display: "flex", alignItems: "center", gap: 12, width: "100%",
+        padding: "12px 14px", textAlign: "left", background: "transparent",
+      }}>
+        {/* category dot */}
+        <span style={{
+          flexShrink: 0, width: 34, height: 34, borderRadius: 10,
+          background: (failed ? "var(--red)" : cm.color) + "1c",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <Ic d={cm.icon} s={17} style={{ color: failed ? "var(--red)" : cm.color }} />
+        </span>
+
+        {/* main */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>{who}</span>
+            {rm && <span className="role-badge" style={{
+              fontSize: 10, padding: "2px 7px", background: rm.color + "1c", color: rm.color, borderColor: rm.color + "44",
+            }}>{rm.label}</span>}
+            <span style={{ fontSize: 13, color: "var(--ink-2)", fontWeight: 600 }}>{actionLabel(r.action)}</span>
+            {r.target && <span className="dim" style={{ fontSize: 12 }}>
+              · <strong style={{ color: "var(--ink-2)" }}>{r.target}</strong>{showWard ? ` · ${r.wardName}` : ""}
+            </span>}
+          </div>
+
+          {chg && (
+            <div className="row" style={{ gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+              <span className="chip" style={{ fontSize: 10 }}>{bedStateText(chg.from.physical, chg.from.reservation)}</span>
+              <Ic d={icons.chevron} s={12} style={{ color: "var(--ink-3)" }} />
+              <span className="chip" style={{ fontSize: 10, color: "var(--st-o)", borderColor: "var(--st-o)" }}>{bedStateText(chg.to.physical, chg.to.reservation)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* time */}
+        <div style={{ flexShrink: 0, textAlign: "right" }}>
+          <div className="dim" style={{ fontSize: 12 }} title={fmtDateTime(r.ts) + " IST"}>{fmtRelative(r.ts)}</div>
+          <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)", transform: open ? "rotate(90deg)" : "none", transition: ".15s" }} />
+        </div>
+      </button>
+
+      {open && <ActivityDetail r={r} />}
+    </div>
+  );
+}
+
+function ActivityHistoryPage() {
+  const [q, setQ]               = useState("");
+  const [debouncedQ, setDebQ]   = useState("");
+  const [from, setFrom]         = useState("");
+  const [to, setTo]             = useState("");
+  const [roles, setRoles]       = useState(["PRE", "NURSE"]);
+  const [cats, setCats]         = useState(["bed", "round"]);
+  const [userId, setUserId]     = useState("");
+  const [users, setUsers]       = useState([]);
+  const [rows, setRows]         = useState(null);
+  const [page, setPage]         = useState(1);
+  const [pages, setPages]       = useState(1);
+  const [total, setTotal]       = useState(0);
+  const [loading, setLoading]   = useState(false);
+  const [open, setOpen]         = useState(() => new Set());
+  const PER_PAGE = 25;
 
   useEffect(() => {
-    const load = () => api.cooAudit()
-      .then((d) => setLogs(d.logs || []))
-      .catch(() => setLogs((prev) => prev ?? [])); // preserve existing data; only fall back to [] on initial failure
-    load();
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
+    api.mgrUsers()
+      .then(d => setUsers((d.users || []).filter(u => u.role === "PRE" || u.role === "NURSE")))
+      .catch(() => {});
   }, []);
 
-  if (logs === null) return (
-    <div className="empty"><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={24} /></span></div>
+  useEffect(() => { const t = setTimeout(() => setDebQ(q), 350); return () => clearTimeout(t); }, [q]);
+
+  const dayMs = (s, end) => {
+    if (!s) return undefined;
+    const dt = new Date(s + "T00:00:00");
+    if (isNaN(dt.getTime())) return undefined;
+    return end ? dt.getTime() + 86400000 - 1 : dt.getTime();
+  };
+
+  const fetchPage = useCallback((p) => {
+    setLoading(true);
+    setOpen(new Set());
+    api.cooActivity({
+      roles, categories: cats,
+      userId: userId || undefined,
+      q: debouncedQ || undefined,
+      from: dayMs(from, false), to: dayMs(to, true),
+      page: p, limit: PER_PAGE,
+    })
+      .then(d => { setRows(d.rows || []); setPage(d.page || 1); setPages(d.pages || 1); setTotal(d.total || 0); })
+      .catch(() => setRows([]))
+      .finally(() => setLoading(false));
+  }, [roles, cats, userId, debouncedQ, from, to]);
+
+  // Any filter change resets to page 1.
+  useEffect(() => { fetchPage(1); }, [fetchPage]);
+
+  const goPage = (p) => { window.scrollTo({ top: 0, behavior: "smooth" }); fetchPage(p); };
+
+  const toggleArr = (arr, set, key) => set(arr.includes(key) ? arr.filter(x => x !== key) : [...arr, key]);
+  const toggleOpen = (id) => setOpen(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const resetFilters = () => { setQ(""); setFrom(""); setTo(""); setRoles(["PRE", "NURSE"]); setCats(["bed", "round"]); setUserId(""); };
+
+  const exportCsv = () => {
+    const head = ["Time (IST)", "Role", "User", "Action", "Target", "Ward", "Detail"];
+    const esc  = (c) => `"${String(c ?? "").replace(/"/g, '""')}"`;
+    const lines = [head.map(esc).join(",")];
+    for (const r of (rows || []))
+      lines.push([
+        fmtDateTime(r.ts), r.role || "", r.name || r.username || "", actionLabel(r.action),
+        r.target || "", r.wardName || "",
+        (r.info || []).map(i => `${i.label}: ${i.value}`).join("; "),
+      ].map(esc).join(","));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    a.download = `activity-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+  };
+
+  const chipBtn = (active, color, label, icon, onClick) => (
+    <button key={label} onClick={onClick} className="chip" style={{
+      fontSize: 12, padding: "6px 12px", cursor: "pointer", fontWeight: 700,
+      background: active ? color : "var(--panel)",
+      borderColor: active ? color : "var(--line)",
+      color: active ? "#fff" : "var(--ink-2)",
+    }}>
+      {active ? <Ic d={icons.check} s={13} /> : (icon && <Ic d={icon} s={13} />)}{label}
+    </button>
   );
 
   return (
     <div>
-      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Audit Log</div>
-      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-        Most recent activity across all users and roles.
+      <div className="row between" style={{ alignItems: "flex-start", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Activity History</div>
+          <div className="dim" style={{ fontSize: 13 }}>Every move by PRE, Nurse, Manager &amp; Admin — filter, search and review.</div>
+        </div>
+        <button className="btn ghost" onClick={exportCsv} disabled={!rows || rows.length === 0} style={{ fontSize: 13 }}>
+          <Ic d={icons.layers} s={15} /> Export CSV
+        </button>
       </div>
 
-      {logs.length === 0 ? (
+      {/* ── Filter bar ─────────────────────────────────────────────────── */}
+      <div className="card" style={{ padding: 14, marginBottom: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="row" style={{ gap: 8, position: "relative" }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }}><Ic d={icons.search} s={16} /></span>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name, ward, bed or action…"
+            style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 14 }} />
+        </div>
+
+        <div className="row" style={{ gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div>
+            <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".04em" }}>Role</div>
+            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              {ACT_ROLES.map(r => chipBtn(roles.includes(r.key), r.color, r.label, null, () => toggleArr(roles, setRoles, r.key)))}
+            </div>
+          </div>
+          <div>
+            <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".04em" }}>Type</div>
+            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              {ACT_CATS.map(c => chipBtn(cats.includes(c.key), c.color, c.label, c.icon, () => toggleArr(cats, setCats, c.key)))}
+            </div>
+          </div>
+        </div>
+
+        <div className="row" style={{ gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ fontSize: 12 }}>
+            <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".04em" }}>From</div>
+            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)" }} />
+          </label>
+          <label style={{ fontSize: 12 }}>
+            <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".04em" }}>To</div>
+            <input type="date" value={to} onChange={e => setTo(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)" }} />
+          </label>
+          <label style={{ fontSize: 12 }}>
+            <div className="dim" style={{ fontSize: 11, fontWeight: 700, marginBottom: 5, textTransform: "uppercase", letterSpacing: ".04em" }}>Person</div>
+            <select value={userId} onChange={e => setUserId(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--panel)", minWidth: 180 }}>
+              <option value="">All people</option>
+              {users.map(u => <option key={u.id} value={u.id}>{u.name} · {u.role}</option>)}
+            </select>
+          </label>
+          <button className="btn ghost" onClick={resetFilters} style={{ fontSize: 13 }}>
+            <Ic d={icons.refresh} s={14} /> Reset
+          </button>
+        </div>
+      </div>
+
+      {/* ── Results ────────────────────────────────────────────────────── */}
+      {rows === null ? (
+        <div className="empty"><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={24} /></span></div>
+      ) : rows.length === 0 ? (
         <div className="card empty">
           <Ic d={icons.list} s={28} />
-          <div style={{ marginTop: 10, fontWeight: 600 }}>No activity yet</div>
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No activity matches these filters</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>Try widening the date range or clearing filters.</div>
         </div>
       ) : (
-        <div className="tbl-wrap">
-          <table className="tbl">
-            <thead>
-              <tr><th>Time</th><th>Action</th><th>Entity</th><th>User</th></tr>
-            </thead>
-            <tbody>
-              {logs.map((a, i) => {
-                const ms = toMs(a.ts);
-                const d  = ms ? new Date(ms) : null;
-                return (
-                  <tr key={i}>
-                    <td className="mono" style={{ whiteSpace: "nowrap", color: "var(--ink-2)" }}>
-                      {d ? d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + " " + fmtTime(ms) : "—"}
-                    </td>
-                    <td style={{ fontWeight: 600 }}>{actionLabel(a.action)}</td>
-                    <td className="dim">{a.entity || "—"}</td>
-                    <td className="dim">{a.username || "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="row between" style={{ fontSize: 12, marginBottom: 10 }}>
+            <span className="dim">
+              Page <strong style={{ color: "var(--ink)" }}>{page}</strong> of {pages} · {total} {total === 1 ? "event" : "events"}
+            </span>
+            {loading && <span className="dim">Loading…</span>}
+          </div>
+          <div style={{ opacity: loading ? 0.5 : 1, transition: "opacity .15s" }}>
+            {rows.map(r => <ActivityRow key={r.id} r={r} open={open.has(r.id)} onToggle={() => toggleOpen(r.id)} />)}
+          </div>
+          <Pagination page={page} pages={pages} onPage={goPage} />
+        </>
       )}
     </div>
   );
@@ -1911,7 +2190,422 @@ function Matrix({ data, selDate, history, userId }) {
   );
 }
 
-function SaveViewModal({ mode, existingView, currentWards, wardTypes, onClose, onSaved }) {
+// ══════════════════════════════════════════════════════════════════════════════
+//  MIDNIGHT CENSUS MATRIX — same matrix-style table/filter/saved-views UX as
+//  Hospital Matrix, but sourced from stored midnight_census snapshots instead
+//  of PRE round history. Saved views here use source:"midnight_census" so
+//  they never mix with Hospital Matrix's saved views.
+// ══════════════════════════════════════════════════════════════════════════════
+function MidnightCensusMatrix({ userId }) {
+  // ── Date selector — "live" or a captured census date ──────────────────────
+  const [censusDates, setCensusDates] = useState([]);
+  const [selDate,     setSelDate]     = useState("live");
+  useEffect(() => { api.mgrCensusDates().then((d) => setCensusDates(d.dates || [])).catch(() => {}); }, []);
+  const isLive = selDate === "live";
+
+  const fmtDateLabel = (d) => {
+    const dt = new Date(d + "T00:00:00");
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  };
+
+  // ── Live ward data (same source as Hospital Matrix) ────────────────────────
+  const [liveWards, setLiveWards] = useState(null);
+  useEffect(() => {
+    if (!isLive) { setLiveWards(null); return; }
+    api.cooLiveWards().then(setLiveWards).catch(() => {});
+  }, [isLive]);
+
+  // ── Historical census snapshot for the selected date ───────────────────────
+  const [censusSnapshot, setCensusSnapshot] = useState(null);
+  const [loadingCensus,  setLoadingCensus]  = useState(false);
+  useEffect(() => {
+    if (isLive) { setCensusSnapshot(null); return; }
+    setLoadingCensus(true);
+    api.mgrHistory(selDate).then((d) => setCensusSnapshot(d.census || null))
+      .catch(() => setCensusSnapshot(null))
+      .finally(() => setLoadingCensus(false));
+  }, [isLive, selDate]);
+
+  // ── Ward filter ──────────────────────────────────────────────────────────
+  const [selectedWards, setSelectedWards] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("coo_census_matrix_order") || "[]"); }
+    catch { return []; }
+  });
+  const [filterOpen, setFilterOpen] = useState(false);
+  useEffect(() => {
+    localStorage.setItem("coo_census_matrix_order", JSON.stringify(selectedWards));
+  }, [selectedWards]);
+  const toggleWard = (ward) => setSelectedWards((prev) =>
+    prev.includes(ward) ? prev.filter((w) => w !== ward) : [...prev, ward]
+  );
+  const showAllWards = () => setSelectedWards([]);
+
+  // ── Saved Views (source: midnight_census) ──────────────────────────────────
+  const [views,        setViews]        = useState([]);
+  const [activeViewId, setActiveViewId] = useState(() => {
+    const stored = localStorage.getItem(`coo_last_census_view_${userId}`);
+    return stored ? Number(stored) : null;
+  });
+  const [viewModal, setViewModal] = useState(null);
+  const [viewToast, setViewToast] = useState("");
+  const [confirm, confirmDialog]  = useConfirm();
+  const showVToast = (m) => { setViewToast(m); setTimeout(() => setViewToast(""), 2200); };
+
+  const loadViews = async () => {
+    try { setViews((await api.cooViews("midnight_census")).views || []); }
+    catch { /* non-fatal */ }
+  };
+  useEffect(() => { loadViews(); }, []);
+
+  useEffect(() => {
+    if (activeViewId == null) return;
+    const v = views.find(x => x.id === activeViewId);
+    if (v) setSelectedWards(v.selected_wards || []);
+  }, [activeViewId, views]);
+
+  useEffect(() => {
+    if (userId == null) return;
+    if (activeViewId != null)
+      localStorage.setItem(`coo_last_census_view_${userId}`, String(activeViewId));
+    else
+      localStorage.removeItem(`coo_last_census_view_${userId}`);
+  }, [activeViewId, userId]);
+
+  const handleToggleWard = (ward) => { setActiveViewId(null); toggleWard(ward); };
+  const handleShowAllWards = () => { setActiveViewId(null); showAllWards(); };
+
+  const activeView = activeViewId != null ? views.find(v => v.id === activeViewId) : null;
+  const systemViews = views.filter(v => v.is_system);
+  const sharedViews = views.filter(v => !v.is_system && v.is_shared);
+  const myViews     = views.filter(v => !v.is_system && !v.is_shared);
+
+  // ── Data build ───────────────────────────────────────────────────────────
+  const sourceWards = isLive
+    ? (liveWards?.wards || [])
+    : (Array.isArray(censusSnapshot?.wards) ? censusSnapshot.wards : []);
+
+  const wardTypes = [...new Set(sourceWards.map(w => w.ward))].sort();
+
+  const allRows = wardTypes.map((ward) => {
+    const w = sourceWards.find(x => x.ward === ward);
+    const hasData = !!w && w.vacant !== null;
+    return {
+      ward,
+      v:  hasData ? (w.vacant            || 0) : 0,
+      r:  hasData ? (w.reserved          || 0) : 0,
+      o:  hasData ? (w.occupied          || 0) : 0,
+      or: hasData ? (w.occupied_reserved || 0) : 0,
+      hasData,
+    };
+  });
+
+  const isFiltered = selectedWards.length > 0;
+  const rows = isFiltered
+    ? selectedWards.map((ward) => allRows.find((r) => r.ward === ward)).filter(Boolean)
+    : allRows;
+  const visibleCount = isFiltered ? selectedWards.length : wardTypes.length;
+  const grandV        = rows.reduce((a, r) => a + r.v,  0);
+  const grandR        = rows.reduce((a, r) => a + r.r,  0);
+  const grandO        = rows.reduce((a, r) => a + r.o,  0);
+  const grandOR       = rows.reduce((a, r) => a + r.or, 0);
+  const grandTotalOcc = grandO + grandOR;
+  const grandTotalVac = grandV + grandR;
+
+  // ── Styles (identical to Hospital Matrix) ───────────────────────────────────
+  const thStyle = (color) => ({
+    padding: "11px 16px", fontWeight: 700, fontSize: 13,
+    color: color || "var(--ink-2)", borderLeft: "1px solid var(--line)",
+    textAlign: "center", background: "var(--panel-2)",
+  });
+  const tdStyle = (color, stripe) => ({
+    textAlign: "center", padding: "10px 16px",
+    borderTop: "1px solid var(--line)", borderLeft: "1px solid var(--line)",
+    fontWeight: 700, fontSize: 15, color,
+    background: stripe ? "rgba(0,0,0,.022)" : "transparent",
+  });
+
+  const snapshotRef = useRef(null);
+  const viewLabel = activeView ? activeView.name : (isFiltered ? "Custom selection" : "All wards");
+  const noDataYet = !isLive && !loadingCensus && !censusSnapshot;
+
+  return (
+    <div>
+      <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>Midnight Census</div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 12 }}>
+        {isLive
+          ? `All bed states by ward · current live counts · updated ${fmtTime(Date.now())}.`
+          : `Midnight census captured ${fmtDateLabel(selDate)}.`}
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label className="label">Census date</label>
+        <select className="field" value={selDate} onChange={(e) => setSelDate(e.target.value)}>
+          <option value="live">Current (Live)</option>
+          {censusDates.map((d) => <option key={d} value={d}>{fmtDateLabel(d)}</option>)}
+        </select>
+      </div>
+
+      <SnapshotActions target={snapshotRef} onToast={showVToast} />
+
+      {/* ── Saved Views selector ─────────────────────────────────────────── */}
+      <div className="card" style={{ padding: "10px 12px", marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            className="field"
+            style={{ flex: 1, padding: "8px 10px", fontSize: 13 }}
+            value={activeViewId ?? ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              setActiveViewId(val === "" ? null : Number(val));
+            }}
+          >
+            {activeViewId == null && <option value="">— Custom —</option>}
+            {systemViews.length > 0 && (
+              <optgroup label="Default">
+                {systemViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+            {sharedViews.length > 0 && (
+              <optgroup label="Shared">
+                {sharedViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+            {myViews.length > 0 && (
+              <optgroup label="Mine">
+                {myViews.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+              </optgroup>
+            )}
+          </select>
+          <button
+            className="btn btn-primary"
+            style={{ padding: "8px 12px", fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}
+            onClick={() => setViewModal({ mode: "new" })}
+          >
+            + Add View
+          </button>
+        </div>
+
+        {activeView && (
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "var(--teal)", fontWeight: 700, flexShrink: 0 }}>
+              {activeView.name}
+            </span>
+            {activeView.is_shared && !activeView.is_system && (
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 10, background: "rgba(0,210,180,.15)", color: "var(--teal)" }}>shared</span>
+            )}
+            <span className="dim" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {activeView.selected_wards.length > 0 ? activeView.selected_wards.join(" · ") : "All wards"}
+            </span>
+            {!activeView.is_system && (
+              <div className="row" style={{ gap: 4, flexShrink: 0 }}>
+                <button className="chip" style={{ fontSize: 10, padding: "2px 7px" }}
+                  onClick={() => setViewModal({ mode: "edit", view: activeView })}>Edit</button>
+                <button className="chip" style={{ fontSize: 10, padding: "2px 7px", color: "var(--red)" }}
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: `Delete view "${activeView.name}"?`,
+                      message: activeView.is_shared
+                        ? "This view is shared with all Admin users. Deleting it removes it for everyone.\n\nThis cannot be undone."
+                        : "This cannot be undone.",
+                      confirmLabel: "Delete view",
+                      danger: true,
+                    });
+                    if (!ok) return;
+                    try {
+                      await api.cooDeleteView(activeView.id);
+                      setActiveViewId(null); setSelectedWards([]);
+                      await loadViews(); showVToast(`View "${activeView.name}" deleted`);
+                    } catch (e) { showVToast(toastErr(e)); }
+                  }}>Del</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Ward filter panel ──────────────────────────────────────────────── */}
+      <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 12 }}>
+        <button
+          onClick={() => setFilterOpen((o) => !o)}
+          style={{
+            width: "100%", display: "flex", alignItems: "center",
+            justifyContent: "space-between", padding: "11px 16px",
+            background: "var(--panel-2)", border: "none", cursor: "pointer", gap: 8,
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink-2)" }}>
+            Filter wards
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isFiltered && (
+              <span style={{
+                fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 20,
+                background: "rgba(0,210,180,.18)", color: "var(--teal)",
+              }}>
+                {visibleCount}/{wardTypes.length} shown
+              </span>
+            )}
+            <span style={{
+              display: "inline-flex", color: "var(--ink-3)",
+              transform: filterOpen ? "rotate(270deg)" : "rotate(90deg)",
+              transition: "transform .2s",
+            }}>
+              <Ic d={icons.chevron} s={15} />
+            </span>
+          </span>
+        </button>
+
+        {filterOpen && (
+          <div style={{ padding: "12px 14px", borderTop: "1px solid var(--line)" }}>
+            {isFiltered && (
+              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+                <button className="chip" style={{ fontSize: 12 }} onClick={handleShowAllWards}>
+                  ✕ Clear selection — show all
+                </button>
+              </div>
+            )}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {wardTypes.map((ward) => {
+                const idx = selectedWards.indexOf(ward);
+                const ticked = idx !== -1;
+                return (
+                  <button
+                    key={ward}
+                    onClick={() => handleToggleWard(ward)}
+                    style={{
+                      padding: "6px 12px", borderRadius: 20, fontSize: 12,
+                      fontWeight: 600, cursor: "pointer", border: "1px solid",
+                      borderColor: ticked ? "var(--teal)" : "var(--line)",
+                      background: ticked ? "rgba(0,210,180,.12)" : "var(--panel)",
+                      color: ticked ? "var(--teal)" : "var(--ink-3)",
+                      transition: "all .15s",
+                    }}
+                  >
+                    {ticked ? `${idx + 1}. ` : ""}{ward}
+                  </button>
+                );
+              })}
+            </div>
+            {isFiltered && (
+              <div className="dim" style={{ fontSize: 11, marginTop: 10 }}>
+                Numbers show the order wards appear in the table.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Matrix table ─────────────────────────────────────────────────── */}
+      <div className="card tbl-scroll" style={{ padding: 0 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13, minWidth: 560 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", padding: "11px 16px", fontWeight: 700, fontSize: 13, color: "var(--ink-2)", background: "var(--panel-2)", minWidth: 140 }}>Ward</th>
+              <th style={{ ...thStyle("var(--st-o)"),  background: "var(--st-o-bg)"  }}>Total Occ</th>
+              <th style={{ ...thStyle("var(--st-o)"),  background: "var(--st-o-bg)"  }}>On Bed</th>
+              <th style={{ ...thStyle("var(--st-or)"), background: "var(--st-or-bg)" }}>Occ+Res</th>
+              <th style={{ ...thStyle("var(--st-v)"),  background: "var(--st-v-bg)"  }}>Total Vac</th>
+              <th style={{ ...thStyle("var(--st-v)"),  background: "var(--st-v-bg)"  }}>Vacant</th>
+              <th style={{ ...thStyle("var(--st-vr)"), background: "var(--st-vr-bg)" }}>Vac+Res</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ padding: "24px 16px", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
+                  {isLive && !liveWards ? "Loading…" : noDataYet ? "No midnight census captured for this date." : loadingCensus ? "Loading…" : "No data available."}
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, ri) => {
+                const stripe = ri % 2;
+                const d = (val, color) => row.hasData
+                  ? <span style={{ color: val > 0 ? color : "var(--ink-3)" }}>{val}</span>
+                  : <span className="dim">–</span>;
+                return (
+                  <tr key={row.ward}>
+                    <td style={{ padding: "10px 16px", fontWeight: 600, borderTop: "1px solid var(--line)", background: stripe ? "var(--panel)" : "var(--panel-2)" }}>{row.ward}</td>
+                    <td style={tdStyle("var(--st-o)",  stripe)}>{d(row.o + row.or, "var(--st-o)")}</td>
+                    <td style={tdStyle("var(--st-o)",  stripe)}>{d(row.o,          "var(--st-o)")}</td>
+                    <td style={tdStyle("var(--st-or)", stripe)}>{d(row.or,         "var(--st-or)")}</td>
+                    <td style={tdStyle("var(--st-v)",  stripe)}>{d(row.v + row.r,  "var(--st-v)")}</td>
+                    <td style={tdStyle("var(--st-v)",  stripe)}>{d(row.v,          "var(--st-v)")}</td>
+                    <td style={tdStyle("var(--st-vr)", stripe)}>{d(row.r,          "var(--st-vr)")}</td>
+                  </tr>
+                );
+              })
+            )}
+            {rows.length > 0 && (
+              <tr>
+                <td style={{ padding: "12px 16px", fontWeight: 800, color: "var(--primary)", borderTop: "2px solid var(--line)", background: "var(--panel-2)" }}>
+                  Total{isFiltered ? <span style={{ fontWeight: 400, fontSize: 11, color: "var(--ink-3)", marginLeft: 6 }}>(filtered)</span> : null}
+                </td>
+                {[
+                  [grandTotalOcc, "var(--st-o)"],
+                  [grandO,        "var(--st-o)"],
+                  [grandOR,       "var(--st-or)"],
+                  [grandTotalVac, "var(--st-v)"],
+                  [grandV,        "var(--st-v)"],
+                  [grandR,        "var(--st-vr)"],
+                ].map(([val, color], i) => (
+                  <td key={i} style={{ textAlign: "center", padding: "12px 16px", borderTop: "2px solid var(--line)", borderLeft: "1px solid var(--line)", fontWeight: 800, fontSize: 16, color, background: "var(--panel-2)" }} className="mono">{val}</td>
+                ))}
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="row" style={{ gap: 14, marginTop: 12, flexWrap: "wrap" }}>
+        <span className="dim" style={{ fontSize: 11 }}>– = not yet entered for this round</span>
+      </div>
+
+      {viewModal && (
+        <SaveViewModal
+          mode={viewModal.mode}
+          existingView={viewModal.view}
+          currentWards={selectedWards}
+          wardTypes={wardTypes}
+          source="midnight_census"
+          onClose={() => setViewModal(null)}
+          onSaved={async (newId) => {
+            setViewModal(null);
+            await loadViews();
+            if (newId != null) setActiveViewId(newId);
+            showVToast(viewModal.mode === "new" ? "View saved ✓" : "View updated ✓");
+          }}
+        />
+      )}
+
+      {viewToast && <div className="toast">{viewToast}</div>}
+      {confirmDialog}
+
+      <div aria-hidden="true" style={{
+        position: "fixed", top: 0, left: 0, width: 720,
+        height: 0, overflow: "hidden", pointerEvents: "none", zIndex: -1,
+      }}>
+        <div ref={snapshotRef} id="snapshot-report" style={{ width: 720 }}>
+          <SnapshotReport
+            viewLabel={viewLabel}
+            isLive={isLive}
+            selDate={selDate}
+            rows={rows}
+            grandV={grandV}
+            grandR={grandR}
+            grandO={grandO}
+            grandOR={grandOR}
+            grandTotalOcc={grandTotalOcc}
+            grandTotalVac={grandTotalVac}
+            isFiltered={isFiltered}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SaveViewModal({ mode, existingView, currentWards, wardTypes, source = "matrix", onClose, onSaved }) {
   useModal(onClose);
   const isNew = mode === "new";
   const [name,       setName]       = useState(existingView?.name || "");
@@ -1932,7 +2626,7 @@ function SaveViewModal({ mode, existingView, currentWards, wardTypes, onClose, o
     try {
       let newId = null;
       if (isNew) {
-        const r = await api.cooSaveView({ name: name.trim(), selected_wards: selWards, is_shared: isShared });
+        const r = await api.cooSaveView({ name: name.trim(), selected_wards: selWards, is_shared: isShared, source });
         newId = r.id;
       } else {
         await api.cooEditView(existingView.id, { name: name.trim(), selected_wards: selWards, is_shared: isShared });

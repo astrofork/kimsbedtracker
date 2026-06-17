@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api, startAlarm, stopAlarm, fmtTime, fmtClock, toastErr, createSocket } from "./lib.js";
 import { Ic, icons, StatusBar, useModal } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { naturalSort, bedStateColor, bedStateBg, bedStateShort } from "./bedUtils.js";
+import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals } from "./bedUtils.js";
 
 const TAB_TITLES = { home: "Dashboard", entry: "Entry — Wards", map: "My Ward Map" };
 
@@ -426,8 +426,9 @@ function MyMap({ data }) {
       <div className="card-grid">
         {data.wards.map((w) => {
           const entered = w.vacant !== null;
-          const wEntered = entered ? w.vacant + (w.occupied || 0) + (w.reserved || 0) + (w.occupied_reserved || 0) : 0;
-          const wPct = wEntered > 0 ? Math.round(((w.occupied || 0) + (w.occupied_reserved || 0)) / wEntered * 100) : 0;
+          const wt = entered ? calculateWardTotals(w) : null;
+          const wEntered = wt ? wt.totalBeds : 0;
+          const wPct = wEntered > 0 ? Math.round((wt.totalOccupied / wEntered) * 100) : 0;
           const full = entered && (w.occupied || 0) === w.total;
           return (
             <div className="ward-card" key={w.ward} style={{ borderColor: full ? "var(--st-o)" : entered ? "var(--st-v)" : "var(--line)" }}>

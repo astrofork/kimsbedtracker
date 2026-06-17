@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { api, fmtTime, fmtClock, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
 import { Ic, icons, StatusBar, useModal, BlockAvatar, useConfirm } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { naturalSort } from "./bedUtils.js";
+import { naturalSort, calculateWardTotals } from "./bedUtils.js";
 
 const MGR_TITLES = {
   report: "Reports", setup: "Blocks Overview", preblocks: "PRE Blocks",
@@ -140,7 +140,7 @@ function WardTable({ wards }) {
             const or_ = w.occupied_reserved || 0;
             const v   = w.vacant            || 0;
             const r   = w.reserved          || 0;
-            const occ = o + or_;
+            const occ = calculateWardTotals(w).totalOccupied;
             const pct = reported && (w.total || 0) > 0 ? (occ / w.total) * 100 : 0;
             const d   = (n) => reported ? n : <span className="dim">–</span>;
             return (
@@ -203,9 +203,11 @@ function Reporting() {
   useEffect(() => {
     const socket = createSocket();
     const refresh = () => { loadRef.current(); };
-    socket.on("bed:update",   refresh);
-    socket.on("round:submit", refresh);
-    socket.on("connect",      refresh);
+    socket.on("bed:update",       refresh);
+    socket.on("round:submit",     refresh);
+    socket.on("ward:operational", refresh);
+    socket.on("alarm:active",     refresh); // overdue PRE round → refresh compliance badge
+    socket.on("connect",          refresh);
     return () => { socket.disconnect(); };
   }, []);
 
@@ -1344,7 +1346,6 @@ function WardEditor({ ward, stations, onClose, onSaved, showToast }) {
   useModal(onClose);
   const unitTypes                     = useUnitTypes();
   const [name,        setName]        = useState(ward.name       || "");
-  const [stationId,   setStationId]   = useState(String(ward.station_id || ""));
   const [unitType,    setUnitType]    = useState(ward.unit_type  || "");
   const [roomType,    setRoomType]    = useState(ward.room_type  || "");
   const [bedType,     setBedType]     = useState(ward.bed_type   || "Census");
@@ -1357,7 +1358,6 @@ function WardEditor({ ward, stations, onClose, onSaved, showToast }) {
     try {
       await api.mgrEditWard(ward.id, {
         name:      name.trim(),
-        stationId: stationId ? Number(stationId) : null,
         unitType:  unitType.trim() || null,
         roomType:  roomType.trim() || null,
         bedType, operational,
@@ -1391,10 +1391,12 @@ function WardEditor({ ward, stations, onClose, onSaved, showToast }) {
           ]} />
 
           <label className="label">Nursing station</label>
-          <select className="field" value={stationId} onChange={(e) => setStationId(e.target.value)}>
-            <option value="">— None —</option>
-            {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          <div className="field" style={{ display: "flex", alignItems: "center", color: "var(--ink-3)", cursor: "default" }}>
+            {ward.station_name || "— Not assigned —"}
+          </div>
+          <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+            Manage station assignment from the Stations tab.
+          </div>
           <div style={{ height: 12 }} />
 
           <label className="label">Unit type <span className="dim" style={{ fontSize: 11 }}>(pick or type custom)</span></label>
@@ -3358,7 +3360,7 @@ function StationDetail({ station, onBack, showToast }) {
         </div>
       </div>
 
-      <div className="row" style={{ gap: 6, marginBottom: 18 }}>
+      <div className="row" style={{ gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
         {[["nurses", "Nurses"], ["access", "Access"], ["coverage", "Coverage"]].map(([key, label]) => (
           <button key={key}
             className={"fchip" + (activeTab === key ? " on" : "")}
@@ -4271,7 +4273,7 @@ function PayerTypeManager({ showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  HISTORY VIEWER
 // ══════════════════════════════════════════════════════════════════════════════
-export function HistoryViewer({ showToast }) {
+export function HistoryViewer({ showToast, showCensusCard = true }) {
   const [dates,    setDates]    = useState([]);
   const [floors,   setFloors]   = useState([]);
   const [date,     setDate]     = useState("");
@@ -4306,7 +4308,23 @@ export function HistoryViewer({ showToast }) {
   };
 
   const reportedFloors = new Set(rounds.map((r) => r.floorName || r.floorId));
-  const dayTotals = rounds.reduce((acc, r) => {
+
+  // Coverage: which PRE blocks submitted on this date vs. all blocks (only
+  // meaningful when not filtered to a single block).
+  const reportedBlockIds = new Set(rounds.map((r) => r.preBlockId ?? r.floorId));
+  const notReportedBlocks = floors.filter((b) => !reportedBlockIds.has(b.id));
+  const fullCoverage = floors.length > 0 && notReportedBlocks.length === 0;
+
+  // Each PRE Block can submit multiple rounds per day; only the LAST round of
+  // each block reflects current bed state, so the day-totals card must dedupe
+  // to one round per block — otherwise beds are counted once per round.
+  const latestPerBlock = new Map();
+  for (const r of rounds) {
+    const key = r.preBlockId ?? r.floorId;
+    const prev = latestPerBlock.get(key);
+    if (!prev || (r.submittedAt || 0) > (prev.submittedAt || 0)) latestPerBlock.set(key, r);
+  }
+  const dayTotals = [...latestPerBlock.values()].reduce((acc, r) => {
     for (const w of (Array.isArray(r.wards) ? r.wards : [])) {
       acc.v += w.vacant   || 0;
       acc.o += w.occupied || 0;
@@ -4340,6 +4358,30 @@ export function HistoryViewer({ showToast }) {
         </div>
       </div>
 
+      {!loading && !floorId && rounds.length > 0 && floors.length > 0 && (
+        <div className="card" style={{
+          padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          borderLeft: `3px solid ${fullCoverage ? "var(--green)" : "var(--amber)"}`,
+        }}>
+          <span style={{
+            flexShrink: 0, minWidth: 46, height: 38, padding: "0 8px", borderRadius: 9,
+            background: (fullCoverage ? "var(--green)" : "var(--amber)") + "1c",
+            color: fullCoverage ? "var(--green)" : "var(--amber)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 15,
+          }}>{reportedBlockIds.size}/{floors.length}</span>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>
+              {reportedBlockIds.size} of {floors.length} PRE block{floors.length !== 1 ? "s" : ""} submitted
+            </div>
+            {fullCoverage
+              ? <div className="dim" style={{ fontSize: 11.5, marginTop: 2, color: "var(--green)" }}>All blocks reported ✓</div>
+              : <div className="dim" style={{ fontSize: 11.5, marginTop: 2 }}>
+                  Not submitted: {notReportedBlocks.map((b) => b.name).join(", ")}
+                </div>}
+          </div>
+        </div>
+      )}
+
       {!loading && rounds.length > 0 && (
         <div className="card glass" style={{ padding: 14, marginBottom: 14 }}>
           <div className="row between" style={{ marginBottom: 10 }}>
@@ -4363,12 +4405,12 @@ export function HistoryViewer({ showToast }) {
             ))}
           </div>
           <div className="dim" style={{ fontSize: 10, marginTop: 6, textAlign: "right" }}>
-            totals across all rounds submitted this day
+            totals from the latest round of each PRE Block
           </div>
         </div>
       )}
 
-      {!loading && census && (() => {
+      {!loading && showCensusCard && census && (() => {
         const wards = Array.isArray(census.wards) ? census.wards : [];
         const tot = wards.reduce((a, w) => ({
           v:  a.v  + (w.vacant || 0),
@@ -4434,60 +4476,116 @@ export function HistoryViewer({ showToast }) {
         </div>
       )}
 
-      {rounds.map((r, i) => {
-        const wards  = Array.isArray(r.wards) ? r.wards : [];
-        const tot    = wards.reduce((a, w) => ({
-          v: a.v + (w.vacant || 0), o: a.o + (w.occupied || 0),
-          r: a.r + (w.reserved || 0), or: a.or + (w.occupied_reserved || 0),
-          t: a.t + (w.total || 0),
-        }), { v: 0, o: 0, r: 0, or: 0, t: 0 });
-        const label  = r.floorName || `Floor ${r.floorId || r.floorCode}`;
-        const isOpen = !!expanded[i];
-        return (
-          <div className="card" key={i} style={{ padding: 14, marginBottom: 10 }}>
-            <div className="row between">
-              <div className="row" style={{ gap: 10 }}>
-                <BlockAvatar code={r.floorCode || label} size={36} />
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{label}</div>
-                  <div className="dim" style={{ fontSize: 11, marginTop: 1 }}>
-                    submitted {fmtTime(r.submittedAt)} · {fmtClock(r.startMin)} round
-                  </div>
-                </div>
-              </div>
-              <span className={"tag " + (r.shift === "night" ? "b" : "v")}>
-                {r.shift === "night" ? "Night" : "Morning"}
-              </span>
+      {!loading && rounds.length > 0 && (() => {
+        // Group rounds by PRE block so a day with many rounds shows ONE card per
+        // block (with a compact round timeline) instead of a wall of big cards.
+        const groups = new Map();
+        for (const r of rounds) {
+          const key = r.preBlockId ?? r.floorId ?? r.floorCode;
+          if (!groups.has(key))
+            groups.set(key, { key, name: r.floorName || r.blockName || "PRE Block", code: r.floorCode || r.blockName, rounds: [] });
+          groups.get(key).rounds.push(r);
+        }
+        for (const g of groups.values()) g.rounds.sort((a, b) => (a.submittedAt || 0) - (b.submittedAt || 0));
+        return [...groups.values()].map(g => <BlockRoundsCard key={g.key} group={g} />);
+      })()}
+    </div>
+  );
+}
+
+function roundTotals(wards) {
+  return (Array.isArray(wards) ? wards : []).reduce((a, w) => ({
+    v: a.v + (w.vacant || 0), o: a.o + (w.occupied || 0),
+    r: a.r + (w.reserved || 0), or: a.or + (w.occupied_reserved || 0),
+    t: a.t + (w.total || 0),
+  }), { v: 0, o: 0, r: 0, or: 0, t: 0 });
+}
+
+// One card per PRE block: latest round shown big, every round of the day as a
+// compact clickable chip (time · occupancy%). Selecting a chip swaps the view to
+// that round. Scales cleanly whether a block reported once or a dozen times.
+function BlockRoundsCard({ group }) {
+  const rounds = group.rounds;
+  const last = rounds.length - 1;
+  const [sel, setSel] = useState(last);
+  const [open, setOpen] = useState(false);
+  const idx = Math.min(sel, last);
+  const r = rounds[idx];
+  const wards = Array.isArray(r.wards) ? r.wards : [];
+  const tot = roundTotals(wards);
+  const occPct = tot.t > 0 ? Math.round(((tot.o + tot.or) / tot.t) * 100) : 0;
+  const isLatest = idx === last;
+
+  return (
+    <div className="card" style={{ padding: 14, marginBottom: 10 }}>
+      <div className="row between" style={{ flexWrap: "wrap", gap: 8 }}>
+        <div className="row" style={{ gap: 10 }}>
+          <BlockAvatar code={group.code || group.name} size={36} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{group.name}</div>
+            <div className="dim" style={{ fontSize: 11, marginTop: 1 }}>
+              {rounds.length} round{rounds.length !== 1 ? "s" : ""} today · latest {fmtTime(rounds[last].submittedAt)}
             </div>
-
-            {tot.t > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <StatusBar v={tot.v} r={tot.r} o={tot.o} or={tot.or} total={tot.t} />
-                <div className="row" style={{ gap: 8, marginTop: 8 }}>
-                  <span className="tag v">{tot.v} vacant</span>
-                  <span className="tag r">{tot.r} vac+res</span>
-                  <span className="tag o">{tot.o} occupied</span>
-                  {tot.or > 0 && <span className="tag or">{tot.or} occ+res</span>}
-                  <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{tot.t} beds</span>
-                </div>
-              </div>
-            )}
-
-            {wards.length > 0 && (
-              <>
-                <button style={{
-                  marginTop: 10, width: "100%", padding: "7px 0", borderRadius: 8,
-                  background: "var(--panel-2)", border: "none", cursor: "pointer", fontSize: 12,
-                  color: "var(--ink-2)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                }} onClick={() => setExpanded((p) => ({ ...p, [i]: !p[i] }))}>
-                  {isOpen ? "▲ Hide" : "▼ Show"} ward breakdown ({wards.length})
-                </button>
-                {isOpen && <WardTable wards={wards} />}
-              </>
-            )}
           </div>
-        );
-      })}
+        </div>
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <span className="chip mono" style={{ fontWeight: 700 }}>{occPct}% occ</span>
+          <span className={"tag " + (r.shift === "night" ? "b" : "v")}>{r.shift === "night" ? "Night" : "Morning"}</span>
+        </div>
+      </div>
+
+      {tot.t > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <StatusBar v={tot.v} r={tot.r} o={tot.o} or={tot.or} total={tot.t} />
+          <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <span className="tag v">{tot.v} vacant</span>
+            <span className="tag r">{tot.r} vac+res</span>
+            <span className="tag o">{tot.o} occupied</span>
+            {tot.or > 0 && <span className="tag or">{tot.or} occ+res</span>}
+            <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{tot.t} beds</span>
+          </div>
+        </div>
+      )}
+
+      {rounds.length > 1 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="dim" style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
+            Rounds today — tap to view
+          </div>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {rounds.map((rd, i) => {
+              const t = roundTotals(rd.wards);
+              const p = t.t > 0 ? Math.round(((t.o + t.or) / t.t) * 100) : 0;
+              const active = i === idx;
+              return (
+                <button key={i} onClick={() => { setSel(i); setOpen(false); }}
+                  title={`submitted ${fmtTime(rd.submittedAt)} · ${rd.shift === "night" ? "Night" : "Morning"}`}
+                  className="chip" style={{
+                    cursor: "pointer", fontSize: 11, padding: "5px 10px", fontWeight: 600,
+                    background: active ? "var(--primary)" : "var(--panel)",
+                    color: active ? "#fff" : "var(--ink-2)",
+                    borderColor: active ? "var(--primary)" : "var(--line)",
+                  }}>
+                  {fmtClock(rd.startMin)} · {p}%
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {wards.length > 0 && (
+        <>
+          <button style={{
+            marginTop: 12, width: "100%", padding: "7px 0", borderRadius: 8,
+            background: "var(--panel-2)", border: "none", cursor: "pointer", fontSize: 12,
+            color: "var(--ink-2)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+          }} onClick={() => setOpen(o => !o)}>
+            {open ? "▲ Hide" : "▼ Show"} ward breakdown ({wards.length}){!isLatest ? ` · ${fmtClock(r.startMin)} round` : ""}
+          </button>
+          {open && <WardTable wards={wards} />}
+        </>
+      )}
     </div>
   );
 }

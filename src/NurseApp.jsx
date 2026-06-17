@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { api, toastErr, createSocket } from "./lib.js";
 import { Ic, icons, useModal } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { naturalSort, bedStateColor, bedStateBg, bedStateShort } from "./bedUtils.js";
+import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals } from "./bedUtils.js";
 
 // ── Bed tile — name + status label, status-tinted ─────────────────────────────
 const BedCard = React.memo(function BedCard({ bed, onClick }) {
@@ -526,7 +526,9 @@ export default function NurseApp({ user, onLogout }) {
 
     socket.on("bed:update", (payload) => {
       const { bedId, wardId } = payload ?? {};
-      if (!bedId || !wardId) return;
+      // Ward-level edits (rename/delete/operational toggle) only carry wardId,
+      // bed-level edits only carry bedId — require at least one, not both.
+      if (!bedId && !wardId) return;
       // Reload to get fresh aggregate counts (vacant/reserved/occupied) for the ward cards
       loadRef.current();
       setLastSync(new Date());
@@ -572,9 +574,8 @@ export default function NurseApp({ user, onLogout }) {
     </div>
   );
 
-  const totalBeds   = wards.reduce((s, w) => s + (w.total_beds ?? 0), 0);
-  const totalVacant = wards.reduce((s, w) => s + (w.vacant ?? 0) + (w.reserved ?? 0), 0);
-  const totalOcc    = wards.reduce((s, w) => s + (w.occupied ?? 0) + (w.occupied_reserved ?? 0), 0);
+  const totalBeds   = wards.reduce((s, w) => s + (w.total_beds ?? 0), 0); // capacity (not categorized sum)
+  const { totalVacant, totalOccupied: totalOcc } = calculateWardTotals(wards);
 
   return (
     <AppShell

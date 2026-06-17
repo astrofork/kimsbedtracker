@@ -102,7 +102,7 @@
 /* ── Reset ────────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body,#root{min-height:100%;overscroll-behavior:none;}
-html{background:var(--bg);overscroll-behavior:none;}
+html{background:var(--bg);overscroll-behavior:none;overflow-x:hidden;}
 body{font-family:'Inter',system-ui,sans-serif;font-size:13px;background:var(--bg);color:var(--ink);overscroll-behavior:none;}
 /* Body scroll lock — applied by useModal() when any sheet is open. */
 body.modal-open{overflow:hidden;position:fixed;width:100%;}

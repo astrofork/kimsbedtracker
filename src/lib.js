@@ -60,6 +60,15 @@ export const api = {
   cooPreActivity: () => req("/coo/pre-activity"),
   cooNurseActivity: () => req("/coo/nurse-activity"),
   cooAudit: () => req("/coo/audit"),
+  cooActivity: (params = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null || v === "") continue;
+      qs.set(k, Array.isArray(v) ? v.join(",") : String(v));
+    }
+    const s = qs.toString();
+    return req(`/coo/activity${s ? "?" + s : ""}`);
+  },
   cooCompliance: () => req("/coo/compliance"),
   // ── manager — KPIs ──────────────────────────────────────────────────────────
   mgrKpis: () => req("/manager/kpis"),
@@ -86,6 +95,7 @@ export const api = {
   mgrDeletePre: (id) => req(`/manager/pre/${id}`, { method: "DELETE" }),
   // ── manager — history ────────────────────────────────────────────────────────
   mgrHistoryDates: () => req("/manager/history/dates"),
+  mgrCensusDates: () => req("/manager/history/census-dates"),
   mgrHistory: (date, preBlockId) =>
     req(`/manager/history?date=${date}${preBlockId != null ? "&preBlockId=" + preBlockId : ""}`),
   // ── manager — nursing stations ───────────────────────────────────────────────
@@ -166,7 +176,7 @@ export const api = {
   mgrUpdatePayerType: (id, data) => req(`/manager/payer-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderPayerType: (id, direction) => req(`/manager/payer-types/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
   mgrDeletePayerType: (id) => req(`/manager/payer-types/${id}`, { method: "DELETE" }),
-  cooViews: () => req("/coo/views"),
+  cooViews: (source = "matrix") => req(`/coo/views?source=${source}`),
   cooSaveView: (data) => req("/coo/views", { method: "POST", body: JSON.stringify(data) }),
   cooEditView: (id, data) => req(`/coo/views/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   cooDeleteView: (id) => req(`/coo/views/${id}`, { method: "DELETE" }),
@@ -256,6 +266,25 @@ export function fmtTime(d) {
   const date = new Date(ms);
   if (isNaN(date.getTime())) return "—";
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+export function fmtRelative(d) {
+  const ms = typeof d === "number" || typeof d === "string" ? toMs(d) : d;
+  if (ms == null) return "—";
+  const diffSec = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (diffSec < 45) return "Just now";
+  const diffMin = Math.round(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.round(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+export function fmtDateTime(d) {
+  const ms = typeof d === "number" || typeof d === "string" ? toMs(d) : d;
+  if (ms == null) return "—";
+  const date = new Date(ms);
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 export function fmtClock(mins) {
 
