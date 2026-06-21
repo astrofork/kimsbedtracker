@@ -70,6 +70,8 @@ export const api = {
     return req(`/coo/activity${s ? "?" + s : ""}`);
   },
   cooCompliance: () => req("/coo/compliance"),
+  cooOccupancyTrend: (range = "7d") => req(`/coo/occupancy-trend?range=${range}`),
+  cooSnapshots: () => req("/coo/snapshots"),
   // ── manager — KPIs ──────────────────────────────────────────────────────────
   mgrKpis: () => req("/manager/kpis"),
   // ── manager — building blocks ────────────────────────────────────────────────
@@ -129,6 +131,34 @@ export const api = {
   mgrEditPreBlock: (id, data) => req(`/manager/pre-blocks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrSetPreBlockStatus: (id, status) => req(`/manager/pre-blocks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
   mgrDeletePreBlock: (id) => req(`/manager/pre-blocks/${id}`, { method: "DELETE" }),
+  // ── manager — Doctor Blocks ──────────────────────────────────────────────────
+  mgrDoctorBlocks: () => req("/manager/doctor-blocks"),
+  mgrDoctorBlock: (id) => req(`/manager/doctor-blocks/${id}`),
+  mgrCreateDoctorBlock: (data) => req("/manager/doctor-blocks", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditDoctorBlock: (id, data) => req(`/manager/doctor-blocks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrSetDoctorBlockStatus: (id, status) => req(`/manager/doctor-blocks/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  mgrDeleteDoctorBlock: (id) => req(`/manager/doctor-blocks/${id}`, { method: "DELETE" }),
+  // ── manager — Doctor users ───────────────────────────────────────────────────
+  mgrCreateDoctor: (data) => req("/manager/doctors", { method: "POST", body: JSON.stringify(data) }),
+  mgrEditDoctor: (id, data) => req(`/manager/doctors/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteDoctor: (id) => req(`/manager/doctors/${id}`, { method: "DELETE" }),
+  // ── Doctor — dashboard, blocks, bed management ───────────────────────────────
+  doctorMe: () => req("/doctor/me"),
+  doctorBlock: (id) => req(`/doctor/blocks/${id}`),
+  doctorBeds: (wardId, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
+    const qs = params.toString();
+    return req(`/doctor/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
+  },
+  doctorPayerTypes: () => req("/doctor/payer-types"),
+  doctorDestinations: () => req("/doctor/destinations"),
+  doctorUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote) =>
+    req(`/doctor/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined }) }),
+  doctorReview: (blockId) => req(`/doctor/blocks/${blockId}/review`, { method: "POST" }),
+  doctorReviewWard: (wardId) => req(`/doctor/wards/${wardId}/review`, { method: "POST" }),
+  doctorActivity: () => req("/doctor/activity"),
   // ── manager — bed details (create/configure only) ────────────────────────────
   wardBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
@@ -155,8 +185,9 @@ export const api = {
     return req(`/pre/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
   prePayerTypes: () => req("/pre/payer-types"),
-  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType) =>
-    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined }) }),
+  preDestinations: () => req("/pre/destinations"),
+  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote) =>
+    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined }) }),
   // ── Nurse — bed management ───────────────────────────────────────────────────
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
@@ -167,8 +198,9 @@ export const api = {
     return req(`/nurse/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
   nursePayerTypes: () => req("/nurse/payer-types"),
-  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType) =>
-    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined }) }),
+  nurseDestinations: () => req("/nurse/destinations"),
+  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote) =>
+    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
   mgrPayerTypes: () => req("/manager/payer-types"),
@@ -176,6 +208,11 @@ export const api = {
   mgrUpdatePayerType: (id, data) => req(`/manager/payer-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderPayerType: (id, direction) => req(`/manager/payer-types/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
   mgrDeletePayerType: (id) => req(`/manager/payer-types/${id}`, { method: "DELETE" }),
+  mgrDestinations: () => req("/manager/destinations"),
+  mgrCreateDestination: (name) => req("/manager/destinations", { method: "POST", body: JSON.stringify({ name }) }),
+  mgrUpdateDestination: (id, data) => req(`/manager/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrReorderDestination: (id, direction) => req(`/manager/destinations/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
+  mgrDeleteDestination: (id) => req(`/manager/destinations/${id}`, { method: "DELETE" }),
   cooViews: (source = "matrix") => req(`/coo/views?source=${source}`),
   cooSaveView: (data) => req("/coo/views", { method: "POST", body: JSON.stringify(data) }),
   cooEditView: (id, data) => req(`/coo/views/${id}`, { method: "PUT", body: JSON.stringify(data) }),

@@ -5,7 +5,12 @@ import {
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
 } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { HistoryViewer, actionLabel } from "./ManagerApp.jsx";
+import {
+  HistoryViewer, actionLabel,
+  HierarchyManager, PreBlockManager, PreManager,
+  StationManager, NurseManager, PayerTypeManager, DestinationManager,
+  DoctorBlockManager, DoctorManager,
+} from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
 } from "./snapshot.js";
@@ -22,12 +27,20 @@ function fmtReminderLabel(hhmm) {
 // Backend role stays COO — the UI presents it as the Admin module.
 const ADMIN_TITLES = {
   dashboard:  "Live Bed Dashboard",
-  activity:   "PRE & Nurse Activity",
-  matrix:     "Hospital Matrix",
   analytics:  "Analytics",
+  matrix:     "Hospital Matrix",
+  activity:   "PRE & Nurse Activity",
   reports:    "Reports",
   savedviews: "Saved Views",
   alerts:     "Alerts",
+  pres:       "PRE Users",
+  nurses:     "Nurse Users",
+  doctors:    "Doctor Users",
+  setup:      "Blocks",
+  preblocks:  "PRE Blocks",
+  doctorblocks: "Doctor Blocks",
+  stations:   "Stations",
+  payers:     "Payer Types",
   settings:   "Settings",
 };
 
@@ -46,6 +59,7 @@ export default function COOApp({ user, meta, onLogout }) {
   const [selDate, setSelDate] = useState("live");
   const [history, setHistory] = useState(null);
   const [reportsView, setReportsView] = useState("activity"); // "activity" | "history" | "census"
+  const [analyticsView, setAnalyticsView] = useState("overview"); // "overview" | "payer"
   const loadRef    = useRef(null);
   const [liveKey,  setLiveKey]  = useState(0);
 
@@ -118,14 +132,33 @@ export default function COOApp({ user, meta, onLogout }) {
   const due = data.dueReminder;
 
   const menu = [
-    { key: "dashboard",  icon: icons.home,     label: "Dashboard" },
-    { key: "activity",   icon: icons.user,     label: "PRE & Nurse" },
-    { key: "matrix",     icon: icons.grid,     label: "Hospital Matrix" },
-    { key: "analytics",  icon: icons.chart,    label: "Analytics" },
-    { key: "reports",    icon: icons.clock,    label: "Reports" },
-    { key: "savedviews", icon: icons.layers,   label: "Saved Views" },
-    { key: "alerts",     icon: icons.bell,     label: "Alerts", dot: !!(due && !dismissed[due]) },
-    { key: "settings",   icon: icons.settings, label: "Settings" },
+    { section: "Dashboard", items: [
+      { key: "dashboard",  icon: icons.home,     label: "Dashboard" },
+      { key: "analytics",  icon: icons.chart,    label: "Analytics" },
+    ] },
+    { section: "Operations", items: [
+      { key: "matrix",     icon: icons.grid,     label: "Hospital Matrix" },
+      { key: "activity",   icon: icons.user,     label: "PRE & Nurse" },
+      { key: "reports",    icon: icons.clock,    label: "Reports" },
+      { key: "savedviews", icon: icons.layers,   label: "Saved Views" },
+      { key: "alerts",     icon: icons.bell,     label: "Alerts", dot: !!(due && !dismissed[due]) },
+    ] },
+    { section: "Users", items: [
+      { key: "pres",       icon: icons.user,        label: "PRE Users" },
+      { key: "nurses",     icon: icons.user,        label: "Nurse Users" },
+      { key: "doctors",    icon: icons.stethoscope, label: "Doctor Users" },
+    ] },
+    { section: "Setup", items: [
+      { key: "setup",      icon: icons.layers,      label: "Blocks" },
+      { key: "preblocks",  icon: icons.grid,        label: "PRE Blocks" },
+      { key: "doctorblocks", icon: icons.stethoscope, label: "Doctor Blocks" },
+      { key: "stations",   icon: icons.bed,         label: "Stations" },
+      { key: "payers",     icon: icons.list,        label: "Payer Types" },
+      { key: "destinations", icon: icons.list,      label: "Destinations" },
+    ] },
+    { section: "System", items: [
+      { key: "settings",   icon: icons.settings, label: "Settings" },
+    ] },
   ];
 
   return (
@@ -159,10 +192,25 @@ export default function COOApp({ user, meta, onLogout }) {
         <DatePicker dates={dates} selDate={selDate} setSelDate={setSelDate} />
       )}
 
-      {tab === "dashboard"  && <LiveBedDashboard refreshKey={liveKey} />}
+      {tab === "dashboard"  && <LiveBedDashboard refreshKey={liveKey} userName={user?.name || user?.username || "Admin"} />}
       {tab === "activity"   && <ActivityPage />}
       {tab === "matrix"     && <Matrix data={data} selDate={selDate} history={history} userId={user?.id} />}
-      {tab === "analytics"  && <Overview data={data} compliance={compliance} selDate={selDate} history={history} onViewBeds={setBedsBlock} />}
+      {tab === "analytics"  && (
+        <div>
+          <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+            {[["overview", "Overview"], ["payer", "Payer & Trends"]].map(([key, label]) => (
+              <button key={key}
+                className={"fchip" + (analyticsView === key ? " on" : "")}
+                style={{ padding: "8px 18px", fontSize: 13 }}
+                onClick={() => setAnalyticsView(key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {analyticsView === "overview" && <Overview data={data} compliance={compliance} selDate={selDate} history={history} onViewBeds={setBedsBlock} />}
+          {analyticsView === "payer"    && <PayerTrendsPanel refreshKey={liveKey} />}
+        </div>
+      )}
       {tab === "reports"    && (
         <div>
           <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
@@ -182,6 +230,20 @@ export default function COOApp({ user, meta, onLogout }) {
       )}
       {tab === "savedviews" && <SavedViewsPage data={data} userId={user?.id} onOpenInMatrix={() => setTab("matrix")} />}
       {tab === "alerts"     && <AlertsPage data={data} compliance={compliance} due={due} dismissed={dismissed} setDismissed={setDismissed} />}
+
+      {/* Users */}
+      {tab === "pres"       && <PreManager showToast={showToast} />}
+      {tab === "nurses"     && <NurseManager showToast={showToast} />}
+      {tab === "doctors"    && <DoctorManager showToast={showToast} />}
+
+      {/* Setup */}
+      {tab === "setup"        && <HierarchyManager showToast={showToast} />}
+      {tab === "preblocks"    && <PreBlockManager showToast={showToast} />}
+      {tab === "doctorblocks" && <DoctorBlockManager showToast={showToast} />}
+      {tab === "stations"     && <StationManager showToast={showToast} />}
+      {tab === "payers"       && <PayerTypeManager showToast={showToast} />}
+      {tab === "destinations" && <DestinationManager showToast={showToast} />}
+
       {tab === "settings"   && <SettingsPage user={user} />}
 
       {sheet     && <WardSheet    pre={sheet}      onClose={() => setSheet(null)} />}
@@ -211,19 +273,206 @@ function DatePicker({ dates, selDate, setSelDate }) {
 //  Fetches ALL operational wards directly via /coo/live-wards — not filtered
 //  through pre_block_wards — so nurse-updated wards appear even without a PRE.
 // ══════════════════════════════════════════════════════════════════════════════
-function LiveBedDashboard({ refreshKey = 0 }) {
-  const [liveData,   setLiveData]   = useState(null);
-  const [viewBy,     setViewBy]     = useState("TOTAL");
-  const [lastSync,   setLastSync]   = useState(new Date());
-  const [search,     setSearch]     = useState("");
-  const [searchBy,   setSearchBy]   = useState("ward");
-  const [groupBy,    setGroupBy]    = useState("none");
-  const [snapToast,  setSnapToast]  = useState("");
-  const [snapBusy,   setSnapBusy]   = useState(null);
+// Lightweight SVG occupancy line chart — no chart lib, scales to container width.
+// Catmull-Rom → cubic-bezier smoothing for a premium curved line.
+function smoothPath(pts) {
+  if (pts.length < 2) return pts.length ? `M${pts[0][0]},${pts[0][1]}` : "";
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
+function TrendChart({ points, height = 300 }) {
+  const ref = useRef(null);
+  const [w, setW] = useState(760);
+  const [activeIdx, setActiveIdx] = useState(null);
+  useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver((es) => { for (const e of es) setW(Math.max(320, e.contentRect.width)); });
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+
+  if (!points || points.length === 0)
+    return <div ref={ref} className="dim" style={{ height, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>No trend data captured yet.</div>;
+
+  const padL = 38, padR = 16, padT = 14, padB = 26;
+  const innerW = w - padL - padR, innerH = height - padT - padB;
+
+  // Zoom the Y axis to the data range (with padding) so real occupancy variation
+  // is visible instead of a flat line pinned to a fixed 0–100 scale.
+  const vals = points.map((p) => p.pct);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi - lo < 8) { const mid = (hi + lo) / 2; lo = mid - 4; hi = mid + 4; }
+  lo = Math.max(0, Math.floor(lo - 2));
+  hi = Math.min(100, Math.ceil(hi + 2));
+  if (hi <= lo) hi = lo + 1;
+  const span = hi - lo;
+
+  const xs = points.length > 1 ? points.length - 1 : 1;
+  const x = (i) => padL + (i / xs) * innerW;
+  const y = (v) => padT + (1 - (v - lo) / span) * innerH;
+
+  const pts = points.map((p, i) => [x(i), y(p.pct)]);
+  const linePath = smoothPath(pts);
+  const baseY = padT + innerH;
+  const areaPath = `${linePath} L${x(points.length - 1).toFixed(1)},${baseY} L${x(0).toFixed(1)},${baseY} Z`;
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(lo + span * f));
+  const step = Math.max(1, Math.ceil(points.length / 7));
+  const dotEvery = points.length <= 14 ? 1 : step; // dot every point when few, else sample
+
+  // X-axis ticks: full "15 Jun, 05:00 am" labels (used by multi-day ranges)
+  // are too wide to show ~7 of side-by-side without overlapping, so the axis
+  // only ever shows the date portion (before the comma) — the full label with
+  // time still appears in the hover callout below. Consecutive ticks landing
+  // on the same calendar day are skipped so dates aren't repeated.
+  const axisLabel = (lbl) => (lbl.includes(",") ? lbl.split(",")[0] : lbl);
+  let lastAxisLabel = null;
+  const ticks = points.map((p, i) => {
+    if (i % step !== 0 && i !== points.length - 1) return null;
+    const lbl = axisLabel(p.label);
+    if (lbl === lastAxisLabel) return null;
+    lastAxisLabel = lbl;
+    return { i, lbl };
+  }).filter(Boolean);
+
+  const shownIdx = activeIdx ?? (points.length - 1);
+  const sx = x(shownIdx), sy = y(points[shownIdx].pct);
+  const handlePointer = (clientX) => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const rel = Math.max(padL, Math.min(rect.width - padR, clientX - rect.left));
+    const idx = Math.round(((rel - padL) / innerW) * xs);
+    setActiveIdx(Math.max(0, Math.min(points.length - 1, idx)));
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="tr-chart"
+      style={{ width: "100%" }}
+      onMouseLeave={() => setActiveIdx(null)}
+      onTouchEnd={() => setActiveIdx(null)}
+    >
+      <svg width={w} height={height} style={{ display: "block" }}>
+        <defs>
+          <linearGradient id="ccTrendFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {grid.map((g, i) => (
+          <g key={i}>
+            <line x1={padL} x2={w - padR} y1={y(g)} y2={y(g)} stroke="var(--line)" strokeWidth="1" strokeDasharray="2 5" />
+            <text x={padL - 7} y={y(g) + 4} fontSize="10.5" fill="var(--ink-3)" textAnchor="end">{g}%</text>
+          </g>
+        ))}
+        <path d={areaPath} fill="url(#ccTrendFill)" />
+        <path d={linePath} fill="none" stroke="var(--primary)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        {points.map((p, i) => ((i % dotEvery === 0 && i !== points.length - 1)
+          ? <circle key={i} cx={x(i)} cy={y(p.pct)} r="3.5" fill="var(--panel)" stroke="var(--primary)" strokeWidth="2" /> : null))}
+        <rect
+          x={padL}
+          y={padT}
+          width={innerW}
+          height={innerH}
+          fill="transparent"
+          style={{ cursor: "crosshair" }}
+          onMouseMove={(e) => handlePointer(e.clientX)}
+          onTouchStart={(e) => handlePointer(e.touches[0].clientX)}
+          onTouchMove={(e) => handlePointer(e.touches[0].clientX)}
+        />
+        {ticks.map(({ i, lbl }) => (
+          <text key={"t" + i} x={x(i)} y={height - 8} fontSize="10.5" fill="var(--ink-3)" textAnchor="middle">{lbl}</text>
+        ))}
+        {/* Interactive value callout */}
+        {(() => {
+          const bw = 58, bh = 36;
+          const bx = Math.max(padL, Math.min(w - padR - bw, sx - bw / 2));
+          const by = Math.max(2, sy - bh - 12);
+          return (
+            <g>
+              <line x1={sx} y1={by + bh} x2={sx} y2={sy} stroke="var(--line)" strokeWidth="1" />
+              <rect x={bx} y={by} width={bw} height={bh} rx="8" fill="var(--panel)" stroke="var(--line)" />
+              <text x={bx + bw / 2} y={by + 16} fontSize="13" fontWeight="800" fill="var(--ink)" textAnchor="middle">{points[shownIdx].pct}%</text>
+              <text x={bx + bw / 2} y={by + 28} fontSize="9.5" fill="var(--ink-3)" textAnchor="middle">{points[shownIdx].label}</text>
+              <circle cx={sx} cy={sy} r="5" fill="var(--panel)" stroke="var(--primary)" strokeWidth="2.5" />
+            </g>
+          );
+        })()}
+      </svg>
+    </div>
+  );
+}
+
+// Tiny smooth sparkline with a gradient area fill (real data from snapshots).
+function Sparkline({ values, color, id, h = 38 }) {
+  if (!values || values.length < 2) return <div style={{ height: h }} />;
+  const w = 100;
+  const min = Math.min(...values), max = Math.max(...values), span = (max - min) || 1;
+  const x = (i) => (i / (values.length - 1)) * w;
+  const y = (v) => (h - 3) - ((v - min) / span) * (h - 9);
+  const pts = values.map((v, i) => [x(i), y(v)]);
+  const line = smoothPath(pts);
+  const area = `${line} L${w},${h} L0,${h} Z`;
+  const gid = "spk-" + id;
+  return (
+    <svg className="kc-spark" width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.34" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${gid})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+const PAYER_PALETTE = ["#6366f1", "#22c55e", "#3b82f6", "#f59e0b", "#ec4899", "#14b8a6", "#8b5cf6", "#ef4444"];
+const payerColor = (name) => {
+  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return PAYER_PALETTE[h % PAYER_PALETTE.length];
+};
+const payerIcon = (name) => {
+  const n = (name || "").toLowerCase();
+  if (/insur|tpa/.test(n)) return icons.shield;
+  if (/cash|self/.test(n)) return icons.banknote;
+  if (/corp|company|employer/.test(n)) return icons.clipboard;
+  if (/arogya|ehs|scheme|govt|government/.test(n)) return icons.fileText;
+  return icons.clipboard;
+};
+
+function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
+  const [liveData,  setLiveData]  = useState(null);
+  const [snaps,     setSnaps]     = useState(null);
+  const [lastSync,  setLastSync]  = useState(new Date());
+  const [viewBy,    setViewBy]    = useState("TOTAL");
+  const [search,    setSearch]    = useState("");
+  const [searchBy,  setSearchBy]  = useState("ward");
+  const [groupBy,   setGroupBy]   = useState("none");
+  const [snapBusy,  setSnapBusy]  = useState(null);
+  const [snapToast, setSnapToast] = useState("");
+  const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
   const snapshotRef = useRef(null);
 
-  const showSnapToast = useCallback((msg) => { setSnapToast(msg); setTimeout(() => setSnapToast(""), 2400); }, []);
+  const load = useCallback(async () => {
+    try { setLiveData(await api.cooLiveWards()); setLastSync(new Date()); } catch { /* keep stale */ }
+  }, []);
+  useEffect(() => { load(); }, [load, refreshKey]);
+  useEffect(() => { api.cooSnapshots().then((r) => setSnaps(r.snapshots || [])).catch(() => setSnaps([])); }, [refreshKey]);
+  useEffect(() => {
+    api.mgrPayerTypes().then((r) => setPayerTypes((r.payerTypes || []).filter((p) => p.active)))
+      .catch(() => setPayerTypes([]));
+  }, [refreshKey]);
 
+  const showSnapToast = useCallback((m) => { setSnapToast(m); setTimeout(() => setSnapToast(""), 2400); }, []);
   const runSnap = useCallback(async (kind, fn, okMsg) => {
     if (snapBusy) return;
     const el = snapshotRef.current;
@@ -237,14 +486,6 @@ function LiveBedDashboard({ refreshKey = 0 }) {
     } finally { setSnapBusy(null); }
   }, [snapBusy, showSnapToast]);
 
-  const load = useCallback(async () => {
-    try {
-      const d = await api.cooLiveWards();
-      setLiveData(d);
-      setLastSync(new Date());
-    } catch { /* non-fatal — keep stale data on screen */ }
-  }, []);
-
   // Must be before any early return — hooks cannot be called conditionally
   const searchFilter = useCallback((r) => {
     const q = search.trim().toLowerCase();
@@ -252,8 +493,6 @@ function LiveBedDashboard({ refreshKey = 0 }) {
     if (searchBy === "room_type") return (r.room_type || "").toLowerCase().includes(q);
     return r.ward.toLowerCase().includes(q);
   }, [search, searchBy]);
-
-  useEffect(() => { load(); }, [load, refreshKey]);
 
   if (!liveData) return (
     <div className="empty" style={{ paddingTop: 80 }}>
@@ -263,175 +502,249 @@ function LiveBedDashboard({ refreshKey = 0 }) {
   );
 
   // All wards from the backend — already deduplicated and includes bed_type
-  const allRows = liveData.wards.map(w => ({
+  const allRows = liveData.wards.map((w) => ({
     id: w.id, ward: w.ward, total: w.total || 0, unit_type: w.unit_type || null,
     vacant: w.vacant, reserved: w.reserved, occupied: w.occupied,
     occupied_reserved: w.occupied_reserved,
-    bed_type: w.bed_type || "Census",
-    room_type:  w.room_type  || null,
-    block_name: w.block_name || null,
-    floor_name: w.floor_name || null,
-    updatedAt:  w.updatedAt  || null,
+    bed_type: w.bed_type || "Census", room_type: w.room_type || null,
+    block_name: w.block_name || null, floor_name: w.floor_name || null,
+    updatedAt: w.updatedAt || null, reviewedAt: w.reviewedAt || null,
+    payersLive: w.payersLive || {},
   }));
 
-  const rows = allRows.filter((r) => {
-    if (viewBy === "KIMS")   return r.unit_type === "KIMS";
-    if (viewBy === "RENOVA") return (r.unit_type || "").toLowerCase().includes("renova");
-    return true;
-  });
+  // Unit options are derived from the live data, so new unit types appear
+  // automatically — no code change needed. "TOTAL" = all.
+  const unitOptions = ["TOTAL", ...Array.from(
+    new Set(allRows.map((r) => (r.unit_type || "").trim()).filter(Boolean))
+  ).sort()];
+  const activeUnit = unitOptions.includes(viewBy) ? viewBy : "TOTAL";
+  const rows = allRows.filter((r) => activeUnit === "TOTAL" || (r.unit_type || "").trim() === activeUnit);
 
   const censusRows    = rows.filter((r) => r.bed_type !== "Non-Census");
   const nonCensusRows = rows.filter((r) => r.bed_type === "Non-Census");
 
-  const sum = (list, fn) => list.reduce((a, r) => a + (fn(r) || 0), 0);
-  const totalBeds = sum(rows, (r) => r.total);
-  const census    = sum(censusRows, (r) => r.total);
-  const nonCensus = sum(nonCensusRows, (r) => r.total);
-  const vacant    = sum(rows, (r) => r.vacant);
-  const vacRes_r  = sum(rows, (r) => r.reserved);
-  const occupied  = sum(rows, (r) => r.occupied || 0);
-  const occRes    = sum(rows, (r) => r.occupied_reserved || 0);
-  const { totalOccupied: totalOcc, totalVacant: totalVac } = calculateWardTotals(rows);
-  const allBeds   = liveData.allBeds   || totalBeds;
-  const nonOpBeds = liveData.nonOpBeds || 0;
-  const pct = (n) => totalBeds > 0 ? Math.round((n / totalBeds) * 100) + "%" : "0%";
+  // KPI cards mirror exactly what the tables show: Unit + Search/Room-type filter.
+  // With no search and Unit = TOTAL, that's every operational ward — the whole hospital.
+  const shownRows = rows.filter(searchFilter);
+  const censusShown    = censusRows.filter(searchFilter);
+  const nonCensusShown = nonCensusRows.filter(searchFilter);
+  const sum = (fn) => shownRows.reduce((a, r) => a + (fn(r) || 0), 0);
+  const sumOf = (set, fn) => set.reduce((a, r) => a + (fn(r) || 0), 0);
+  const operational = sum((r) => r.total);
+  const census      = sum((r) => (r.bed_type !== "Non-Census" ? r.total : 0));
+  const nonCensus    = operational - census;
+  const v = sum((r) => r.vacant), rr = sum((r) => r.reserved), o = sum((r) => r.occupied), or_ = sum((r) => r.occupied_reserved);
+  const totalOcc = o + or_, totalVac = v + rr;
+  const censusOcc    = sumOf(censusShown,    (r) => r.occupied) + sumOf(censusShown,    (r) => r.occupied_reserved);
+  const nonCensusOcc = sumOf(nonCensusShown, (r) => r.occupied) + sumOf(nonCensusShown, (r) => r.occupied_reserved);
+  // Non-operational beds live outside `rows` (operational-only), so that total
+  // only makes sense for the unfiltered, org-wide view.
+  const showingAll = !search.trim() && activeUnit === "TOTAL";
+  const allBeds = showingAll ? (liveData.allBeds || operational) : operational;
+  const nonOp   = showingAll ? (liveData.nonOpBeds || 0) : 0;
+  const base = operational || 1;
+  const pct = (n) => Math.round((n / base) * 100) + "%";
 
+  // Sparkline series from hourly org-wide snapshots — decorative trend per card;
+  // these aren't filterable by unit/search since snapshots store only org totals.
+  const S = {
+    total:    (snaps || []).map((s) => s.total || 0),
+    vacant:   (snaps || []).map((s) => s.vacant || 0),
+    reserved: (snaps || []).map((s) => s.reserved || 0),
+    occupied: (snaps || []).map((s) => s.occupied || 0),
+  };
+  // Grouped Beds → Occupied → Vacant so the grid reads top-to-bottom as one
+  // story instead of interleaving the three categories. Color families match
+  // the group (blue=beds, red/pink=occupied, green=vacant) so a glance at
+  // color alone tells you which bucket a card belongs to.
   const KPIS = [
-    { label: "TOTAL BEDS",       val: allBeds,   sub: `${nonOpBeds} non-operational`, color: "var(--ink)" },
-    { label: "OPERATIONAL BEDS", val: totalBeds, sub: pct(totalBeds), color: "var(--st-v)" },
-    { label: "CENSUS BEDS",     val: census,    sub: pct(census),      color: "var(--st-v)"    },
-    { label: "NON-CENSUS BEDS", val: nonCensus, sub: pct(nonCensus),   color: "var(--st-o)"    },
-    { label: "TOTAL OCCUPIED",  val: totalOcc,  sub: pct(totalOcc),    color: "var(--st-o)"    },
-    { label: "ON BED",          val: occupied,  sub: pct(occupied),    color: "var(--st-o)"    },
-    { label: "OCC + RES",       val: occRes,    sub: pct(occRes),      color: "var(--st-or)"   },
-    { label: "TOTAL VACANT",    val: totalVac,  sub: pct(totalVac),    color: "var(--st-v)"    },
-    { label: "VACANT",          val: vacant,    sub: pct(vacant),      color: "var(--st-v)"    },
-    { label: "VAC + RES",       val: vacRes_r,  sub: pct(vacRes_r),    color: "var(--st-vr)"   },
+    // Total Beds — the "whole house" reference point, always first
+    { label: "Total Beds", val: allBeds, sub: `${nonOp} non-operational`, color: "#2f64ff", icon: icons.bed, series: S.total },
+
+    // All Occupied-type cards together
+    { label: "Total Occupied",      val: totalOcc,    sub: pct(totalOcc),    color: "#dc2626", icon: icons.chart, series: S.occupied },
+    { label: "Census Occupied",     val: censusOcc,    sub: pct(censusOcc),    color: "#ea580c", icon: icons.users, series: S.occupied },
+    { label: "Non-Census Occupied", val: nonCensusOcc, sub: pct(nonCensusOcc), color: "#f97316", icon: icons.user,  series: S.occupied },
+    { label: "On Bed",              val: o,           sub: pct(o),           color: "#ff3b8a", icon: icons.bed,   series: S.occupied },
+
+    // All Vacant-type cards together
+    { label: "Total Vacant", val: totalVac, sub: pct(totalVac), color: "#16a34a", icon: icons.bed,   series: S.vacant },
+    { label: "Vacant",       val: v,        sub: pct(v),        color: "#15803d", icon: icons.check, series: S.vacant },
+
+    // Remaining bed breakdowns — these are inventory counts, not occupancy
+    // state, so a "%" here is either a tautology (Operational Beds is always
+    // 100% of itself) or just restates a split better read as a plain count.
+    { label: "Operational Beds", val: operational, sub: null, color: "#1d4ed8", icon: icons.refresh, series: S.total },
+    { label: "Census Beds",      val: census,      sub: null, color: "#1e3a8a", icon: icons.users,   series: S.total },
+    { label: "Non-Census Beds",  val: nonCensus,   sub: null, color: "#0c2a6b", icon: icons.user,    series: S.reserved },
+
+    // RES variants last
+    { label: "OCC + RES", val: or_, sub: pct(or_), color: "#be123c", icon: icons.plus,  series: S.reserved },
+    { label: "VAC + RES", val: rr,  sub: pct(rr),  color: "#0ea5b7", icon: icons.clock, series: S.reserved },
   ];
+
+  // One card per active payer type (dynamic — auto-adjusts if Setup → Payer
+  // Types changes). Value = live occupied count for that payer over the
+  // current Unit + Search filter; sparkline = that payer's real hourly trend
+  // from occupancy_snapshots.payer_snapshot (sparse until enough points accrue).
+  const payerOccBase = totalOcc || 1;
+  const payerCards = (payerTypes || []).map((pt, i) => {
+    const val = shownRows.reduce((a, r) => a + ((r.payersLive || {})[pt.name] || 0), 0);
+    return {
+      label: pt.name,
+      val,
+      sub: `${Math.round((val / payerOccBase) * 100)}% of occupied`,
+      color: PAYER_PALETTE[i % PAYER_PALETTE.length],
+      icon: payerIcon(pt.name),
+      series: (snaps || []).map((s) => (s.payers || {})[pt.name] || 0),
+    };
+  });
 
   const canShare = snapshotCanShare();
 
   return (
-    <div>
-      {/* Header strip: subtitle + LIVE badge */}
-      <div className="row between" style={{ marginBottom: 14, flexWrap: "wrap", gap: 10 }}>
-        <div className="dim" style={{ fontSize: 13 }}>Real-time overview of beds</div>
-        <div className="row" style={{ gap: 8 }}>
-          <span style={{
-            display: "inline-flex", alignItems: "center", gap: 6,
-            padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 800,
-            background: "var(--st-v)", color: "#fff", letterSpacing: ".05em",
-          }}>
-            <span style={{ width: 7, height: 7, borderRadius: 99, background: "#fff" }} className="pulse" />
-            LIVE
-          </span>
-          <span className="dim" style={{ fontSize: 11 }}>Auto refresh · every 15 sec</span>
+    <div className="cc-wrap">
+      <div className="row between" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 4 }}>
+        <div>
+          <div className="dash-greet">{greetOf()}, {userName} <span style={{ fontWeight: 400 }}>👋</span></div>
+          <div className="dash-greet-sub">Here's your real-time overview of bed status across all units.</div>
         </div>
+        <span className="cc-live"><i /> Live · {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
       </div>
 
-      {/* View By */}
-      <div className="card row" style={{ padding: "8px 12px", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-2)" }}>View By</span>
-        {["TOTAL", "KIMS", "RENOVA"].map((k) => (
-          <button key={k} className={"fchip" + (viewBy === k ? " on" : "")}
-            style={{ padding: "6px 16px", fontSize: 12 }}
-            onClick={() => setViewBy(k)}>{k}</button>
-        ))}
-      </div>
+      {/* When a filter/search narrows the view, the cards & tables below reflect that subset. */}
+      {!showingAll && (
+        <div className="row" style={{ gap: 8, margin: "12px 0 2px", alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 5,
+            padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700,
+            background: "var(--primary-bg, rgba(37,99,235,.12))", color: "var(--primary)",
+          }}>
+            <Ic d={icons.search} s={12} /> Showing {shownRows.length} of {allRows.length} wards
+          </span>
+          <span className="dim" style={{ fontSize: 11 }}>Cards &amp; tables below reflect the current filter</span>
+        </div>
+      )}
 
-      {/* KPI cards */}
-      <div style={{
-        display: "grid", gap: 10, marginBottom: 16,
-        gridTemplateColumns: "repeat(auto-fit, minmax(min(140px, 100%), 1fr))",
-      }}>
-        {KPIS.map(({ label, val, sub, color }) => (
-          <div key={label} className="card" style={{ padding: "12px 14px" }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color, letterSpacing: ".04em" }}>{label}</div>
-            <div style={{ fontSize: 24, fontWeight: 800, marginTop: 4, letterSpacing: "-.02em" }}>{val}</div>
-            <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>{sub}</div>
+      {/* Gradient KPI cards with sparklines */}
+      <div className="kc-grid">
+        {KPIS.map((k) => (
+          <div key={k.label} className="kc">
+            <div className="kc-head">
+              <div className="kc-label" style={{ color: k.color }}>{k.label}</div>
+              <div className="kc-icon" style={{ color: k.color, background: `${k.color}1a` }}>
+                <Ic d={k.icon} s={15} />
+              </div>
+            </div>
+            <div className="kc-val">{k.val}</div>
+            <div className="kc-sub">{k.sub}</div>
+            <Sparkline values={k.series} color={k.color} id={k.label.replace(/[^a-z0-9]/gi, "")} />
           </div>
         ))}
       </div>
 
-      {/* Search + Group by */}
-      <div className="card" style={{ padding: "10px 14px", marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {/* Search type toggle */}
-          <div className="row" style={{ gap: 0, borderRadius: 7, overflow: "hidden", border: "1px solid var(--line)", flexShrink: 0 }}>
-            {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }].map(opt => (
-              <button key={opt.value}
-                onClick={() => { setSearchBy(opt.value); setSearch(""); }}
-                style={{
-                  padding: "5px 12px", fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer",
-                  background: searchBy === opt.value ? "var(--primary)" : "transparent",
-                  color: searchBy === opt.value ? "#fff" : "var(--ink-3)",
-                  transition: "background .15s, color .15s",
-                }}>
-                {opt.label}
-              </button>
+      {/* By Payer — one dynamic card per active payer type */}
+      {payerCards.length > 0 && (
+        <>
+          <div className="floor-head" style={{ marginTop: 4 }}>By Payer</div>
+          <div className="kc-grid">
+            {payerCards.map((k) => (
+              <div key={k.label} className="kc">
+                <div className="kc-head">
+                  <div className="kc-label" style={{ color: k.color }}>{k.label}</div>
+                  <div className="kc-icon" style={{ color: k.color, background: `${k.color}1a` }}>
+                    <Ic d={k.icon} s={15} />
+                  </div>
+                </div>
+                <div className="kc-val">{k.val}</div>
+                <div className="kc-sub">{k.sub}</div>
+                <Sparkline values={k.series} color={k.color} id={"pc" + k.label.replace(/[^a-z0-9]/gi, "")} />
+              </div>
             ))}
           </div>
-          {/* Search input */}
-          <div style={{ position: "relative", flex: 1, minWidth: 140 }}>
-            <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", pointerEvents: "none", display: "flex" }}>
-              <Ic d={icons.search} s={13} />
-            </span>
-            <input
-              className="field"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder={searchBy === "room_type" ? "Search room type…" : "Search ward name…"}
-              style={{ paddingLeft: 28, fontSize: 13, height: 34, width: "100%" }}
-            />
+        </>
+      )}
+
+      {/* Toolbar — Unit filter + View-by + Search + Group-by + Snapshot */}
+      <div className="card" style={{ padding: "10px 12px", marginBottom: 16 }}>
+        <div className="dash-toolbar">
+          <div className="dtg">
+            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
+            {unitOptions.length <= 4 ? (
+              <div className="seg-pill">
+                {unitOptions.map((k) => (
+                  <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
+                ))}
+              </div>
+            ) : (
+              <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
+                style={{ fontSize: 13, fontWeight: 600, height: 40, borderRadius: 10, paddingTop: 0, paddingBottom: 0, minWidth: 150 }}>
+                {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
+              </select>
+            )}
           </div>
-          {/* Group by */}
-          <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink-3)", whiteSpace: "nowrap" }}>Group by</span>
-            <select
-              className="field"
-              value={groupBy}
-              onChange={e => setGroupBy(e.target.value)}
-              style={{ fontSize: 12, height: 34, paddingTop: 0, paddingBottom: 0 }}
-            >
-              {GROUP_BY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+
+          <div className="dt-divider" />
+
+          <div className="dtg">
+            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
+            <div className="seg-pill">
+              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }].map((opt) => (
+                <button key={opt.value} className={searchBy === opt.value ? "on" : ""}
+                  onClick={() => { setSearchBy(opt.value); setSearch(""); }}>{opt.label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="dtg dt-search">
+            <span style={{ position: "absolute", left: 12, bottom: 12, color: "var(--ink-3)", pointerEvents: "none", display: "flex" }}>
+              <Ic d={icons.search} s={15} />
+            </span>
+            <input className="field" value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder={searchBy === "room_type" ? "Search room type…" : "Search ward name…"}
+              style={{ paddingLeft: 34, fontSize: 13, height: 40, width: "100%", borderRadius: 10 }} maxLength={60} />
+          </div>
+
+          <div className="dtg">
+            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.users} s={15} /></span><span className="dtg-label">Group by</span></div>
+            <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
+              style={{ fontSize: 13, fontWeight: 600, height: 40, borderRadius: 10, paddingTop: 0, paddingBottom: 0, minWidth: 150 }}>
+              {GROUP_BY_OPTIONS.map((o2) => <option key={o2.value} value={o2.value}>{o2.label}</option>)}
             </select>
+          </div>
+
+          <div className="dt-divider" />
+
+          <div className="dt-actions">
+            <button className="btn btn-primary dt-iconbtn"
+              disabled={snapBusy !== null} title="Download snapshot image" aria-label="Download snapshot image"
+              onClick={() => runSnap("download", snapshotDownload, "Snapshot downloaded")}>
+              <span className={snapBusy === "download" ? "spin" : ""} style={{ display: "inline-flex" }}>
+                <Ic d={snapBusy === "download" ? icons.refresh : icons.camera} s={17} />
+              </span>
+            </button>
+            <button className="chip dt-iconbtn"
+              disabled={snapBusy !== null} title="Copy snapshot to clipboard" aria-label="Copy snapshot to clipboard"
+              onClick={() => runSnap("copy", snapshotCopy, "Snapshot copied to clipboard")}>
+              <Ic d={snapBusy === "copy" ? icons.refresh : icons.copy} s={17} />
+            </button>
+            {canShare && (
+              <button className="chip dt-iconbtn"
+                disabled={snapBusy !== null} title="Share snapshot" aria-label="Share snapshot"
+                onClick={() => runSnap("share", snapshotShare, "Shared successfully")}>
+                <Ic d={snapBusy === "share" ? icons.refresh : icons.share} s={17} />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Snapshot buttons — above the tables */}
-      <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginBottom: 10 }}>
-        <button className="btn btn-primary"
-          style={{ padding: "5px 14px", fontSize: 12, gap: 6 }}
-          disabled={snapBusy !== null}
-          onClick={() => runSnap("download", snapshotDownload, "Snapshot downloaded")}>
-          {snapBusy === "download"
-            ? <><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={13} /></span> Generating…</>
-            : <>📸 Snapshot</>}
-        </button>
-        <button className="chip"
-          style={{ padding: "5px 12px", fontSize: 12 }}
-          disabled={snapBusy !== null}
-          title="Copy as image"
-          onClick={() => runSnap("copy", snapshotCopy, "Snapshot copied to clipboard")}>
-          {snapBusy === "copy" ? "…" : "📋 Copy"}
-        </button>
-        {canShare && (
-          <button className="chip"
-            style={{ padding: "5px 12px", fontSize: 12 }}
-            disabled={snapBusy !== null}
-            onClick={() => runSnap("share", snapshotShare, "Shared successfully")}>
-            {snapBusy === "share" ? "…" : "📤 Share"}
-          </button>
-        )}
-      </div>
-
-      {/* Ward tables — this is what gets captured */}
+      {/* Ward tables — this is what gets captured by Snapshot/Copy/Share */}
       <div ref={snapshotRef}>
         {groupBy === "none" ? (
           <>
-            <WardStatusTable title="Census Beds" accent="var(--st-v)" rows={censusRows} totalLabel="TOTAL (CENSUS)" searchFilter={searchFilter} />
-            <WardStatusTable title="Non-Census Beds" accent="var(--st-o)" rows={nonCensusRows} totalLabel="TOTAL (NON-CENSUS)" searchFilter={searchFilter} />
+            <WardStatusTable title="Census Beds" accent="var(--st-v)" accentBg="var(--st-v-bg)" rows={censusRows} totalLabel="TOTAL (CENSUS)" searchFilter={searchFilter} />
+            <WardStatusTable title="Non-Census Beds" accent="var(--st-o)" accentBg="var(--st-o-bg)" rows={nonCensusRows} totalLabel="TOTAL (NON-CENSUS)" searchFilter={searchFilter} />
           </>
         ) : (
           <UnifiedGroupedTable rows={rows} searchFilter={searchFilter} groupBy={groupBy} />
@@ -452,6 +765,145 @@ function LiveBedDashboard({ refreshKey = 0 }) {
   );
 }
 
+function greetOf() {
+  const hour = new Date().getHours();
+  return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  PAYER & TRENDS — Analytics sub-tab. Org-wide Payer Mix (accordion + range
+//  toggle + unit/ward drill-down) and the Occupancy Trend chart (avg/high/low).
+// ══════════════════════════════════════════════════════════════════════════════
+function PayerTrendsPanel({ refreshKey = 0 }) {
+  const [liveData,     setLiveData]     = useState(null);
+  const [payerRange,   setPayerRange]   = useState("live");
+  const [expandedPayer, setExpandedPayer] = useState(null);
+  const [trendRange,   setTrendRange]   = useState("7d");
+  const [trend,        setTrend]        = useState(null);
+
+  useEffect(() => { api.cooLiveWards().then(setLiveData).catch(() => {}); }, [refreshKey]);
+  useEffect(() => {
+    let alive = true; setTrend(null);
+    api.cooOccupancyTrend(trendRange).then((t) => alive && setTrend(t))
+      .catch(() => alive && setTrend({ points: [], avg: 0, high: { pct: 0, label: "—" }, low: { pct: 0, label: "—" } }));
+    return () => { alive = false; };
+  }, [trendRange, refreshKey]);
+
+  if (!liveData) return (
+    <div className="empty" style={{ paddingTop: 80 }}>
+      <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+      <div className="dim" style={{ marginTop: 12 }}>Loading…</div>
+    </div>
+  );
+
+  const W = liveData.wards || [];
+  const payerMetric = (w) => payerRange === "live" ? (w.payersLive || {}) : ((w.payersAdmit || {})[payerRange] || {});
+  const agg = {};
+  for (const w of W) for (const [p, n] of Object.entries(payerMetric(w))) agg[p] = (agg[p] || 0) + n;
+  const payerTotal = Object.values(agg).reduce((a, b) => a + b, 0);
+  const payerRows = Object.keys(agg).map((name) => ({ name, val: agg[name], pct: payerTotal > 0 ? (agg[name] / payerTotal) * 100 : 0 })).sort((a, b) => b.val - a.val);
+  const PAYER_RANGES = [["live", "Live"], ["today", "Today"], ["d7", "7d"], ["d30", "30d"], ["y1", "1y"]];
+  const payerCaption = { live: "occupied now", today: "admitted today", d7: "admitted in 7d", d30: "admitted in 30d", y1: "admitted in 1y" }[payerRange];
+  const payerBreakdown = (name) => {
+    const byUnit = {}; const wards = [];
+    for (const w of W) {
+      const n = (payerMetric(w) || {})[name] || 0;
+      if (n > 0) { const u = (w.unit_type || "—").trim() || "—"; byUnit[u] = (byUnit[u] || 0) + n; wards.push({ ward: w.ward, n }); }
+    }
+    return { units: Object.entries(byUnit).map(([unit, n]) => ({ unit, n })).sort((a, b) => b.n - a.n), wards: wards.sort((a, b) => b.n - a.n) };
+  };
+
+  const TREND_RANGES = [["today", "Today"], ["7d", "7 Days"], ["30d", "30 Days"], ["1y", "1 Year"]];
+  const delta = trend && trend.points.length > 1 ? trend.points[trend.points.length - 1].pct - trend.points[0].pct : 0;
+  const deltaLabel = { today: "since midnight", "7d": "vs last 7 days", "30d": "vs last 30 days", "1y": "vs last year" }[trendRange] || "over period";
+
+  return (
+    <div className="dash-2col">
+      <div className="pm-panel">
+        <div className="pm-head">
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <span className="pm-title">Payer Mix</span>
+            <span className="pm-pill">{payerTotal} {payerCaption}</span>
+          </div>
+          <div className="seg-pill seg-pill-sm">
+            {PAYER_RANGES.map(([k, l]) => <button key={k} className={payerRange === k ? "on" : ""} onClick={() => setPayerRange(k)}>{l}</button>)}
+          </div>
+        </div>
+        {payerRows.length === 0 ? (
+          <div className="dim" style={{ fontSize: 13, padding: "10px 2px" }}>No data for this range.</div>
+        ) : (
+          <>
+            <div className="pm-rows">
+              {payerRows.map((p, i) => {
+                const open = expandedPayer === p.name;
+                const bd = open ? payerBreakdown(p.name) : null;
+                const c = PAYER_PALETTE[i % PAYER_PALETTE.length];
+                return (
+                  <div key={p.name} className="pm-row">
+                    <button className="pm-rowhead" onClick={() => setExpandedPayer(open ? null : p.name)}>
+                      <span className={"pm-chev" + (open ? " open" : "")}><Ic d={icons.chevron} s={13} /></span>
+                      <span className="pm-ic" style={{ color: c, background: `${c}16` }}><Ic d={payerIcon(p.name)} s={16} /></span>
+                      <span className="pm-main">
+                        <span className="pm-name">{p.name}</span>
+                        {open && bd && (
+                          <span className="pm-inline">
+                            <span><span className="pm-dl">BY UNIT</span>{bd.units.length ? bd.units.map((u) => `${u.unit} ${u.n}`).join("  •  ") : "—"}</span>
+                            <span><span className="pm-dl">TOP WARDS</span>{bd.wards.length ? bd.wards.slice(0, 6).map((w) => `${w.ward} (${w.n})`).join(", ") : "—"}{bd.wards.length > 6 ? ` +${bd.wards.length - 6} more` : ""}</span>
+                          </span>
+                        )}
+                      </span>
+                      <span className="pm-right">
+                        <span className="pm-right-top"><span className="pm-val">{p.val}</span></span>
+                        <span className="pm-meter">
+                          <span className="pm-bar"><i style={{ width: `${p.pct}%`, background: c }} /></span>
+                          <span className="pm-pct" style={{ color: c, background: `${c}14` }}>{p.pct.toFixed(1)}%</span>
+                        </span>
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="pm-total">
+              <span className="pm-total-name">Total</span>
+              <span className="dim" style={{ fontSize: 12 }}>• {payerRows.length} payers</span>
+              <span className="pm-total-val">{payerTotal}</span>
+              <span className="pm-total-pct">100%</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="tr-panel">
+        <div className="tr-head">
+          <span className="tr-title">Occupancy Trend</span>
+          <div className="seg-pill seg-pill-sm">
+            {TREND_RANGES.map(([k, l]) => <button key={k} className={trendRange === k ? "on" : ""} onClick={() => setTrendRange(k)}>{l}</button>)}
+          </div>
+        </div>
+        {trend === null ? (
+          <div className="empty" style={{ height: 300, display: "flex", alignItems: "center", justifyContent: "center" }}><span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span></div>
+        ) : (
+          <>
+            <TrendChart points={trend.points} height={300} />
+            <div className="tr-foot">
+              <div className="tr-stat">
+                <div className="tr-stat-l">Average Occupancy</div>
+                <div className="tr-stat-v">{trend.avg}%</div>
+                {trend.points.length > 1 && (
+                  <div className="tr-delta" style={{ color: delta >= 0 ? "var(--st-v)" : "var(--st-or)" }}>{delta >= 0 ? "↗" : "↘"} {Math.abs(delta)}% {deltaLabel}</div>
+                )}
+              </div>
+              <div className="tr-stat"><div className="tr-stat-l" style={{ color: "var(--st-v)" }}>Highest</div><div className="tr-stat-v">{trend.high.pct}%</div><div className="dim" style={{ fontSize: 11 }}>{trend.high.label}</div></div>
+              <div className="tr-stat"><div className="tr-stat-l" style={{ color: "var(--st-or)" }}>Lowest</div><div className="tr-stat-v">{trend.low.pct}%</div><div className="dim" style={{ fontSize: 11 }}>{trend.low.label}</div></div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const GROUP_BY_OPTIONS = [
   { value: "none",       label: "None"           },
   { value: "room_type",  label: "Room Type"      },
@@ -468,23 +920,57 @@ function OccBar({ p }) {
 }
 
 // Click to toggle between relative ("5m ago") and absolute (date + time) display.
-function LastUpdatedCell({ ts }) {
+// `ts` is the last bed-value change (beds.updated_at). `reviewedAt` is the last
+// time a PRE round confirmed the ward. When a ward was confirmed more recently
+// than it was changed, we surface that so "last updated" doesn't read as stale
+// for a ward that was just reviewed-unchanged.
+function LastUpdatedCell({ ts, reviewedAt = null }) {
   const [open, setOpen] = useState(false);
-  if (!ts) return <span className="dim">–</span>;
+  const showReviewed = reviewedAt && (!ts || reviewedAt > ts);
+  if (!ts && !showReviewed) return <span className="dim">–</span>;
   return (
     <span
       className="dim"
-      style={{ fontSize: 11, cursor: "pointer", userSelect: "none" }}
+      style={{ fontSize: 11, cursor: "pointer", userSelect: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, lineHeight: 1.2, textAlign: "center", whiteSpace: "nowrap" }}
       title="Click to toggle date/time"
       onClick={() => setOpen(o => !o)}
     >
-      {open ? fmtDateTime(ts) : fmtRelative(ts)}
+      <span>{ts ? (open ? fmtDateTime(ts) : fmtRelative(ts)) : "No change yet"}</span>
+      {showReviewed && (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--st-v)", fontSize: 9.5, fontWeight: 700 }}
+          title="Last time a PRE round confirmed this ward, even with no occupancy change">
+          <Ic d={icons.check} s={9} /> Reviewed {open ? fmtDateTime(reviewedAt) : fmtRelative(reviewedAt)}
+        </span>
+      )}
     </span>
   );
 }
 
 const wstSum = (list, fn) => list.reduce((a, r) => a + (fn(r) || 0), 0);
 const wstC   = { textAlign: "center" };
+
+// Normalize a verbose, inconsistently-cased room type into a compact label:
+//   "SINGLE ROOM - AC"         → "Single Room · AC"
+//   "GENERAL WARD (F) - NON AC"→ "General Ward (F) · NAC"
+//   "Critical Care (Peads)"    → "Critical Care (Peads)"
+const RT_ACRONYMS = new Set(["AC", "NAC", "OT", "BMT", "ICU", "HDU", "NICU", "MICU", "SICU", "KT", "LT", "CT"]);
+function shortRoomType(rt) {
+  if (!rt || !rt.trim()) return null;
+  const s = rt
+    .replace(/non\s*-?\s*ac/ig, "NAC")   // "NON AC" → "NAC"
+    .replace(/\s*[-–]\s*/g, " · ");        // hyphen separator → middot
+  return s.split(/\s+/).map((w) => {
+    if (w === "·") return w;
+    if (/^\(.*\)$/.test(w)) {              // parenthetical tag, e.g. (F) / (Peads)
+      const inner = w.slice(1, -1);
+      return "(" + (RT_ACRONYMS.has(inner.toUpperCase()) || inner.length <= 2
+        ? inner.toUpperCase()
+        : inner.charAt(0).toUpperCase() + inner.slice(1).toLowerCase()) + ")";
+    }
+    if (RT_ACRONYMS.has(w.toUpperCase())) return w.toUpperCase();
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  }).join(" ");
+}
 
 function renderWardRow(r, showBadge) {
   const reported = r.vacant !== null && r.vacant !== undefined;
@@ -499,16 +985,23 @@ function renderWardRow(r, showBadge) {
   return (
     <tr key={r.id}>
       <td style={{ fontWeight: 600 }}>
-        {r.ward}
-        {showBadge && (
-          <span style={{
-            marginLeft: 7, fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
-            padding: "2px 5px", borderRadius: 4, verticalAlign: "middle",
-            background: isCensus ? "rgba(34,197,94,.12)" : "rgba(249,115,22,.12)",
-            color: isCensus ? "var(--st-v)" : "var(--st-o)",
-          }}>
-            {isCensus ? "Census" : "Non-Census"}
-          </span>
+        <span>
+          {r.ward}
+          {showBadge && (
+            <span style={{
+              marginLeft: 7, fontSize: 9, fontWeight: 800, letterSpacing: 0.4,
+              padding: "2px 5px", borderRadius: 4, verticalAlign: "middle",
+              background: isCensus ? "rgba(34,197,94,.12)" : "rgba(249,115,22,.12)",
+              color: isCensus ? "var(--st-v)" : "var(--st-o)",
+            }}>
+              {isCensus ? "Census" : "Non-Census"}
+            </span>
+          )}
+        </span>
+        {r.room_type && (
+          <div style={{ fontSize: 10, fontWeight: 500, color: "var(--ink-3)", marginTop: 1, whiteSpace: "nowrap" }}>
+            · {shortRoomType(r.room_type)}
+          </div>
         )}
       </td>
       <td style={wstC}>{r.total}</td>
@@ -518,8 +1011,8 @@ function renderWardRow(r, showBadge) {
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)"  }}>{d(vac)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)"  }}>{d(v)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>
-      <td>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>
-      <td><LastUpdatedCell ts={r.updatedAt} /></td>
+      <td style={wstC}>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>
+      <td><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
     </tr>
   );
 }
@@ -537,7 +1030,7 @@ function groupAggregates(grpRows) {
 }
 
 // Flat table — shown when Group by = None
-function WardStatusTable({ title, accent, rows, totalLabel, searchFilter }) {
+function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilter }) {
   const filtered = rows.filter(searchFilter);
 
   const totBeds = wstSum(filtered, r => r.total);
@@ -552,10 +1045,10 @@ function WardStatusTable({ title, accent, rows, totalLabel, searchFilter }) {
     <div className="card" style={{ marginBottom: 16, overflow: "hidden" }}>
       <div className="row between" style={{ padding: "13px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 8 }}>
         <div style={{ fontWeight: 700, fontSize: 14, color: accent }}>{title}</div>
-        <span className="chip" style={{ color: accent }}>Total: {wstSum(rows, r => r.total)} beds</span>
+        <span className="chip" style={{ color: accent }}>Total: {totBeds} beds</span>
       </div>
       <div className="tbl-wrap" style={{ border: "none", borderRadius: 0 }}>
-        <table className="tbl">
+        <table className="tbl tbl-pin1">
           <thead>
             <tr>
               <th>WARD</th>
@@ -566,31 +1059,31 @@ function WardStatusTable({ title, accent, rows, totalLabel, searchFilter }) {
               <th style={{ ...wstC, color: "var(--st-v)"  }}>TOTAL VAC</th>
               <th style={{ ...wstC, color: "var(--st-v)"  }}>VACANT</th>
               <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC+RES</th>
-              <th style={wstC}>OCCUPANCY %</th>
-              <th>LAST UPDATED</th>
+              <th style={wstC}>OCC %</th>
+              <th style={wstC}>LAST UPDATED</th>
             </tr>
           </thead>
           <tbody>
+            {/* Total row always shows — reflects the active filter, including the
+                zero-match case (all-zero totals rather than vanishing entirely). */}
+            <tr className="tbl-total-row" style={{ background: accentBg, "--tbl-total-accent": accent }}>
+              <td style={{ fontWeight: 800, fontSize: 13, color: accent, background: accentBg }}>{totalLabel}</td>
+              <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totOcc}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totO}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totVac}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totV}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
+              <td style={wstC}><OccBar p={totPct} /></td>
+              <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
+            </tr>
             {filtered.length === 0 ? (
               <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
             ) : (
-              <>
-                {filtered.map(r => renderWardRow(r, false))}
-                <tr style={{ background: "var(--panel-2)" }}>
-                  <td style={{ fontWeight: 800, color: accent }}>{totalLabel}</td>
-                  <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totOcc}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totO}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totVac}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totV}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
-                  <td><OccBar p={totPct} /></td>
-                  <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
-                </tr>
-              </>
+              filtered.map(r => renderWardRow(r, false))
             )}
           </tbody>
         </table>
@@ -641,10 +1134,10 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
             — grouped by {groupLabel}
           </span>
         </div>
-        <span className="chip">Total: {wstSum(rows, r => r.total)} beds</span>
+        <span className="chip">Total: {totBeds} beds</span>
       </div>
       <div className="tbl-wrap" style={{ border: "none", borderRadius: 0 }}>
-        <table className="tbl">
+        <table className="tbl tbl-pin1">
           <thead>
             <tr>
               <th>WARD</th>
@@ -655,58 +1148,58 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
               <th style={{ ...wstC, color: "var(--st-v)"  }}>TOTAL VAC</th>
               <th style={{ ...wstC, color: "var(--st-v)"  }}>VACANT</th>
               <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC+RES</th>
-              <th style={wstC}>OCCUPANCY %</th>
-              <th>LAST UPDATED</th>
+              <th style={wstC}>OCC %</th>
+              <th style={wstC}>LAST UPDATED</th>
             </tr>
           </thead>
           <tbody>
+            {/* Grand total always shows first — reflects the active filter,
+                including the zero-match case (all-zero totals, not vanished). */}
+            <tr className="tbl-total-row" style={{ background: "var(--primary-bg, rgba(37,99,235,.12))", "--tbl-total-accent": "var(--primary)" }}>
+              <td style={{ fontWeight: 800, fontSize: 13, color: "var(--primary)", background: "var(--primary-bg, rgba(37,99,235,.12))" }}>GRAND TOTAL</td>
+              <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totOcc}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totO}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totVac}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totV}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
+              <td style={wstC}><OccBar p={totPct} /></td>
+              <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
+            </tr>
             {filtered.length === 0 ? (
               <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
             ) : (
-              <>
-                {groups.map(({ key, grpRows }) => {
-                  const isOpen = expanded.has(key);
-                  const { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt } = groupAggregates(grpRows);
-                  return (
-                    <React.Fragment key={key}>
-                      <tr onClick={() => toggleSection(key)}
-                        style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
-                        <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
-                          <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
-                          {key}
-                          <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
-                            {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""} · totals shown
-                          </span>
-                        </td>
-                        <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
-                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{gocc}</td>
-                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{go}</td>
-                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{gor}</td>
-                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{gvac}</td>
-                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{gv}</td>
-                        <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{gvr}</td>
-                        <td><OccBar p={gp} /></td>
-                        <td><LastUpdatedCell ts={gUpdatedAt} /></td>
-                      </tr>
-                      {isOpen && grpRows.map(r => renderWardRow(r, true))}
-                    </React.Fragment>
-                  );
-                })}
-                <tr style={{ background: "var(--panel-2)" }}>
-                  <td style={{ fontWeight: 800 }}>GRAND TOTAL</td>
-                  <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totOcc}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{totO}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totVac}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{totV}</td>
-                  <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
-                  <td><OccBar p={totPct} /></td>
-                  <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
-                </tr>
-              </>
+              groups.map(({ key, grpRows }) => {
+                const isOpen = expanded.has(key);
+                const { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt } = groupAggregates(grpRows);
+                return (
+                  <React.Fragment key={key}>
+                    <tr onClick={() => toggleSection(key)}
+                      style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
+                      <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
+                        <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
+                        {key}
+                        <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
+                          {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""} · totals shown
+                        </span>
+                      </td>
+                      <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{gocc}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)"  }}>{go}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{gor}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{gvac}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)"  }}>{gv}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{gvr}</td>
+                      <td style={wstC}><OccBar p={gp} /></td>
+                      <td><LastUpdatedCell ts={gUpdatedAt} /></td>
+                    </tr>
+                    {isOpen && grpRows.map(r => renderWardRow(r, true))}
+                  </React.Fragment>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -1255,7 +1748,6 @@ const ACT_CATS = [
 const ACT_ROLES = [
   { key: "PRE",     label: "PRE",     color: "var(--blue)" },
   { key: "NURSE",   label: "Nurse",   color: "var(--green)" },
-  { key: "MANAGER", label: "Manager", color: "var(--amber)" },
   { key: "COO",     label: "Admin",   color: "var(--primary)" },
 ];
 const ACT_BED = ["bed_status_update", "bed_add", "bed_delete", "bed_rename", "beds_generate", "bed_master_edit", "ward_update"];
@@ -1357,10 +1849,11 @@ function ActivityRow({ r, open, onToggle }) {
           </div>
 
           {chg && (
-            <div className="row" style={{ gap: 6, marginTop: 5, flexWrap: "wrap" }}>
+            <div className="row" style={{ gap: 6, marginTop: 5, flexWrap: "wrap", alignItems: "center" }}>
               <span className="chip" style={{ fontSize: 10 }}>{bedStateText(chg.from.physical, chg.from.reservation)}</span>
               <Ic d={icons.chevron} s={12} style={{ color: "var(--ink-3)" }} />
               <span className="chip" style={{ fontSize: 10, color: "var(--st-o)", borderColor: "var(--st-o)" }}>{bedStateText(chg.to.physical, chg.to.reservation)}</span>
+              {r.note && <span className="dim" style={{ fontSize: 11, fontWeight: 600 }}>· {r.note}</span>}
             </div>
           )}
         </div>
@@ -1598,7 +2091,7 @@ function SettingsPage({ user }) {
         <div className="row between">
           <div>
             <div style={{ fontWeight: 600, fontSize: 13 }}>Live refresh</div>
-            <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>Dashboards refresh automatically every 15 seconds.</div>
+            <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>Dashboards update in real time as changes happen (live WebSocket).</div>
           </div>
           <span className="tag v">Active</span>
         </div>

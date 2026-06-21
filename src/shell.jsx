@@ -25,6 +25,21 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // A "sectioned" menu is an array of { section, items:[…] } groups. A flat menu
+  // (array of nav items) is still supported for the PRE / Nurse apps.
+  const sectioned = Array.isArray(menu) && menu.some((m) => Array.isArray(m?.items));
+  const [closedSections, setClosedSections] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("sb_closed_sections") || "[]")); }
+    catch { return new Set(); }
+  });
+  const toggleSection = (name) =>
+    setClosedSections((prev) => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      localStorage.setItem("sb_closed_sections", JSON.stringify([...next]));
+      return next;
+    });
+
   const isMobile = () => window.innerWidth < 768;
 
   const toggle = useCallback(() => {
@@ -54,18 +69,49 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
           <span className="name">BedFlow</span>
         </div>
         <nav className="sb-menu">
-          {menu.map((m) => (
-            <button
-              key={m.key}
-              className={"sb-item" + (active === m.key ? " on" : "")}
-              onClick={() => select(m.key)}
-              title={m.label}
-            >
-              <span className="ic"><Ic d={m.icon} s={18} /></span>
-              <span className="lbl">{m.label}</span>
-              {m.dot && <span className="dot" />}
-            </button>
-          ))}
+          {sectioned
+            ? menu.map((sec) => {
+                // When the rail is icon-collapsed we ignore per-section folding
+                // and just show every icon — there's no room for headers.
+                const closed = !collapsed && closedSections.has(sec.section);
+                return (
+                  <div key={sec.section} className="sb-section">
+                    <button
+                      type="button"
+                      className={"sb-section-head" + (closed ? " closed" : "")}
+                      onClick={() => toggleSection(sec.section)}
+                      aria-expanded={!closed}
+                    >
+                      <span className="lbl">{sec.section}</span>
+                      <span className="chev"><Ic d={icons.chevron} s={14} /></span>
+                    </button>
+                    {!closed && sec.items.map((m) => (
+                      <button
+                        key={m.key}
+                        className={"sb-item" + (active === m.key ? " on" : "")}
+                        onClick={() => select(m.key)}
+                        title={m.label}
+                      >
+                        <span className="ic"><Ic d={m.icon} s={18} /></span>
+                        <span className="lbl">{m.label}</span>
+                        {m.dot && <span className="dot" />}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })
+            : menu.map((m) => (
+                <button
+                  key={m.key}
+                  className={"sb-item" + (active === m.key ? " on" : "")}
+                  onClick={() => select(m.key)}
+                  title={m.label}
+                >
+                  <span className="ic"><Ic d={m.icon} s={18} /></span>
+                  <span className="lbl">{m.label}</span>
+                  {m.dot && <span className="dot" />}
+                </button>
+              ))}
         </nav>
         <div className="sb-foot">
           <button className="sb-item" onClick={onLogout} title="Logout">

@@ -8,8 +8,8 @@ import { PwaManager } from "./pwa.jsx";
 import Login from "./Login.jsx";
 import PREApp from "./PREApp.jsx";
 import COOApp from "./COOApp.jsx";
-import ManagerApp from "./ManagerApp.jsx";
 import NurseApp from "./NurseApp.jsx";
+import DoctorApp from "./DoctorApp.jsx";
 
 // Apply saved theme before first paint — prevents flash-of-wrong-theme.
 initTheme();
@@ -82,8 +82,8 @@ function App() {
     </div>
   );
   if (user.role === "COO")     return <><COOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
-  if (user.role === "MANAGER") return <><ManagerApp user={user} onLogout={logout} /><PwaManager /></>;
   if (user.role === "NURSE")   return <><NurseApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
+  if (user.role === "DOCTOR")  return <><DoctorApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   return <><PREApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
 }
 

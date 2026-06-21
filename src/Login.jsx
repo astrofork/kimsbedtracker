@@ -69,23 +69,23 @@ export default function Login({ onLogin, sessionMsg }) {
         </div>
 
         <div className="card slide-up" style={{ padding: 18, marginTop: 28, animationDelay: ".05s" }}>
-          <div className="seg" style={{ marginBottom: 18 }}>
+          <div className="seg seg-roles" style={{ marginBottom: 18 }}>
             <button className={role === "PRE" ? "on" : ""} onClick={() => setRole("PRE")}>PRE</button>
             <button className={role === "NURSE" ? "on" : ""} onClick={() => setRole("NURSE")}>Nurse</button>
-            <button className={role === "MANAGER" ? "on" : ""} onClick={() => setRole("MANAGER")}>Manager</button>
+            <button className={role === "DOCTOR" ? "on" : ""} onClick={() => setRole("DOCTOR")}>Doctor</button>
             <button className={role === "COO" ? "on" : ""} onClick={() => setRole("COO")}>Admin</button>
           </div>
 
           <label className="label">Username</label>
-          <input className="field"
-            placeholder={role === "PRE" ? "e.g. pre1" : role === "NURSE" ? "e.g. nurse_gm" : role === "MANAGER" ? "manager" : "e.g. admin1"}
+          <input className="field" maxLength={60}
+            placeholder={role === "PRE" ? "e.g. pre1" : role === "NURSE" ? "e.g. nurse_gm" : role === "DOCTOR" ? "e.g. dr_kumar" : "e.g. admin1"}
             value={u}
             autoCapitalize="none" autoCorrect="off"
             onChange={(e) => setU(e.target.value)} />
           <div style={{ height: 14 }} />
           <label className="label">Password</label>
           <div style={{ position: "relative" }}>
-            <input className="field" type={showPwd ? "text" : "password"} placeholder="••••••" value={p}
+            <input className="field" type={showPwd ? "text" : "password"} placeholder="••••••" maxLength={72} value={p}
               style={{ paddingRight: 42 }}
               onChange={(e) => setP(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()} />

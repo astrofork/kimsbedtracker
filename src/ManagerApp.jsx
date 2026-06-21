@@ -4,57 +4,12 @@ import { Ic, icons, StatusBar, useModal, BlockAvatar, useConfirm } from "./ui.js
 import { AppShell } from "./shell.jsx";
 import { naturalSort, calculateWardTotals } from "./bedUtils.js";
 
-const MGR_TITLES = {
-  report: "Reports", setup: "Blocks Overview", preblocks: "PRE Blocks",
-  pres: "PRE Users", stations: "Nursing Stations", nurses: "Nurse Users",
-  history: "Round History", payers: "Payer Types",
-};
-
-export default function ManagerApp({ user, onLogout }) {
-  const [tab, setTab] = useState("setup");
-
-  const [toast, setToast] = useState("");
-  const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2400); }, []);
-
-  const menu = [
-    { key: "report",    icon: icons.chart,  label: "Report" },
-    { key: "setup",     icon: icons.layers, label: "Blocks" },
-    { key: "preblocks", icon: icons.grid,   label: "PRE Blocks" },
-    { key: "pres",      icon: icons.user,   label: "PRE Users" },
-    { key: "stations",  icon: icons.bed,    label: "Stations" },
-    { key: "nurses",    icon: icons.user,   label: "Nurse Users" },
-    { key: "history",   icon: icons.clock,  label: "History" },
-    { key: "payers",    icon: icons.list,   label: "Payer Types" },
-  ];
-
-  return (
-    <AppShell
-      menu={menu}
-      active={tab}
-      onSelect={setTab}
-      title={MGR_TITLES[tab]}
-      user={{ name: user.name || user.username || "Manager", role: "MANAGER" }}
-      onLogout={onLogout}
-      topExtra={
-        <span className="pre-pill" style={{ flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
-          <span style={{ fontSize: 11 }}><Ic d={icons.clock} s={11} /> {fmtTime(Date.now())}</span>
-          <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
-        </span>
-      }
-    >
-      {tab === "report"     && <Reporting />}
-      {tab === "setup"      && <HierarchyManager showToast={showToast} />}
-      {tab === "preblocks"  && <PreBlockManager showToast={showToast} />}
-      {tab === "pres"       && <PreManager showToast={showToast} />}
-      {tab === "stations"   && <StationManager showToast={showToast} />}
-      {tab === "nurses"     && <NurseManager showToast={showToast} />}
-      {tab === "history"    && <HistoryViewer showToast={showToast} />}
-      {tab === "payers"     && <PayerTypeManager showToast={showToast} />}
-
-      {toast && <div className="toast">{toast}</div>}
-    </AppShell>
-  );
-}
+// The standalone Manager role was retired — its pages are now mounted inside the
+// Admin (COO) app. This module is kept as a component library: COOApp imports
+// the page components (HierarchyManager, PreBlockManager, PreManager,
+// StationManager, NurseManager, PayerTypeManager), plus HistoryViewer and
+// actionLabel. There is no longer a Manager app shell, Manager Reports, or
+// History nav entry.
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  REPORTING
@@ -832,7 +787,7 @@ export function actionLabel(a) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  HIERARCHY MANAGER — drill-down: Blocks → Floors → Wards
 // ══════════════════════════════════════════════════════════════════════════════
-function HierarchyManager({ showToast }) {
+export function HierarchyManager({ showToast }) {
   // drill-down state
   const [selBlock,  setSelBlock]  = useState(null);
   const [selFloor,  setSelFloor]  = useState(null);
@@ -1085,7 +1040,13 @@ function HierarchyManager({ showToast }) {
                     confirmLabel: "Delete ward", danger: true,
                   });
                   if (!ok) return;
-                  try { await api.mgrDeleteWard(w.id); load(); showToast(`Ward "${w.name}" deleted`); }
+                  try {
+                    const r = await api.mgrDeleteWard(w.id);
+                    load();
+                    showToast(r?.deletedBeds
+                      ? `Ward "${w.name}" deleted (${r.deletedBeds} bed${r.deletedBeds === 1 ? "" : "s"} removed with it)`
+                      : `Ward "${w.name}" deleted`);
+                  }
                   catch (e) { showToast(toastErr(e)); }
                 }}>Delete</button>
             </div>
@@ -1167,7 +1128,7 @@ function BuildingBlockEditor({ block, onClose, onSaved, showToast }) {
           <div style={{ height: 12 }} />
 
           <label className="label">Full name <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-          <input className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Main Building" />
+          <input className="field" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Main Building" maxLength={40} />
           <div style={{ height: 18 }} />
 
           <button className="btn btn-primary btn-block" disabled={busy} onClick={save}>
@@ -1223,7 +1184,7 @@ function FloorEditor({ floor, buildingBlockId, onClose, onSaved, showToast }) {
             ))}
           </div>
           <input className="field" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Ground Floor, ICU Block" autoFocus />
+            placeholder="e.g. Ground Floor, ICU Block" maxLength={60} autoFocus />
           <div style={{ height: 18 }} />
 
           <button className="btn btn-primary btn-block" disabled={busy || !name.trim()} onClick={save}>
@@ -1299,7 +1260,7 @@ function WardCreator({ floorId, floorName, onClose, onSaved, showToast }) {
           </div>
 
           <label className="label">Ward / room name</label>
-          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="MICU I" autoFocus />
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="MICU I" maxLength={60} autoFocus />
           <div style={{ height: 12 }} />
 
           <TogglePair label="Bed type" value={bedType} onChange={setBedType} options={[
@@ -1314,14 +1275,14 @@ function WardCreator({ floorId, floorName, onClose, onSaved, showToast }) {
 
           <label className="label">Unit type <span className="dim" style={{ fontSize: 11 }}>(pick or type custom)</span></label>
           <input className="field" list="unit-type-list" value={unitType}
-            onChange={(e) => setUnitType(e.target.value)} placeholder="e.g. KIMS, ICU…" />
+            onChange={(e) => setUnitType(e.target.value)} placeholder="e.g. KIMS, ICU…" maxLength={40} />
           <datalist id="unit-type-list">
             {unitTypes.map((t) => <option key={t} value={t} />)}
           </datalist>
           <div style={{ height: 12 }} />
 
           <label className="label">Room type <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-          <input className="field" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="ICU" />
+          <input className="field" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="ICU" maxLength={40} />
           <div style={{ height: 12 }} />
 
           <label className="label">Initial bed count <span className="dim" style={{ fontSize: 11 }}>(can add/generate beds later)</span></label>
@@ -1377,7 +1338,7 @@ function WardEditor({ ward, stations, onClose, onSaved, showToast }) {
           </div>
 
           <label className="label">Ward name</label>
-          <input className="field" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={60} />
           <div style={{ height: 12 }} />
 
           <TogglePair label="Bed type" value={bedType} onChange={setBedType} options={[
@@ -1401,14 +1362,14 @@ function WardEditor({ ward, stations, onClose, onSaved, showToast }) {
 
           <label className="label">Unit type <span className="dim" style={{ fontSize: 11 }}>(pick or type custom)</span></label>
           <input className="field" list="unit-type-list" value={unitType}
-            onChange={(e) => setUnitType(e.target.value)} placeholder="e.g. KIMS, ICU…" />
+            onChange={(e) => setUnitType(e.target.value)} placeholder="e.g. KIMS, ICU…" maxLength={40} />
           <datalist id="unit-type-list">
             {unitTypes.map((t) => <option key={t} value={t} />)}
           </datalist>
           <div style={{ height: 12 }} />
 
           <label className="label">Room type</label>
-          <input className="field" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="e.g. ICU" />
+          <input className="field" value={roomType} onChange={(e) => setRoomType(e.target.value)} placeholder="e.g. ICU" maxLength={40} />
           <div style={{ height: 18 }} />
 
           <button className="btn btn-primary btn-block" disabled={busy} onClick={save}>
@@ -1778,7 +1739,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
                 Add a single bed to <strong>{ward.name}</strong>
               </div>
               <label className="label">Bed Name</label>
-              <input className="field" value={addName} style={{ marginBottom: 12 }}
+              <input className="field" value={addName} style={{ marginBottom: 12 }} maxLength={40}
                 placeholder="e.g. 201A, ICU-5, B12"
                 onChange={(e) => setAddName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addBed()} />
@@ -1838,7 +1799,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
               {genMode === "range" ? (
                 <>
                   <label className="label">Prefix (optional)</label>
-                  <input className="field" value={genPrefix} placeholder="e.g. ICU, B, Room"
+                  <input className="field" value={genPrefix} placeholder="e.g. ICU, B, Room" maxLength={20}
                     style={{ marginBottom: 10 }} onChange={(e) => setGenPrefix(e.target.value)} />
                   <div className="row" style={{ gap: 10, marginBottom: 12 }}>
                     <div style={{ flex: 1 }}>
@@ -2105,7 +2066,7 @@ function GenerateBedForm({
             <div style={{ flex: 1.5 }}>
               <label className="label" style={{ fontSize: 11 }}>Prefix <span className="dim">(optional)</span></label>
               <input className="field" value={genPrefix} onChange={(e) => setGenPrefix(e.target.value)}
-                placeholder="e.g. ICU, A" />
+                placeholder="e.g. ICU, A" maxLength={20} />
             </div>
             <div style={{ flex: 1 }}>
               <label className="label" style={{ fontSize: 11 }}>From</label>
@@ -2153,7 +2114,7 @@ function GenerateBedForm({
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
           <label className="label">Or add a single bed</label>
           <div className="row" style={{ gap: 8 }}>
-            <input className="field" value={individualBed} style={{ flex: 1 }}
+            <input className="field" value={individualBed} style={{ flex: 1 }} maxLength={40}
               onChange={(e) => setIndividualBed(e.target.value)}
               placeholder="e.g. 201A, ICU5, B12"
               onKeyDown={(e) => e.key === "Enter" && onAddBed()} />
@@ -2296,7 +2257,99 @@ function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStatio
   );
 }
 
-function PreBlockManager({ showToast }) {
+// ── Shared block-detail building blocks (PRE Block + Doctor Block) ──────────────
+// Lightweight detail header — mirrors StationDetail's pattern (small chips,
+// not a heavy button toolbar) so PRE Blocks / Doctor Blocks look and behave
+// like Stations instead of like a separate, heavier "block card" product.
+function BlockDetailLight({
+  backLabel, onBack, name, statusActive, statLine, description,
+  onEdit, onToggle, onDelete, deleteLabel,
+  tabs, activeTab, setActiveTab,
+}) {
+  return (
+    <>
+      <div className="row between" style={{ marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+        <button className="chip" onClick={onBack}>← Back to {backLabel}</button>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+          <button className="chip" onClick={onEdit}>Edit</button>
+          <button className="chip" onClick={onToggle}>{statusActive ? "Deactivate" : "Activate"}</button>
+          <button className="chip" style={{ color: "var(--red)" }} onClick={onDelete}>{deleteLabel || "Delete"}</button>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 700, fontSize: 20 }}>{name}</div>
+          <span className={"tag" + (statusActive ? " v" : "")}
+            style={!statusActive ? { background: "var(--panel-2)", color: "var(--ink-3)" } : undefined}>
+            {statusActive ? "Active" : "Inactive"}
+          </span>
+        </div>
+        <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>{statLine}</div>
+        {description && <div className="dim" style={{ fontSize: 12, marginTop: 6, overflowWrap: "anywhere" }}>{description}</div>}
+      </div>
+
+      <div className="row" style={{ gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        {tabs.map(([key, label]) => (
+          <button key={key} className={"fchip" + (activeTab === key ? " on" : "")} onClick={() => setActiveTab(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// Generic member row for a block's "people" tab (doctors or PRE users) —
+// mirrors StationDetail's nurse row exactly (avatar, name/username, Remove chip).
+function BlockMemberRow({ member, onRemove }) {
+  return (
+    <div className="card" style={{ padding: 14, marginBottom: 10 }}>
+      <div className="row between">
+        <div className="row" style={{ gap: 10 }}>
+          <div className="blk-docav">{initialsFor(member.name)}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 14 }}>{member.name}</div>
+            <div className="dim" style={{ fontSize: 11 }}>
+              @{member.username}{member.status === "inactive" ? " · inactive" : ""}
+            </div>
+          </div>
+        </div>
+        {onRemove && <button className="chip" style={{ color: "var(--red)" }} onClick={onRemove}>Remove</button>}
+      </div>
+    </div>
+  );
+}
+
+function WardRow({ ward }) {
+  const nonCensus = ward.bed_type === "Non-Census";
+  const noBeds = (ward.total_beds ?? 0) === 0;
+  return (
+    <div className="blk-ward">
+      <div className="blk-ward-ic"><Ic d={icons.bed} s={17} /></div>
+      <div className="blk-ward-main">
+        <div className="blk-ward-name">{ward.name}</div>
+        <div className="blk-ward-loc">
+          {[ward.block_name && `Block ${ward.block_name}`, ward.floor_name, ward.station_name].filter(Boolean).join(" · ") || "—"}
+        </div>
+      </div>
+      <div className="blk-ward-right">
+        <span className="blk-pill" style={{
+          color: nonCensus ? "var(--amber)" : "var(--primary)",
+          borderColor: nonCensus ? "var(--amber)" : "var(--primary)",
+          background: nonCensus ? "var(--amber-bg)" : "var(--st-vr-bg)",
+        }}>{ward.bed_type || "Census"}</span>
+        <span className="blk-bedcount" style={noBeds ? { color: "var(--red)" } : undefined}>
+          {noBeds ? "no beds" : `${ward.total_beds} beds`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const initialsFor = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+
+export function PreBlockManager({ showToast }) {
   const [blocks,  setBlocks]  = useState([]);
   const [allWards, setAllWards] = useState([]);
   const [selBlock, setSelBlock] = useState(null); // null = list | object = detail
@@ -2314,110 +2367,17 @@ function PreBlockManager({ showToast }) {
 
   // ── Detail view ───────────────────────────────────────────────────────────
 
-  if (selBlock) return (
-    <div>
-      <div className="row" style={{ gap: 10, marginBottom: 14, alignItems: "center" }}>
-        <button className="chip" style={{ fontSize: 13 }} onClick={() => setSelBlock(null)}>
-          ← PRE Blocks
-        </button>
-        <div style={{ flex: 1 }}>
-          <div className="h1" style={{ fontSize: 18 }}>{selBlock.name}</div>
-          <div className="dim" style={{ fontSize: 12 }}>
-            {selBlock.ward_count ?? selBlock.wards?.length ?? 0} wards ·{" "}
-            <span style={{ color: selBlock.status === "active" ? "var(--teal)" : "var(--red)", fontWeight: 600 }}>
-              {selBlock.status === "active" ? "Active" : "Inactive"}
-            </span>
-          </div>
-        </div>
-        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }}
-          onClick={() => setEditing(selBlock)}>Edit</button>
-      </div>
-
-      {selBlock.description && (
-        <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-          <div className="dim" style={{ fontSize: 13 }}>{selBlock.description}</div>
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-        <button className="btn btn-ghost" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
-          onClick={async () => {
-            const newStatus = selBlock.status === "active" ? "inactive" : "active";
-            try {
-              await api.mgrSetPreBlockStatus(selBlock.id, newStatus);
-              await load();
-              const updated = { ...selBlock, status: newStatus };
-              setSelBlock(updated);
-              showToast(`${selBlock.name} ${newStatus === "active" ? "activated" : "deactivated"}`);
-            } catch (e) { showToast(toastErr(e)); }
-          }}>
-          {selBlock.status === "active" ? "Deactivate" : "Activate"}
-        </button>
-        <button className="btn" style={{ flex: 1, padding: "9px 0", fontSize: 13, color: "var(--red)",
-          background: "transparent", border: "1.5px solid var(--red)" }}
-          onClick={async () => {
-            const ok = await confirm({
-              title: `Delete "${selBlock.name}"?`,
-              message: "This removes the PRE Block and all ward assignments. Wards themselves are not affected.\n\nThis cannot be undone.",
-              confirmLabel: "Delete PRE Block", danger: true,
-            });
-            if (!ok) return;
-            try {
-              await api.mgrDeletePreBlock(selBlock.id);
-              await load();
-              setSelBlock(null);
-              showToast(`"${selBlock.name}" deleted`);
-            } catch (e) { showToast(toastErr(e)); }
-          }}>
-          Delete
-        </button>
-      </div>
-
-      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>
-        Assigned Wards ({selBlock.wards?.length ?? 0})
-      </div>
-      {(selBlock.wards || []).length === 0 && (
-        <div className="card empty"><div style={{ fontWeight: 600 }}>No wards assigned</div></div>
-      )}
-      {(selBlock.wards || []).map(w => (
-        <div key={w.id} className="card" style={{ padding: "12px 14px", marginBottom: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>{w.name}</div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
-            {[w.block_name && `Block ${w.block_name}`, w.floor_name, w.station_name]
-              .filter(Boolean).join(" · ")}
-          </div>
-          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-            <span style={{
-              padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-              background: w.bed_type === "Non-Census" ? "#fef9e7" : "var(--teal-bg, #e6f7f5)",
-              color: w.bed_type === "Non-Census" ? "#8a7000" : "var(--teal)",
-              border: `1px solid ${w.bed_type === "Non-Census" ? "#d4c060" : "var(--teal)"}`,
-            }}>{w.bed_type || "Census"}</span>
-            <span className="dim" style={{ fontSize: 11 }}>{w.total_beds} beds</span>
-          </div>
-        </div>
-      ))}
-
-      {editing !== null && (
-        <PreBlockEditor
-          block={editing === "new" ? null : editing}
-          allWards={allWards}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            await load();
-            try {
-              const detail = await api.mgrPreBlock(selBlock.id);
-              setSelBlock(detail);
-            } catch {}
-            showToast("Saved ✓");
-          }}
-          showToast={showToast}
-        />
-      )}
-      {confirmDialog}
-    </div>
-  );
+  if (selBlock) {
+    return (
+      <PreBlockDetail
+        block={selBlock}
+        allWards={allWards}
+        onBack={() => setSelBlock(null)}
+        onChanged={load}
+        showToast={showToast}
+      />
+    );
+  }
 
   // ── List view ─────────────────────────────────────────────────────────────
 
@@ -2494,6 +2454,193 @@ function PreBlockManager({ showToast }) {
   );
 }
 
+// ── PRE Block detail — Station-style: light header + tabs (PRE Users | Wards) ──
+function PreBlockDetail({ block, allWards, onBack, onChanged, showToast }) {
+  const [activeTab, setActiveTab] = useState("pre");
+  const [editing,   setEditing]   = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [preUsers,  setPreUsers]  = useState([]);
+  const [blockData, setBlockData] = useState(block);
+  const [confirm, confirmDialog]  = useConfirm();
+
+  const loadPreUsers = async () => {
+    try {
+      const u = await api.mgrUsers();
+      setPreUsers((u.users || []).filter((x) => x.role === "PRE" && x.pre_block_id === blockData.id));
+    } catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { loadPreUsers(); }, [blockData.id]);
+
+  const refreshBlock = async () => {
+    try { setBlockData(await api.mgrPreBlock(blockData.id)); } catch { /* keep stale */ }
+  };
+
+  const wards = blockData.wards || [];
+  const totalBeds = wards.reduce((s, w) => s + (w.total_beds ?? 0), 0);
+
+  const removePre = async (u) => {
+    const ok = await confirm({
+      title: `Remove "${u.name}" from block?`,
+      message: `${u.name} will be unassigned from ${blockData.name}. They keep their login access.`,
+      confirmLabel: "Remove", danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.mgrEditPre(u.id, { preBlockId: null });
+      loadPreUsers();
+      onChanged();
+      showToast(`${u.name} removed from block`);
+    } catch (e) { showToast(toastErr(e)); }
+  };
+
+  return (
+    <div>
+      <BlockDetailLight
+        backLabel="PRE Blocks" onBack={onBack}
+        name={blockData.name} statusActive={blockData.status === "active"}
+        statLine={`${wards.length} ward${wards.length === 1 ? "" : "s"} · ${preUsers.length} PRE user${preUsers.length === 1 ? "" : "s"} · ${totalBeds} beds`}
+        description={blockData.description}
+        onEdit={() => setEditing(true)}
+        onToggle={async () => {
+          const newStatus = blockData.status === "active" ? "inactive" : "active";
+          try {
+            await api.mgrSetPreBlockStatus(blockData.id, newStatus);
+            setBlockData((d) => ({ ...d, status: newStatus }));
+            onChanged();
+            showToast(`${blockData.name} ${newStatus === "active" ? "activated" : "deactivated"}`);
+          } catch (e) { showToast(toastErr(e)); }
+        }}
+        onDelete={async () => {
+          const ok = await confirm({
+            title: `Delete "${blockData.name}"?`,
+            message: "This removes the PRE Block and all ward assignments. Wards themselves are not affected.\n\nThis cannot be undone.",
+            confirmLabel: "Delete PRE Block", danger: true,
+          });
+          if (!ok) return;
+          try { await api.mgrDeletePreBlock(blockData.id); onChanged(); onBack(); showToast(`"${blockData.name}" deleted`); }
+          catch (e) { showToast(toastErr(e)); }
+        }}
+        tabs={[["pre", "PRE Users"], ["wards", "Wards"]]}
+        activeTab={activeTab} setActiveTab={setActiveTab}
+      />
+
+      {activeTab === "pre" && (
+        <div>
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 16 }}>PRE Users</div>
+            <button className="btn btn-primary" style={{ padding: "7px 12px", fontSize: 13 }}
+              onClick={() => setAssigning(true)}>
+              + Assign PRE User
+            </button>
+          </div>
+          {preUsers.length === 0 ? (
+            <div className="card empty">
+              <Ic d={icons.user} s={28} />
+              <div style={{ marginTop: 10, fontWeight: 600 }}>No PRE users in this block</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Assign one using the button above.</div>
+            </div>
+          ) : preUsers.map((u) => <BlockMemberRow key={u.id} member={u} onRemove={() => removePre(u)} />)}
+        </div>
+      )}
+
+      {activeTab === "wards" && (
+        <div>
+          <div className="blk-sec-head">
+            <span className="blk-sec-title">Wards</span>
+            <span className="blk-sec-sub">{wards.length} ward{wards.length === 1 ? "" : "s"} · {totalBeds} beds</span>
+          </div>
+          {wards.length === 0
+            ? <div className="blk-empty">No wards assigned — tap Edit to add some.</div>
+            : wards.map((w) => <WardRow key={w.id} ward={w} />)}
+        </div>
+      )}
+
+      {editing && (
+        <PreBlockEditor
+          block={blockData}
+          allWards={allWards}
+          onClose={() => setEditing(false)}
+          onSaved={async () => { setEditing(false); await refreshBlock(); onChanged(); showToast("Saved ✓"); }}
+          showToast={showToast}
+        />
+      )}
+      {assigning && (
+        <AssignPreModal
+          blockId={blockData.id}
+          blockName={blockData.name}
+          onClose={() => setAssigning(false)}
+          onSaved={() => { setAssigning(false); loadPreUsers(); onChanged(); showToast("PRE user assigned to block"); }}
+        />
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+function AssignPreModal({ blockId, blockName, onClose, onSaved }) {
+  useModal(onClose);
+  const [unassigned, setUnassigned] = useState([]);
+  const [userId,     setUserId]     = useState("");
+  const [busy,       setBusy]       = useState(false);
+  const [err,        setErr]        = useState("");
+
+  useEffect(() => {
+    api.mgrUsers().then((r) => {
+      setUnassigned((r.users || []).filter((u) => u.role === "PRE" && !u.pre_block_id));
+    }).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    if (!userId) { setErr("Select a PRE user"); return; }
+    setBusy(true);
+    try {
+      await api.mgrEditPre(Number(userId), { preBlockId: blockId });
+      onSaved();
+    } catch (e) { setErr(friendlyError(e).message); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 17 }}>Assign PRE User to {blockName}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">PRE User (unassigned)</label>
+          <select className="field" value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">— Select PRE user —</option>
+            {unassigned.map((u) => (
+              <option key={u.id} value={u.id}>{u.name} (@{u.username})</option>
+            ))}
+          </select>
+          {unassigned.length === 0 && (
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              All PRE users are already assigned to a block.
+            </div>
+          )}
+
+          {err && (
+            <div style={{
+              background: "var(--red-bg, #FEF2F2)", color: "var(--red, #DC2626)",
+              padding: "9px 12px", borderRadius: 8, fontSize: 13, margin: "12px 0 0",
+            }}>{err}</div>
+          )}
+
+          <div style={{ height: 16 }} />
+          <button className="btn btn-primary btn-block"
+            disabled={busy || unassigned.length === 0} onClick={save}>
+            {busy ? "Assigning…" : "Assign to Block"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PreBlockEditor({ block, allWards, onClose, onSaved, showToast }) {
   useModal(onClose);
   const isNew = !block;
@@ -2539,14 +2686,15 @@ function PreBlockEditor({ block, allWards, onClose, onSaved, showToast }) {
 
               <label className="label">PRE Block name</label>
               <input className="field" value={name} onChange={e => setName(e.target.value)}
-                placeholder="e.g. Critical Care, General Wards" autoFocus />
+                placeholder="e.g. Critical Care, General Wards" maxLength={100} autoFocus />
               <div style={{ height: 12 }} />
 
               <label className="label">Description <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-              <textarea className="field" rows={2} value={description}
+              <textarea className="field" rows={3} value={description}
                 onChange={e => setDescription(e.target.value)}
                 placeholder="e.g. All critical care wards for PRE monitoring"
-                style={{ resize: "none" }} />
+                maxLength={500} style={{ resize: "none", overflowWrap: "anywhere" }} />
+              <div className="dim" style={{ fontSize: 11, textAlign: "right", marginTop: 4 }}>{description.length}/500</div>
               <div style={{ height: 16 }} />
 
               <div className="row between" style={{ marginBottom: 8 }}>
@@ -2630,7 +2778,7 @@ function PreBlockEditor({ block, allWards, onClose, onSaved, showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PRE USERS MANAGER
 // ══════════════════════════════════════════════════════════════════════════════
-function PreManager({ showToast }) {
+export function PreManager({ showToast }) {
   const [users,      setUsers]      = useState([]);
   const [preBlocks,  setPreBlocks]  = useState([]);
   const [editing,    setEditing]    = useState(null);
@@ -2772,14 +2920,14 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
 
           <label className="label">Display name</label>
           <input className="field" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="PRE user name" autoFocus />
+            placeholder="PRE user name" maxLength={80} autoFocus />
           <div style={{ height: 12 }} />
 
           {isNew && (
             <>
               <label className="label">Username <span className="dim" style={{ fontSize: 11 }}>(for login)</span></label>
               <input className="field" value={username} autoCapitalize="none"
-                onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="pre1" />
+                onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="pre1" maxLength={40} />
               <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
                 Letters, numbers, and underscores only — e.g. pre1, pre_b2
               </div>
@@ -2791,7 +2939,7 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
           <div style={{ position: "relative" }}>
             <input className="field" type={showPwd ? "text" : "password"} value={password}
               onChange={(e) => setPassword(e.target.value)} placeholder="min 8 characters"
-              style={{ paddingRight: 42 }} />
+              maxLength={72} style={{ paddingRight: 42 }} />
             <button type="button" onClick={() => setShowPwd((v) => !v)}
               style={{
                 position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
@@ -2844,7 +2992,7 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  NURSE-IN-CHARGE MANAGER
 // ══════════════════════════════════════════════════════════════════════════════
-function NurseManager({ showToast }) {
+export function NurseManager({ showToast }) {
   const [nurses,   setNurses]   = useState([]);
   const [stations, setStations] = useState([]); // [{id, name, ward_count, nurse_count}]
   const [editing,  setEditing]  = useState(null); // null | "new" | nurse obj
@@ -3003,14 +3151,14 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
           </div>
 
           <label className="label">Display name</label>
-          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nurse Priya" />
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nurse Priya" maxLength={80} />
           <div style={{ height: 12 }} />
 
           {isNew && (
             <>
               <label className="label">Username <span className="dim" style={{ fontSize: 11 }}>(for login)</span></label>
               <input className="field" value={username} autoCapitalize="none"
-                onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="nurse_gm" />
+                onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="nurse_gm" maxLength={40} />
               <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
                 Letters, numbers, and underscores only — e.g. nurse_gm, nic1
               </div>
@@ -3022,7 +3170,7 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
           <div style={{ position: "relative" }}>
             <input className="field" type={showPwd ? "text" : "password"} value={password}
               onChange={(e) => setPassword(e.target.value)} placeholder="min 8 characters"
-              style={{ paddingRight: 42 }} />
+              maxLength={72} style={{ paddingRight: 42 }} />
             <button type="button" onClick={() => setShowPwd((v) => !v)}
               style={{
                 position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
@@ -3050,15 +3198,15 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
           <div style={{ height: 12 }} />
 
           <label className="label">Employee ID <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-          <input className="field" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="e.g. EMP-1234" />
+          <input className="field" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} placeholder="e.g. EMP-1234" maxLength={50} />
           <div style={{ height: 12 }} />
 
           <label className="label">Phone <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-          <input className="field" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 98765 43210" />
+          <input className="field" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 98765 43210" maxLength={30} />
           <div style={{ height: 12 }} />
 
           <label className="label">Email <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-          <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nurse@hospital.in" />
+          <input className="field" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="nurse@hospital.in" maxLength={120} />
           <div style={{ height: 16 }} />
 
           <button className="btn btn-primary btn-block" disabled={busy} onClick={save}>
@@ -3074,7 +3222,7 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  STATION MANAGER
 // ══════════════════════════════════════════════════════════════════════════════
-function StationManager({ showToast }) {
+export function StationManager({ showToast }) {
   const [stations,         setStations]         = useState([]);
   const [selectedStation,  setSelectedStation]  = useState(null);
   const [editing,          setEditing]          = useState(null);
@@ -3130,7 +3278,7 @@ function StationManager({ showToast }) {
                 onClick={async () => {
                   const ok = await confirm({
                     title: `Delete station "${s.name}"?`,
-                    message: `This will delete the station and unassign all its wards and nurses.\n\nThis cannot be undone.`,
+                    message: `The station must have no wards or nurses assigned — reassign those first if it still has any.\n\nThis cannot be undone.`,
                     confirmLabel: "Delete station",
                     danger: true,
                   });
@@ -3221,7 +3369,7 @@ function StationEditor({ station, onClose, onSaved, showToast }) {
 
           <label className="label">Station name</label>
           <input className="field" value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. General Male, ICU, Emergency" autoFocus />
+            placeholder="e.g. General Male, ICU, Emergency" maxLength={100} autoFocus />
           <div style={{ height: 20 }} />
 
           {/* Ward assignment */}
@@ -4105,7 +4253,7 @@ function NurseAccessManager({ showToast, stationId }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  PAYER TYPE MANAGER
 // ══════════════════════════════════════════════════════════════════════════════
-function PayerTypeManager({ showToast }) {
+export function PayerTypeManager({ showToast }) {
   const [types,    setTypes]    = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [busy,     setBusy]     = useState(false);
@@ -4201,7 +4349,7 @@ function PayerTypeManager({ showToast }) {
       <div className="card" style={{ padding: 14, marginBottom: 16 }}>
         <label className="label">Add new payer type</label>
         <div className="row" style={{ gap: 8 }}>
-          <input className="field" value={newName} style={{ flex: 1 }}
+          <input className="field" value={newName} style={{ flex: 1 }} maxLength={100}
             placeholder='e.g. "Government Scheme"'
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()} />
@@ -4236,7 +4384,177 @@ function PayerTypeManager({ showToast }) {
               {/* Name / edit */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 {editId === pt.id ? (
-                  <input className="field" autoFocus value={editName}
+                  <input className="field" autoFocus maxLength={100} value={editName}
+                    style={{ padding: "6px 10px", fontSize: 13 }}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveRename(pt); if (e.key === "Escape") setEditId(null); }}
+                    onBlur={() => saveRename(pt)} />
+                ) : (
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{pt.name}</span>
+                )}
+              </div>
+
+              {/* Active badge */}
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
+                background: pt.active ? "var(--green-bg)" : "var(--panel-2)",
+                color: pt.active ? "var(--green)" : "var(--ink-3)",
+                border: `1px solid ${pt.active ? "var(--green)" : "var(--line)"}`,
+                flexShrink: 0, whiteSpace: "nowrap",
+              }}>{pt.active ? "Active" : "Inactive"}</span>
+
+              {/* Actions */}
+              <div className="row" style={{ gap: 0, flexShrink: 0 }}>
+                {iconBtn(() => { setEditId(pt.id); setEditName(pt.name); }, "var(--primary)", "Rename", icons.pencil)}
+                {iconBtn(() => toggleActive(pt), pt.active ? "var(--amber)" : "var(--green)", pt.active ? "Deactivate" : "Activate", pt.active ? icons.eyeOff : icons.eye)}
+                {iconBtn(() => remove(pt), "var(--red)", "Delete", icons.trash)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      {confirmDialog}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DESTINATIONS — admin-managed list of where a patient is sent while a bed is
+//  held Occupied + Reserved (e.g. OT, Scanning). Mirrors PayerTypeManager.
+// ══════════════════════════════════════════════════════════════════════════════
+export function DestinationManager({ showToast }) {
+  const [types,    setTypes]    = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [busy,     setBusy]     = useState(false);
+  const [newName,  setNewName]  = useState("");
+  const [editId,   setEditId]   = useState(null); // id being renamed
+  const [editName, setEditName] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async () => {
+    setLoading(true);
+    try { setTypes((await api.mgrDestinations()).destinations || []); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    const n = newName.trim();
+    if (!n) return;
+    setBusy(true);
+    try {
+      await api.mgrCreateDestination(n);
+      setNewName("");
+      await load();
+      showToast(`"${n}" added ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const saveRename = async (pt) => {
+    const n = editName.trim();
+    if (!n || n === pt.name) { setEditId(null); return; }
+    setBusy(true);
+    try {
+      await api.mgrUpdateDestination(pt.id, { name: n });
+      setEditId(null);
+      await load();
+      showToast(`Renamed to "${n}" ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const toggleActive = async (pt) => {
+    setBusy(true);
+    try {
+      await api.mgrUpdateDestination(pt.id, { active: !pt.active });
+      await load();
+      showToast(`"${pt.name}" ${pt.active ? "deactivated" : "activated"}`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const reorder = async (pt, dir) => {
+    setBusy(true);
+    try { await api.mgrReorderDestination(pt.id, dir); await load(); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (pt) => {
+    const ok = await confirm({
+      title: `Delete "${pt.name}"?`,
+      message: `This destination will be removed. It cannot be deleted if any bed is currently using it.`,
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.mgrDeleteDestination(pt.id);
+      await load();
+      showToast(`"${pt.name}" deleted`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--line)" };
+  const iconBtn  = (onClick, color, title, icon) => (
+    <button title={title} onClick={onClick} disabled={busy}
+      style={{ background: "none", border: "none", cursor: busy ? "default" : "pointer", color, padding: 4, borderRadius: 6, display: "flex" }}>
+      <Ic d={icon} s={16} />
+    </button>
+  );
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <div className="h2" style={{ marginBottom: 4 }}>Destinations</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 18 }}>
+        Active destinations appear in the PRE, Nurse and Doctor bed-update dropdown — shown whenever a bed is set to
+        Occupied + Reserved (e.g. patient sent to OT or Scanning). Deactivated destinations are hidden from staff but preserved in history.
+      </div>
+
+      {/* Add new */}
+      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+        <label className="label">Add new destination</label>
+        <div className="row" style={{ gap: 8 }}>
+          <input className="field" value={newName} style={{ flex: 1 }} maxLength={100}
+            placeholder='e.g. "OT" or "Scanning"'
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()} />
+          <button className="btn btn-primary" disabled={busy || !newName.trim()} onClick={add}
+            style={{ whiteSpace: "nowrap" }}>
+            <Ic d={icons.plus} s={15} /> Add
+          </button>
+        </div>
+      </div>
+
+      {/* List */}
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {loading ? (
+          <div className="dim" style={{ padding: 32, textAlign: "center" }}>
+            <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
+          </div>
+        ) : types.length === 0 ? (
+          <div className="empty">No destinations yet.</div>
+        ) : (
+          types.map((pt, i) => (
+            <div key={pt.id} style={{ ...rowStyle, background: pt.active ? "transparent" : "var(--panel-2)", opacity: pt.active ? 1 : 0.65 }}>
+              {/* Reorder arrows */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
+                <button disabled={busy || i === 0} onClick={() => reorder(pt, "up")}
+                  style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer",
+                    color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▲</button>
+                <button disabled={busy || i === types.length - 1} onClick={() => reorder(pt, "down")}
+                  style={{ background: "none", border: "none", cursor: i === types.length - 1 ? "default" : "pointer",
+                    color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▼</button>
+              </div>
+
+              {/* Name / edit */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {editId === pt.id ? (
+                  <input className="field" autoFocus maxLength={100} value={editName}
                     style={{ padding: "6px 10px", fontSize: 13 }}
                     onChange={(e) => setEditName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") saveRename(pt); if (e.key === "Escape") setEditId(null); }}
@@ -4586,6 +4904,561 @@ function BlockRoundsCard({ group }) {
           {open && <WardTable wards={wards} />}
         </>
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DOCTOR BLOCK MANAGER
+// ══════════════════════════════════════════════════════════════════════════════
+export function DoctorBlockManager({ showToast }) {
+  const [blocks,     setBlocks]     = useState([]);
+  const [allWards,   setAllWards]   = useState([]);
+  const [allDoctors, setAllDoctors] = useState([]);
+  const [selBlock,   setSelBlock]   = useState(null);
+  const [editing,    setEditing]    = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async () => {
+    try {
+      const [b, w, u] = await Promise.all([api.mgrDoctorBlocks(), api.mgrWards(), api.mgrUsers()]);
+      setBlocks(b.blocks || []);
+      setAllWards(w.wards || []);
+      setAllDoctors((u.users || []).filter((x) => x.role === "DOCTOR"));
+    } catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // ── Detail view ───────────────────────────────────────────────────────────
+  if (selBlock) {
+    return (
+      <DoctorBlockDetail
+        block={selBlock}
+        allWards={allWards}
+        allDoctors={allDoctors}
+        onBack={() => setSelBlock(null)}
+        onChanged={load}
+        showToast={showToast}
+      />
+    );
+  }
+
+  // ── List view ─────────────────────────────────────────────────────────────
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 4 }}>
+        <div className="h1" style={{ fontSize: 18 }}>Doctor Blocks</div>
+        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }} onClick={() => setEditing("new")}>
+          + New Doctor Block
+        </button>
+      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+        Ward groups doctors can update. A ward belongs to only one Doctor Block.
+      </div>
+
+      {blocks.map((b) => (
+        <div key={b.id} className="card" style={{ padding: 0, marginBottom: 10, overflow: "hidden" }}>
+          <button style={{ width: "100%", padding: "14px 16px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}
+            onClick={async () => { try { setSelBlock(await api.mgrDoctorBlock(b.id)); } catch (e) { showToast(toastErr(e)); } }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: b.status === "active" ? "var(--teal)" : "var(--panel-3, #ccc)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Ic d={icons.stethoscope} s={20} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{b.name}</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
+                {b.ward_count} ward{b.ward_count !== 1 ? "s" : ""} · {b.doctor_count} doctor{b.doctor_count !== 1 ? "s" : ""} · {b.total_beds} beds
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: b.status === "active" ? "var(--teal-bg, #e6f7f5)" : "#f5f5f5", color: b.status === "active" ? "var(--teal)" : "var(--ink-3)", border: `1px solid ${b.status === "active" ? "var(--teal)" : "var(--line)"}` }}>
+                {b.status === "active" ? "Active" : "Inactive"}
+              </span>
+              <span style={{ color: "var(--ink-3)", fontSize: 18 }}>›</span>
+            </div>
+          </button>
+        </div>
+      ))}
+
+      {blocks.length === 0 && (
+        <div className="card empty" style={{ marginTop: 14 }}>
+          <Ic d={icons.stethoscope} s={28} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No Doctor Blocks yet</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>Group wards for doctors to update.</div>
+        </div>
+      )}
+
+      {editing !== null && (
+        <DoctorBlockEditor block={editing === "new" ? null : editing} allWards={allWards} allDoctors={allDoctors}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); showToast("Saved ✓"); }}
+          showToast={showToast} />
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+// ── Doctor Block detail — Station-style: light header + tabs (Doctors | Wards) ──
+function DoctorBlockDetail({ block, allWards, allDoctors, onBack, onChanged, showToast }) {
+  const [activeTab, setActiveTab] = useState("doctors");
+  const [editing,   setEditing]   = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [blockData, setBlockData] = useState(block);
+  const [confirm, confirmDialog]  = useConfirm();
+
+  const refreshBlock = async () => {
+    try { setBlockData(await api.mgrDoctorBlock(blockData.id)); } catch { /* keep stale */ }
+  };
+
+  const wards = blockData.wards || [];
+  const doctors = blockData.doctors || [];
+  const totalBeds = wards.reduce((s, w) => s + (w.total_beds ?? 0), 0);
+
+  const removeDoctor = async (d) => {
+    const ok = await confirm({
+      title: `Remove "${d.name}" from block?`,
+      message: `${d.name} will lose access to this block's wards. They keep their login access.`,
+      confirmLabel: "Remove", danger: true,
+    });
+    if (!ok) return;
+    try {
+      const newDoctorIds = doctors.filter((x) => x.id !== d.id).map((x) => x.id);
+      await api.mgrEditDoctorBlock(blockData.id, { doctorIds: newDoctorIds });
+      await refreshBlock();
+      onChanged();
+      showToast(`${d.name} removed from block`);
+    } catch (e) { showToast(toastErr(e)); }
+  };
+
+  return (
+    <div>
+      <BlockDetailLight
+        backLabel="Doctor Blocks" onBack={onBack}
+        name={blockData.name} statusActive={blockData.status === "active"}
+        statLine={`${wards.length} ward${wards.length === 1 ? "" : "s"} · ${doctors.length} doctor${doctors.length === 1 ? "" : "s"} · ${totalBeds} beds`}
+        description={blockData.description}
+        onEdit={() => setEditing(true)}
+        onToggle={async () => {
+          const newStatus = blockData.status === "active" ? "inactive" : "active";
+          try {
+            await api.mgrSetDoctorBlockStatus(blockData.id, newStatus);
+            setBlockData((d) => ({ ...d, status: newStatus }));
+            onChanged();
+            showToast(`${blockData.name} ${newStatus === "active" ? "activated" : "deactivated"}`);
+          } catch (e) { showToast(toastErr(e)); }
+        }}
+        onDelete={async () => {
+          const ok = await confirm({
+            title: `Delete "${blockData.name}"?`,
+            message: "This removes the Doctor Block and its ward/doctor assignments. The wards and doctors themselves are not affected.\n\nThis cannot be undone.",
+            confirmLabel: "Delete Doctor Block", danger: true,
+          });
+          if (!ok) return;
+          try { await api.mgrDeleteDoctorBlock(blockData.id); onChanged(); onBack(); showToast(`"${blockData.name}" deleted`); }
+          catch (e) { showToast(toastErr(e)); }
+        }}
+        tabs={[["doctors", "Doctors"], ["wards", "Wards"]]}
+        activeTab={activeTab} setActiveTab={setActiveTab}
+      />
+
+      {activeTab === "doctors" && (
+        <div>
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 16 }}>Doctors</div>
+            <button className="btn btn-primary" style={{ padding: "7px 12px", fontSize: 13 }}
+              onClick={() => setAssigning(true)}>
+              + Assign Doctor
+            </button>
+          </div>
+          {doctors.length === 0 ? (
+            <div className="card empty">
+              <Ic d={icons.stethoscope} s={28} />
+              <div style={{ marginTop: 10, fontWeight: 600 }}>No doctors in this block</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Assign one using the button above.</div>
+            </div>
+          ) : doctors.map((d) => <BlockMemberRow key={d.id} member={d} onRemove={() => removeDoctor(d)} />)}
+        </div>
+      )}
+
+      {activeTab === "wards" && (
+        <div>
+          <div className="blk-sec-head">
+            <span className="blk-sec-title">Wards</span>
+            <span className="blk-sec-sub">{wards.length} ward{wards.length === 1 ? "" : "s"} · {totalBeds} beds</span>
+          </div>
+          {wards.length === 0
+            ? <div className="blk-empty">No wards assigned — tap Edit to add some.</div>
+            : wards.map((w) => <WardRow key={w.id} ward={w} />)}
+        </div>
+      )}
+
+      {editing && (
+        <DoctorBlockEditor block={blockData} allWards={allWards} allDoctors={allDoctors}
+          onClose={() => setEditing(false)}
+          onSaved={async () => { setEditing(false); await refreshBlock(); onChanged(); showToast("Saved ✓"); }}
+          showToast={showToast} />
+      )}
+      {assigning && (
+        <AssignDoctorModal
+          blockId={blockData.id}
+          blockName={blockData.name}
+          currentDoctorIds={doctors.map((d) => d.id)}
+          onClose={() => setAssigning(false)}
+          onSaved={async () => { setAssigning(false); await refreshBlock(); onChanged(); showToast("Doctor assigned to block"); }}
+        />
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+function AssignDoctorModal({ blockId, blockName, currentDoctorIds, onClose, onSaved }) {
+  useModal(onClose);
+  const [available, setAvailable] = useState([]);
+  const [doctorId,  setDoctorId]  = useState("");
+  const [busy,      setBusy]      = useState(false);
+  const [err,       setErr]       = useState("");
+
+  useEffect(() => {
+    api.mgrUsers().then((r) => {
+      setAvailable((r.users || []).filter((u) => u.role === "DOCTOR" && !currentDoctorIds.includes(u.id)));
+    }).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    if (!doctorId) { setErr("Select a doctor"); return; }
+    setBusy(true);
+    try {
+      await api.mgrEditDoctorBlock(blockId, { doctorIds: [...currentDoctorIds, Number(doctorId)] });
+      onSaved();
+    } catch (e) { setErr(friendlyError(e).message); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 17 }}>Assign Doctor to {blockName}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Doctor (not yet in this block)</label>
+          <select className="field" value={doctorId} onChange={(e) => setDoctorId(e.target.value)}>
+            <option value="">— Select doctor —</option>
+            {available.map((d) => (
+              <option key={d.id} value={d.id}>{d.name} (@{d.username}){d.status === "inactive" ? " · inactive" : ""}</option>
+            ))}
+          </select>
+          {available.length === 0 && (
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              All doctors are already in this block.
+            </div>
+          )}
+
+          {err && (
+            <div style={{
+              background: "var(--red-bg, #FEF2F2)", color: "var(--red, #DC2626)",
+              padding: "9px 12px", borderRadius: 8, fontSize: 13, margin: "12px 0 0",
+            }}>{err}</div>
+          )}
+
+          <div style={{ height: 16 }} />
+          <button className="btn btn-primary btn-block"
+            disabled={busy || available.length === 0} onClick={save}>
+            {busy ? "Assigning…" : "Assign to Block"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DoctorBlockEditor({ block, allWards, allDoctors, onClose, onSaved, showToast }) {
+  useModal(onClose);
+  const isNew = !block;
+  const [name,        setName]        = useState(block?.name        || "");
+  const [description, setDescription] = useState(block?.description || "");
+  const [wardIds,     setWardIds]     = useState(block?.wards ? block.wards.map((w) => w.id) : []);
+  const [doctorIds,   setDoctorIds]   = useState(block?.doctors ? block.doctors.map((d) => d.id) : []);
+  const [showPicker,  setShowPicker]  = useState(false);
+  const [busy,        setBusy]        = useState(false);
+
+  const pickedWards = allWards.filter((w) => wardIds.includes(w.id));
+  const toggleDoctor = (id) => setDoctorIds((ids) => ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Doctor Block name required"); return; }
+    setBusy(true);
+    try {
+      if (isNew) await api.mgrCreateDoctorBlock({ name: name.trim(), description: description.trim() || undefined, wardIds, doctorIds });
+      else       await api.mgrEditDoctorBlock(block.id, { name: name.trim(), description: description.trim() || null, wardIds, doctorIds });
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  return (
+    <>
+      <div className="overlay" onClick={onClose}>
+        <div className="sheet" role="dialog" aria-modal="true" style={{ maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+          <div className="grab" />
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            <div className="pad">
+              <div className="row between" style={{ marginBottom: 14 }}>
+                <div className="h1" style={{ fontSize: 18 }}>{isNew ? "New Doctor Block" : `Edit "${block.name}"`}</div>
+                <button className="chip" onClick={onClose}>Close</button>
+              </div>
+
+              <label className="label">Doctor Block name</label>
+              <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. ICU Block, Emergency Block" maxLength={100} autoFocus />
+              <div style={{ height: 12 }} />
+
+              <label className="label">Description <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
+              <textarea className="field" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. All ICU wards for doctor updates" maxLength={500} style={{ resize: "none", overflowWrap: "anywhere" }} />
+              <div className="dim" style={{ fontSize: 11, textAlign: "right", marginTop: 4 }}>{description.length}/500</div>
+              <div style={{ height: 16 }} />
+
+              <div className="row between" style={{ marginBottom: 8 }}>
+                <label className="label" style={{ margin: 0 }}>
+                  Assigned Wards <span style={{ color: "var(--teal)", fontSize: 12, marginLeft: 4 }}>
+                    {wardIds.length === 0 ? "(none yet)" : `(${wardIds.length} selected)`}
+                  </span>
+                </label>
+                <button className="chip" style={{ fontSize: 12 }} onClick={() => setShowPicker(true)}>
+                  {wardIds.length === 0 ? "Select wards" : "Change"}
+                </button>
+              </div>
+              {pickedWards.length === 0 ? (
+                <div style={{ padding: 16, borderRadius: 10, border: "2px dashed var(--line)", textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
+                  No wards selected — you can add them later too.
+                </div>
+              ) : (
+                <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", marginBottom: 4 }}>
+                  {pickedWards.map((w, i) => (
+                    <div key={w.id} style={{ padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, borderBottom: i < pickedWards.length - 1 ? "1px solid var(--line)" : "none" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{w.name}</div>
+                        <div className="dim" style={{ fontSize: 11 }}>{[w.block_name && `Block ${w.block_name}`, w.floor_name].filter(Boolean).join(" · ")}</div>
+                      </div>
+                      <button className="chip" style={{ fontSize: 11, color: "var(--red)", padding: "2px 8px" }} onClick={() => setWardIds((ids) => ids.filter((id) => id !== w.id))}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ height: 16 }} />
+
+              <label className="label">Assigned Doctors <span className="dim" style={{ fontSize: 11 }}>({doctorIds.length} selected)</span></label>
+              {allDoctors.length === 0 ? (
+                <div style={{ padding: "10px 14px", borderRadius: 10, background: "#fff8e1", border: "1px solid #f0c040", fontSize: 13, color: "#7a5c00" }}>
+                  No doctors yet — create Doctor users first.
+                </div>
+              ) : (
+                <div style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
+                  {allDoctors.map((d, i) => {
+                    const on = doctorIds.includes(d.id);
+                    return (
+                      <button key={d.id} onClick={() => toggleDoctor(d.id)} style={{ width: "100%", textAlign: "left", padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, background: on ? "var(--teal-bg, #e6f7f5)" : "transparent", border: "none", borderBottom: i < allDoctors.length - 1 ? "1px solid var(--line)" : "none", cursor: "pointer" }}>
+                        <span style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${on ? "var(--teal)" : "var(--line)"}`, background: on ? "var(--teal)" : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {on && <Ic d={icons.check} s={12} />}
+                        </span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</div>
+                          <div className="dim" style={{ fontSize: 11 }}>@{d.username}{d.status === "inactive" ? " · inactive" : ""}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div style={{ height: 20 }} />
+              <button className="btn btn-primary btn-block" disabled={busy || !name.trim()} onClick={save}>
+                {busy ? "Saving…" : isNew ? "Create Doctor Block" : "Save changes"}
+              </button>
+              <div style={{ height: 14 }} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showPicker && (
+        <WardPickerModal allWards={allWards} selectedIds={wardIds}
+          onClose={() => setShowPicker(false)}
+          onDone={(ids) => { setWardIds(ids); setShowPicker(false); }} />
+      )}
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DOCTOR USERS MANAGER
+// ══════════════════════════════════════════════════════════════════════════════
+export function DoctorManager({ showToast }) {
+  const [users,   setUsers]   = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async () => {
+    try {
+      const u = await api.mgrUsers();
+      setUsers((u.users || []).filter((x) => x.role === "DOCTOR"));
+    } catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 4 }}>
+        <div className="h1" style={{ fontSize: 18 }}>Doctor users</div>
+        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }} onClick={() => setEditing("new")}>
+          <Ic d={icons.stethoscope} s={15} /> Add Doctor
+        </button>
+      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+        Doctors update individual beds in their assigned Doctor Blocks. Blocks are assigned separately.
+      </div>
+
+      {users.map((u) => (
+        <div className="card" key={u.id} style={{ padding: 14, marginBottom: 10 }}>
+          <div className="row between">
+            <div className="row" style={{ gap: 10 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: u.status === "inactive" ? "var(--panel-3, #ccc)" : "var(--teal)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Ic d={icons.stethoscope} s={18} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
+                <div className="dim" style={{ fontSize: 11 }}>
+                  @{u.username}{u.remarks ? <> · {u.remarks}</> : ""}
+                </div>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <span className={"tag " + (u.status === "inactive" ? "" : "v")} style={u.status === "inactive" ? { color: "var(--red)" } : undefined}>
+                {u.status === "inactive" ? "Inactive" : "Active"}
+              </span>
+              <button className="chip" onClick={() => setEditing(u)}>Edit</button>
+              <button className="chip" style={{ color: "var(--red)" }}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: `Delete user "${u.name}"?`,
+                    message: `Username: ${u.username}\n\nThey lose access immediately and are removed from all Doctor Blocks. Past bed-update history is kept.\n\nThis cannot be undone.`,
+                    confirmLabel: "Delete user", danger: true,
+                  });
+                  if (!ok) return;
+                  try { await api.mgrDeleteDoctor(u.id); load(); showToast(`User "${u.name}" deleted`); }
+                  catch (e) { showToast(toastErr(e)); }
+                }}>Del</button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {users.length === 0 && (
+        <div className="card empty" style={{ marginTop: 14 }}>
+          <Ic d={icons.stethoscope} s={28} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No Doctor users yet</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>Add a Doctor account above.</div>
+        </div>
+      )}
+
+      {editing !== null && (
+        <DoctorEditor user={editing === "new" ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); showToast("Saved ✓"); }}
+          showToast={showToast} />
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+function DoctorEditor({ user, onClose, onSaved, showToast }) {
+  useModal(onClose);
+  const isNew = !user;
+  const [username, setUsername] = useState(user?.username || "");
+  const [name,     setName]     = useState(user?.name     || "");
+  const [password, setPassword] = useState("");
+  const [showPwd,  setShowPwd]  = useState(false);
+  const [status,   setStatus]   = useState(user?.status   || "active");
+  const [remarks,  setRemarks]  = useState(user?.remarks  || "");
+  const [busy,     setBusy]     = useState(false);
+
+  const strong = (p) => p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p);
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Display name is required."); return; }
+    if (isNew) {
+      const uname = username.trim().toLowerCase();
+      if (!uname) { showToast("Username is required."); return; }
+      if (!/^[a-z0-9_]+$/.test(uname)) { showToast("Username can only contain letters, numbers, and underscores."); return; }
+      if (!strong(password)) { showToast("Password must be ≥8 chars with a letter and a number."); return; }
+    } else if (password && !strong(password)) {
+      showToast("New password must be ≥8 chars with a letter and a number."); return;
+    }
+    setBusy(true);
+    try {
+      if (isNew) {
+        await api.mgrCreateDoctor({ username: username.trim().toLowerCase(), password, name: name.trim(), status, remarks: remarks.trim() || undefined });
+      } else {
+        const data = { name: name.trim(), status, remarks: remarks.trim() || null };
+        if (password) data.password = password;
+        await api.mgrEditDoctor(user.id, data);
+      }
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>{isNew ? "New Doctor" : "Edit " + user.name}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Display name</label>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Dr Kumar" maxLength={80} autoFocus />
+          <div style={{ height: 12 }} />
+
+          {isNew && (
+            <>
+              <label className="label">Username <span className="dim" style={{ fontSize: 11 }}>(for login)</span></label>
+              <input className="field" value={username} autoCapitalize="none" onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="dr_kumar" maxLength={40} />
+              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>Letters, numbers, and underscores only.</div>
+              <div style={{ height: 12 }} />
+            </>
+          )}
+
+          <label className="label">{isNew ? "Password" : "New password (blank = keep current)"}</label>
+          <div style={{ position: "relative" }}>
+            <input className="field" type={showPwd ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="≥8 chars, a letter and a number" maxLength={72} style={{ paddingRight: 42 }} />
+            <button type="button" onClick={() => setShowPwd((v) => !v)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--ink-3)", display: "flex", alignItems: "center" }} aria-label={showPwd ? "Hide password" : "Show password"}>
+              <Ic d={showPwd ? icons.eyeOff : icons.eye} s={18} />
+            </button>
+          </div>
+          <div style={{ height: 12 }} />
+
+          <label className="label">Status</label>
+          <div className="seg">
+            <button className={status === "active" ? "on" : ""} onClick={() => setStatus("active")}>Active</button>
+            <button className={status === "inactive" ? "on" : ""} onClick={() => setStatus("inactive")}>Inactive</button>
+          </div>
+          <div style={{ height: 12 }} />
+
+          <label className="label">Remarks <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
+          <textarea className="field" rows={3} value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="e.g. Cardiology consultant" maxLength={500} style={{ resize: "none", overflowWrap: "anywhere" }} />
+          <div className="dim" style={{ fontSize: 11, textAlign: "right", marginTop: 4 }}>{remarks.length}/500</div>
+
+          <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
+            {busy ? "Saving…" : isNew ? "Create Doctor" : "Save changes"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
     </div>
   );
 }

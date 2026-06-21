@@ -26,21 +26,38 @@ const BedCard = React.memo(function BedCard({ bed, onClick }) {
           {bed.payer_type}
         </span>
       )}
+      {bed.reservation_status === "RESERVED" && bed.physical_status === "OCCUPIED" && bed.destination && (
+        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--st-or)", lineHeight: 1.1,
+          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          → {bed.destination}
+        </span>
+      )}
+      {bed.reservation_status === "RESERVED" && bed.physical_status === "VACANT" && bed.reservation_note && (
+        <span title={bed.reservation_note} style={{ fontSize: 9, fontWeight: 700, color: "var(--st-vr)", lineHeight: 1.1,
+          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          📝 {bed.reservation_note}
+        </span>
+      )}
     </div>
   );
 });
 
 // ── Bed status dialog — centered popup ────────────────────────────────────────
 function BedDetailSheet({ bed, onSave, onClose }) {
-  const [physical,    setPhysical]    = useState(bed.physical_status);
-  const [reservation, setReservation] = useState(bed.reservation_status);
-  const [payer,       setPayer]       = useState(bed.payer_type || "");
-  const [payerTypes,  setPayerTypes]  = useState([]);
-  const [saving,      setSaving]      = useState(false);
+  const [physical,     setPhysical]     = useState(bed.physical_status);
+  const [reservation,  setReservation]  = useState(bed.reservation_status);
+  const [payer,        setPayer]        = useState(bed.payer_type || "");
+  const [payerTypes,   setPayerTypes]   = useState([]);
+  const [destination,  setDestination]  = useState(bed.destination || "");
+  const [destinations, setDestinations] = useState([]);
+  const [resNote,      setResNote]      = useState(bed.reservation_note || "");
+  const [saving,       setSaving]       = useState(false);
+  const [noteOpen,     setNoteOpen]     = useState(false);
   const color = bedStateColor(physical, reservation);
 
   useEffect(() => {
     api.nursePayerTypes().then(r => setPayerTypes(r.payerTypes || [])).catch(() => {});
+    api.nurseDestinations().then(r => setDestinations(r.destinations || [])).catch(() => {});
   }, []);
 
   // When switching to VACANT clear the payer selection
@@ -53,13 +70,26 @@ function BedDetailSheet({ bed, onSave, onClose }) {
   // If bed was already occupied+reserved (patient in OT), payer was set on admission
   const payerLocked = physical === "OCCUPIED" && reservation === "RESERVED" && bed.physical_status === "OCCUPIED";
 
+  // OCC+RES = patient temporarily away at a destination (OT, Scanning) — bed
+  // held for them. Destination is required to enter/stay in this state.
+  const needsDestination = physical === "OCCUPIED" && reservation === "RESERVED";
+
+  // VAC+RES = bed held for an incoming patient (transfer, scheduled admission).
+  // Note describing why is required.
+  const needsResNote = physical === "VACANT" && reservation === "RESERVED";
+  const showResNote = needsResNote;
+
   const handleSave = async () => {
     if (needsPayer && !payer && !payerLocked) return;
+    if (needsDestination && !destination) return;
+    if (needsResNote && !resNote.trim()) return;
     setSaving(true);
     // pass payer as null when vacating so backend clears it; undefined when locked (no change)
     const payerArg = physical === "VACANT" ? null : (payerLocked && payer === (bed.payer_type || "") ? undefined : payer || null);
+    const destinationArg = needsDestination ? destination : undefined;
+    const resNoteArg = showResNote ? resNote : undefined;
     try {
-      await onSave(bed.id, physical, reservation, payerArg);
+      await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg);
       onClose();
     } catch { /* parent shows toast */ }
     finally { setSaving(false); }
@@ -116,6 +146,43 @@ function BedDetailSheet({ bed, onSave, onClose }) {
             </div>
           </div>
 
+          {/* Read-only callouts — always reflect what's actually saved on the bed
+              right now, regardless of which toggle is currently selected below. */}
+          {bed.physical_status === "OCCUPIED" && bed.reservation_status === "RESERVED" && bed.destination && (
+            <div style={{
+              background: "var(--st-or-bg, rgba(255,59,138,.1))", border: "1px solid var(--st-or)",
+              borderRadius: 10, padding: "10px 12px", marginBottom: 16,
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--st-or)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>
+                Sent to
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", wordBreak: "break-word", overflowWrap: "anywhere" }}>{bed.destination}</div>
+            </div>
+          )}
+          {bed.physical_status === "VACANT" && bed.reservation_status === "RESERVED" && bed.reservation_note && (
+            <div onClick={() => setNoteOpen(o => !o)} role="button" tabIndex={0}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setNoteOpen(o => !o)}
+              style={{
+                background: "var(--st-vr-bg, rgba(124,58,237,.1))", border: "1px solid var(--st-vr)",
+                borderRadius: 10, padding: "10px 12px", marginBottom: 16, cursor: "pointer",
+              }}>
+              <div className="row between" style={{ alignItems: "baseline" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--st-vr)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>
+                  Reservation Note
+                </div>
+                <span className="dim" style={{ fontSize: 10, flexShrink: 0 }}>{noteOpen ? "tap to collapse" : "tap to view full"}</span>
+              </div>
+              <div style={{
+                fontSize: 13, fontWeight: 600, color: "var(--ink)",
+                wordBreak: "break-word", overflowWrap: "anywhere",
+                display: noteOpen ? "block" : "-webkit-box",
+                WebkitLineClamp: noteOpen ? "unset" : 2,
+                WebkitBoxOrient: "vertical",
+                overflow: noteOpen ? "visible" : "hidden",
+              }}>{bed.reservation_note}</div>
+            </div>
+          )}
+
           {/* Physical status */}
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
@@ -154,6 +221,22 @@ function BedDetailSheet({ bed, onSave, onClose }) {
             </div>
           </div>
 
+          {/* Reservation note — shown only for Vacant + Reserved (bed held for incoming patient) */}
+          {showResNote && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+                Note <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+              </div>
+              <textarea className="field" value={resNote} maxLength={255} rows={2}
+                placeholder="e.g. Reserved for incoming transfer from ICU"
+                onChange={(e) => setResNote(e.target.value)}
+                style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", wordBreak: "break-word", overflowWrap: "anywhere", borderColor: !resNote.trim() ? "var(--red)" : undefined }} />
+              {!resNote.trim() && (
+                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>A note is required for Vacant + Reserved beds.</div>
+              )}
+            </div>
+          )}
+
           {/* Payer type — shown only when OCCUPIED */}
           {physical === "OCCUPIED" && (
             <div style={{ marginBottom: 24 }}>
@@ -184,13 +267,31 @@ function BedDetailSheet({ bed, onSave, onClose }) {
             </div>
           )}
 
+          {/* Destination — shown only for Occupied + Reserved (patient sent to OT/Scanning etc.) */}
+          {needsDestination && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+                Destination <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+              </div>
+              <select className="field" value={destination}
+                onChange={(e) => setDestination(e.target.value)}
+                style={{ fontSize: 14, borderColor: !destination ? "var(--red)" : undefined }}>
+                <option value="">— Where is the patient going? —</option>
+                {destinations.map(dt => <option key={dt.id} value={dt.name}>{dt.name}</option>)}
+              </select>
+              {!destination && (
+                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Destination is required for Occupied + Reserved beds.</div>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
             <button className="btn btn-ghost" style={{ padding: "10px 18px" }} onClick={onClose}>
               Cancel
             </button>
             <button className="btn btn-primary" style={{ padding: "10px 18px" }}
-              disabled={saving || (needsPayer && !payer && !payerLocked)}
+              disabled={saving || (needsPayer && !payer && !payerLocked) || (needsDestination && !destination) || (needsResNote && !resNote.trim())}
               onClick={handleSave}>
               {saving ? "Saving…" : "Update Status"}
             </button>
@@ -245,10 +346,17 @@ function NurseBedModal({ ward, onSave, onClose }) {
     if (b.reservation_status === "RESERVED") fc["Reserved"]++;
   }
 
-  const handleSave = async (bedId, physical, reservation, payer) => {
-    await onSave(bedId, physical, reservation, payer);
+  const handleSave = async (bedId, physical, reservation, payer, destination, reservationNote) => {
+    await onSave(bedId, physical, reservation, payer, destination, reservationNote);
+    const stillOccRes = physical === "OCCUPIED" && reservation === "RESERVED";
+    const stillVacRes = physical === "VACANT" && reservation === "RESERVED";
     setBeds(prev => prev.map(b =>
-      b.id !== bedId ? b : { ...b, physical_status: physical, reservation_status: reservation, payer_type: physical === "VACANT" ? null : (payer !== undefined ? payer : b.payer_type) }
+      b.id !== bedId ? b : {
+        ...b, physical_status: physical, reservation_status: reservation,
+        payer_type: physical === "VACANT" ? null : (payer !== undefined ? payer : b.payer_type),
+        destination: stillOccRes ? (destination !== undefined ? destination : b.destination) : null,
+        reservation_note: stillVacRes ? (reservationNote !== undefined ? reservationNote : b.reservation_note) : null,
+      }
     ));
   };
 
@@ -547,9 +655,9 @@ export default function NurseApp({ user, onLogout }) {
     }
   }, [modalWardId, modalWard, wards]);
 
-  const handleSave = async (bedId, physical, reservation, payer) => {
+  const handleSave = async (bedId, physical, reservation, payer, destination, reservationNote) => {
     try {
-      await api.nurseUpdateBedStatus(bedId, physical, reservation, payer);
+      await api.nurseUpdateBedStatus(bedId, physical, reservation, payer, destination, reservationNote);
       showToast("Saved");
     } catch (e) { showToast(toastErr(e)); }
   };
