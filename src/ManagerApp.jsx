@@ -2132,7 +2132,7 @@ function GenerateBedForm({
 // ══════════════════════════════════════════════════════════════════════════════
 
 /** Ward row as returned by GET /manager/wards — used in the picker */
-function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStationId }) {
+function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStationId, currentDoctorBlockId }) {
   useModal(onClose);
   const [search,   setSearch]   = useState("");
   const [selected, setSelected] = useState(new Set(selectedIds));
@@ -2160,6 +2160,11 @@ function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStatio
     const w = allWards.find(x => x.id === id);
     return w?.station_id && w.station_id !== currentStationId;
   });
+
+  // Only relevant when called from DoctorBlockEditor — a ward can belong to only
+  // ONE Doctor Block, and unlike stations the backend hard-rejects a move, so
+  // these are shown disabled rather than just warned-about.
+  const blockContext = currentDoctorBlockId !== undefined;
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -2195,9 +2200,12 @@ function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStatio
           {filtered.map(w => {
             const on = selected.has(w.id);
             const inOtherStation = stationContext && w.station_id && w.station_id !== currentStationId;
+            const inOtherBlock = blockContext && w.doctor_block_id && w.doctor_block_id !== currentDoctorBlockId;
             return (
-              <div key={w.id} onClick={() => toggle(w.id)} style={{
-                padding: "11px 12px", marginBottom: 6, borderRadius: 10, cursor: "pointer",
+              <div key={w.id} onClick={() => { if (!inOtherBlock) toggle(w.id); }} style={{
+                padding: "11px 12px", marginBottom: 6, borderRadius: 10,
+                cursor: inOtherBlock ? "not-allowed" : "pointer",
+                opacity: inOtherBlock ? 0.6 : 1,
                 border: `2px solid ${on ? (inOtherStation ? "#f0a500" : "var(--teal)") : "var(--line)"}`,
                 background: on ? (inOtherStation ? "#fff8e1" : "var(--teal-bg, #e6f7f5)") : "var(--panel-2)",
                 display: "flex", alignItems: "flex-start", gap: 10,
@@ -2217,6 +2225,12 @@ function WardPickerModal({ allWards, selectedIds, onDone, onClose, currentStatio
                         fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 20,
                         background: "#fff0c0", color: "#7a5900", border: "1px solid #e0c040",
                       }}>In {w.station_name}</span>
+                    )}
+                    {inOtherBlock && (
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 20,
+                        background: "#fde2e2", color: "#a01818", border: "1px solid #e08080",
+                      }}>Already in {w.doctor_block_name}</span>
                     )}
                   </div>
                   <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
@@ -3035,9 +3049,9 @@ export function NurseManager({ showToast }) {
                   @{n.username}
                   {n.employee_id && <> · {n.employee_id}</>}
                   {(() => {
-                    const stName = stations.find((s) => s.id === n.station_id)?.name || n.nursing_station;
-                    return stName
-                      ? <> · <span style={{ color: "var(--teal)" }}>{stName}</span></>
+                    const names = n.station_names?.length ? n.station_names : (n.nursing_station ? [n.nursing_station] : []);
+                    return names.length
+                      ? <> · <span style={{ color: "var(--teal)" }}>{names.join(", ")}</span></>
                       : <> · <span style={{ color: "var(--amber)" }}>no station</span></>;
                   })()}
                 </div>
@@ -3095,7 +3109,8 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
   const [name,       setName]       = useState(nurse?.name        || "");
   const [password,   setPassword]   = useState("");
   const [showPwd,    setShowPwd]    = useState(false);
-  const [stationId,  setStationId]  = useState(String(nurse?.station_id || ""));
+  const initialPrimaryId = nurse?.station_id || "";
+  const [stationId,  setStationId]  = useState(String(initialPrimaryId));
   const [employeeId, setEmployeeId] = useState(nurse?.employee_id || "");
   const [phone,      setPhone]      = useState(nurse?.phone       || "");
   const [email,      setEmail]      = useState(nurse?.email       || "");
@@ -3122,19 +3137,25 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
       if (isNew) {
         await api.mgrCreateNurse({
           username: username.trim().toLowerCase(), password, name: name.trim(),
-          stationId: sid,
+          stationIds: sid ? [sid] : [],
           employeeId: employeeId.trim() || undefined,
           phone: phone.trim() || undefined,
           email: email.trim() || undefined,
         });
       } else {
-        const data = { name: name.trim(), stationId: sid,
+        const data = { name: name.trim(),
           employeeId: employeeId.trim() || undefined,
           phone: phone.trim() || undefined,
           email: email.trim() || undefined,
         };
         if (password) data.password = password;
         await api.mgrEditNurse(nurse.id, data);
+        // Swap only the primary station here — other stations this nurse covers
+        // (assigned from a station's own page) are left untouched.
+        if (sid !== (initialPrimaryId || null)) {
+          if (initialPrimaryId) await api.mgrRemoveNurseStation(nurse.id, initialPrimaryId);
+          if (sid) await api.mgrAddNurseStation(nurse.id, sid);
+        }
       }
       onSaved();
     } catch (e) { showToast(toastErr(e)); setBusy(false); }
@@ -3193,6 +3214,14 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
           ) : (
             <div className="field" style={{ color: "var(--ink-3)", fontStyle: "italic" }}>
               No stations yet — create one in the Stations tab first.
+            </div>
+          )}
+          {!isNew && nurse?.station_ids?.length > 1 && (
+            <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+              Also covers: {nurse.station_ids
+                .map((id, i) => (id === Number(initialPrimaryId) ? null : nurse.station_names[i]))
+                .filter(Boolean).join(", ")}.
+              Manage extra stations from each station's page.
             </div>
           )}
           <div style={{ height: 12 }} />
@@ -3462,7 +3491,7 @@ function StationDetail({ station, onBack, showToast }) {
   const loadNurses = async () => {
     try {
       const u = await api.mgrUsers();
-      setNurses((u.users || []).filter((x) => x.role === "NURSE" && x.station_id === stationData.id));
+      setNurses((u.users || []).filter((x) => x.role === "NURSE" && x.station_ids?.includes(stationData.id)));
     } catch (e) { showToast(toastErr(e)); }
   };
 
@@ -3488,7 +3517,7 @@ function StationDetail({ station, onBack, showToast }) {
     });
     if (!ok) return;
     try {
-      await api.mgrSetNurseStation(n.id, null);
+      await api.mgrRemoveNurseStation(n.id, stationData.id);
       loadNurses();
       showToast(`${n.name} removed from station`);
     } catch (e) { showToast(toastErr(e)); }
@@ -3618,7 +3647,7 @@ function AssignNurseModal({ stationId, stationName, onClose, onSaved, showToast 
 
   useEffect(() => {
     api.mgrUsers().then((r) => {
-      setUnassigned((r.users || []).filter((u) => u.role === "NURSE" && !u.station_id));
+      setUnassigned((r.users || []).filter((u) => u.role === "NURSE" && !u.station_ids?.includes(stationId)));
     }).catch(() => {});
   }, []);
 
@@ -3626,7 +3655,7 @@ function AssignNurseModal({ stationId, stationName, onClose, onSaved, showToast 
     if (!nurseId) { setErr("Select a nurse"); return; }
     setBusy(true);
     try {
-      await api.mgrSetNurseStation(Number(nurseId), stationId);
+      await api.mgrAddNurseStation(Number(nurseId), stationId);
       onSaved();
     } catch (e) { setErr(friendlyError(e).message); setBusy(false); }
   };
@@ -3641,18 +3670,16 @@ function AssignNurseModal({ stationId, stationName, onClose, onSaved, showToast 
             <button className="chip" onClick={onClose}>Close</button>
           </div>
 
-          <label className="label">Nurse (unassigned)</label>
+          <label className="label">Nurse</label>
           <select className="field" value={nurseId} onChange={(e) => setNurseId(e.target.value)}>
             <option value="">— Select nurse —</option>
             {unassigned.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name} (@{n.username}){n.employee_id ? ` · ${n.employee_id}` : ""}
-              </option>
+              <option key={n.id} value={n.id}>{n.name}</option>
             ))}
           </select>
           {unassigned.length === 0 && (
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-              All nurses are already assigned to a station.
+              Every nurse is already assigned to this station.
             </div>
           )}
 
@@ -3875,9 +3902,15 @@ function NurseAccessModal({ assignment, onClose, onSaved, showToast, stationId }
   const [loadBeds,  setLoadBeds]  = useState(false);
 
   const [nurseId,   setNurseId]   = useState(assignment?.nurse_id  ? String(assignment.nurse_id)  : "");
+  // Edit mode: single ward (you're editing one specific existing row)
   const [wardId,    setWardId]    = useState(assignment?.ward_id   ? String(assignment.ward_id)   : "");
   const [accType,   setAccType]   = useState(assignment?.access_type || "FULL");
   const [selBeds,   setSelBeds]   = useState(new Set(assignment?.bed_names || []));
+  // New mode: pick multiple wards, each with its own access type / bed list
+  const [pickedWardIds,  setPickedWardIds]  = useState(new Set());
+  const [wardConfigs,    setWardConfigs]    = useState({}); // { [wardId]: { accessType, bedNames: Set } }
+  const [wardBedsCache,  setWardBedsCache]  = useState({}); // { [wardId]: beds[] }
+  const [loadingBedsFor, setLoadingBedsFor] = useState(null);
   const [status,    setStatus]    = useState(assignment?.status || "active");
   const [busy,      setBusy]      = useState(false);
   const [err,       setErr]       = useState("");
@@ -3885,22 +3918,26 @@ function NurseAccessModal({ assignment, onClose, onSaved, showToast, stationId }
   useEffect(() => {
     Promise.all([api.mgrUsers(), api.mgrWards()]).then(([u, w]) => {
       let allNurses = (u.users || []).filter((x) => x.role === "NURSE");
-      if (stationId != null) allNurses = allNurses.filter((x) => x.station_id === stationId);
+      if (stationId != null) allNurses = allNurses.filter((x) => x.station_ids?.includes(stationId));
       setNurses(allNurses);
-      let stationWards = (w.wards || []).filter((x) => x.operational !== false);
+      // Access can be granted regardless of operational status — a non-operational
+      // ward still belongs to the station and may need a nurse assigned ahead of
+      // reopening, so don't hide it from this picker.
+      let stationWards = w.wards || [];
       if (stationId != null) stationWards = stationWards.filter((x) => x.station_id === stationId);
       setWards(stationWards);
     }).catch(() => {});
   }, []);
 
+  // Edit-mode bed list (single ward)
   useEffect(() => {
-    if (!wardId || accType !== "BEDS") { setBeds([]); return; }
+    if (isNew || !wardId || accType !== "BEDS") { setBeds([]); return; }
     setLoadBeds(true);
     api.wardBeds(Number(wardId))
       .then((r) => setBeds(r.beds || []))
       .catch(() => {})
       .finally(() => setLoadBeds(false));
-  }, [wardId, accType]);
+  }, [isNew, wardId, accType]);
 
   const toggleBed = (name) => setSelBeds((prev) => {
     const n = new Set(prev);
@@ -3908,19 +3945,79 @@ function NurseAccessModal({ assignment, onClose, onSaved, showToast, stationId }
     return n;
   });
 
+  // New-mode: multi-ward picking + per-ward config
+  const loadBedsForWard = (id) => {
+    if (wardBedsCache[id]) return;
+    setLoadingBedsFor(id);
+    api.wardBeds(id)
+      .then((r) => setWardBedsCache((c) => ({ ...c, [id]: r.beds || [] })))
+      .catch(() => {})
+      .finally(() => setLoadingBedsFor(null));
+  };
+
+  const toggleWard = (id) => {
+    setPickedWardIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) {
+        n.delete(id);
+        setWardConfigs((wc) => { const c = { ...wc }; delete c[id]; return c; });
+      } else {
+        n.add(id);
+        setWardConfigs((wc) => ({ ...wc, [id]: { accessType: "FULL", bedNames: new Set() } }));
+      }
+      return n;
+    });
+  };
+
+  const setWardAccessType = (id, type) => {
+    setWardConfigs((wc) => ({ ...wc, [id]: { accessType: type, bedNames: new Set() } }));
+    if (type === "BEDS") loadBedsForWard(id);
+  };
+
+  const toggleWardBed = (wardId, bedName) => {
+    setWardConfigs((wc) => {
+      const cfg = wc[wardId] || { accessType: "BEDS", bedNames: new Set() };
+      const nextBeds = new Set(cfg.bedNames);
+      nextBeds.has(bedName) ? nextBeds.delete(bedName) : nextBeds.add(bedName);
+      return { ...wc, [wardId]: { ...cfg, bedNames: nextBeds } };
+    });
+  };
+
   const save = async () => {
     setErr("");
     if (!nurseId) { setErr("Select a nurse"); return; }
+
+    if (isNew) {
+      if (pickedWardIds.size === 0) { setErr("Select at least one ward"); return; }
+      for (const id of pickedWardIds) {
+        const cfg = wardConfigs[id];
+        if (cfg.accessType === "BEDS" && cfg.bedNames.size === 0) {
+          setErr(`Select at least one bed for "${wards.find((w) => w.id === id)?.name}"`);
+          return;
+        }
+      }
+      setBusy(true);
+      try {
+        for (const id of pickedWardIds) {
+          const cfg = wardConfigs[id];
+          await api.mgrCreateNurseAccess({
+            nurseId: Number(nurseId), wardId: id,
+            accessType: cfg.accessType, bedNames: [...cfg.bedNames], status,
+          });
+        }
+        onSaved();
+      } catch (e) {
+        setErr(e?.message || "Save failed");
+        setBusy(false);
+      }
+      return;
+    }
+
     if (!wardId)  { setErr("Select a ward");  return; }
     if (accType === "BEDS" && selBeds.size === 0) { setErr("Select at least one bed"); return; }
     setBusy(true);
     try {
-      const body = { accessType: accType, bedNames: [...selBeds], status };
-      if (isNew) {
-        await api.mgrCreateNurseAccess({ nurseId: Number(nurseId), wardId: Number(wardId), ...body });
-      } else {
-        await api.mgrEditNurseAccess(assignment.id, body);
-      }
+      await api.mgrEditNurseAccess(assignment.id, { accessType: accType, bedNames: [...selBeds], status });
       onSaved();
     } catch (e) {
       setErr(e?.message || "Save failed");
@@ -3952,109 +4049,224 @@ function NurseAccessModal({ assignment, onClose, onSaved, showToast, stationId }
             style={!isNew ? { opacity: 0.6 } : {}}>
             <option value="">— Select nurse —</option>
             {nurses.map((n) => (
-              <option key={n.id} value={n.id}>
-                {n.name} (@{n.username}){n.nursing_station ? ` · ${n.nursing_station}` : ""}
-              </option>
+              <option key={n.id} value={n.id}>{n.name}</option>
             ))}
           </select>
           <div style={{ height: 14 }} />
 
-          {/* Ward */}
-          <label className="label">Ward</label>
-          <select className="field" value={wardId}
-            onChange={(e) => { setWardId(e.target.value); setSelBeds(new Set()); }}
-            disabled={!isNew}
-            style={!isNew ? { opacity: 0.6 } : {}}>
-            <option value="">— Select ward —</option>
-            {wards.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}{w.block_name ? ` · Block ${w.block_name}` : ""}{w.floor_name ? ` · ${w.floor_name}` : ""}
-              </option>
-            ))}
-          </select>
-          <div style={{ height: 14 }} />
-
-          {/* Access type */}
-          <label className="label">Access Type</label>
-          <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-            {[["FULL", "Full Ward Access"], ["BEDS", "Selected Beds"]].map(([val, label]) => (
-              <label key={val} style={{
-                flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
-                padding: "9px 12px", borderRadius: 10, border: "1.5px solid",
-                borderColor: accType === val ? "var(--primary)" : "var(--line)",
-                background: accType === val ? "var(--primary-bg, #EFF6FF)" : "var(--panel-2)",
-                fontWeight: accType === val ? 600 : 400, fontSize: 13,
-              }}>
-                <input type="radio" name="accType" value={val}
-                  checked={accType === val}
-                  onChange={() => { setAccType(val); setSelBeds(new Set()); }}
-                  style={{ accentColor: "var(--primary)" }} />
-                {label}
+          {/* Ward(s) */}
+          {isNew ? (
+            <>
+              <label className="label">
+                Wards
+                {pickedWardIds.size > 0 && (
+                  <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{pickedWardIds.size} selected</span>
+                )}
               </label>
-            ))}
-          </div>
-
-          {/* Bed picker (BEDS only) */}
-          {accType === "BEDS" && wardId && (
-            <div style={{ marginBottom: 14 }}>
-              <div className="row between" style={{ marginBottom: 8 }}>
-                <label className="label" style={{ margin: 0 }}>
-                  Select Beds
-                  {selBeds.size > 0 && (
-                    <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{selBeds.size} selected</span>
-                  )}
-                  {selWard && (
-                    <span className="dim" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
-                      ({selWard.name})
-                    </span>
-                  )}
-                </label>
-                <div className="row" style={{ gap: 6 }}>
-                  <button className="chip" style={{ fontSize: 11 }}
-                    onClick={() => setSelBeds(new Set(beds.map((b) => b.bed_name)))}>
-                    Select all
-                  </button>
-                  <button className="chip" style={{ fontSize: 11, color: "var(--ink-3)" }}
-                    onClick={() => setSelBeds(new Set())}>
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              {loadBeds ? (
-                <div className="dim" style={{ fontSize: 12, padding: "10px 0" }}>Loading beds…</div>
-              ) : beds.length === 0 ? (
-                <div className="dim" style={{ fontSize: 12, padding: "10px 0" }}>
-                  No beds configured for this ward yet.
-                </div>
-              ) : (
-                <div style={{
-                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
-                  gap: 6, maxHeight: 260, overflowY: "auto",
-                  border: "1px solid var(--line)", borderRadius: 10, padding: 10,
-                }}>
-                  {beds.map((b) => {
-                    const checked = selBeds.has(b.bed_name);
-                    return (
-                      <label key={b.id} style={{
-                        display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
-                        padding: "6px 8px", borderRadius: 8, fontSize: 12,
-                        background: checked ? "var(--primary-bg, #EFF6FF)" : "var(--panel-2)",
-                        border: "1.5px solid", borderColor: checked ? "var(--primary)" : "var(--line)",
-                        fontWeight: checked ? 600 : 400,
-                      }}>
-                        <input type="checkbox" checked={checked}
-                          onChange={() => toggleBed(b.bed_name)}
-                          style={{ accentColor: "var(--primary)", flexShrink: 0 }} />
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {b.bed_name}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                {wards.map((w) => {
+                  const checked = pickedWardIds.has(w.id);
+                  const cfg = wardConfigs[w.id];
+                  const wBeds = wardBedsCache[w.id] || [];
+                  return (
+                    <div key={w.id} style={{
+                      borderRadius: 10, border: "1.5px solid", padding: "10px 12px",
+                      borderColor: checked ? "var(--teal-deep)" : "var(--line)",
+                      background: checked ? "var(--panel-2)" : "transparent",
+                    }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleWard(w.id)} />
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>
+                          {w.name}{w.block_name ? ` · Block ${w.block_name}` : ""}{w.floor_name ? ` · ${w.floor_name}` : ""}
+                        </span>
+                        <span className="chip" style={{
+                          fontSize: 10,
+                          color: w.operational === false ? "var(--amber)" : "var(--teal)",
+                        }}>
+                          {w.operational === false ? "non-operational" : "operational"}
                         </span>
                       </label>
-                    );
-                  })}
+
+                      {checked && (
+                        <div style={{ marginTop: 10, paddingLeft: 26 }}>
+                          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                            {[["FULL", "Full Ward Access"], ["BEDS", "Selected Beds"]].map(([val, label]) => (
+                              <label key={val} style={{
+                                flex: 1, display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                                padding: "7px 10px", borderRadius: 8, border: "1.5px solid",
+                                borderColor: cfg?.accessType === val ? "var(--primary)" : "var(--line)",
+                                background: cfg?.accessType === val ? "var(--primary-bg, #EFF6FF)" : "var(--panel)",
+                                fontWeight: cfg?.accessType === val ? 600 : 400, fontSize: 12,
+                              }}>
+                                <input type="radio" name={`accType-${w.id}`} value={val}
+                                  checked={cfg?.accessType === val}
+                                  onChange={() => setWardAccessType(w.id, val)}
+                                  style={{ accentColor: "var(--primary)" }} />
+                                {label}
+                              </label>
+                            ))}
+                          </div>
+
+                          {cfg?.accessType === "BEDS" && (
+                            <div>
+                              <div className="row between" style={{ marginBottom: 6 }}>
+                                <span className="dim" style={{ fontSize: 11 }}>
+                                  {cfg.bedNames.size > 0 ? `${cfg.bedNames.size} bed(s) selected` : "Select beds"}
+                                </span>
+                                <div className="row" style={{ gap: 6 }}>
+                                  <button className="chip" style={{ fontSize: 11 }}
+                                    onClick={() => setWardConfigs((wc) => ({ ...wc, [w.id]: { ...wc[w.id], bedNames: new Set(wBeds.map((b) => b.bed_name)) } }))}>
+                                    Select all
+                                  </button>
+                                  <button className="chip" style={{ fontSize: 11, color: "var(--ink-3)" }}
+                                    onClick={() => setWardConfigs((wc) => ({ ...wc, [w.id]: { ...wc[w.id], bedNames: new Set() } }))}>
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                              {loadingBedsFor === w.id ? (
+                                <div className="dim" style={{ fontSize: 12, padding: "6px 0" }}>Loading beds…</div>
+                              ) : wBeds.length === 0 ? (
+                                <div className="dim" style={{ fontSize: 12, padding: "6px 0" }}>
+                                  No beds configured for this ward yet.
+                                </div>
+                              ) : (
+                                <div style={{
+                                  display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
+                                  gap: 5, maxHeight: 180, overflowY: "auto",
+                                  border: "1px solid var(--line)", borderRadius: 8, padding: 8,
+                                }}>
+                                  {wBeds.map((b) => {
+                                    const bChecked = cfg.bedNames.has(b.bed_name);
+                                    return (
+                                      <label key={b.id} style={{
+                                        display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                                        padding: "5px 7px", borderRadius: 7, fontSize: 11,
+                                        background: bChecked ? "var(--primary-bg, #EFF6FF)" : "var(--panel-2)",
+                                        border: "1.5px solid", borderColor: bChecked ? "var(--primary)" : "var(--line)",
+                                        fontWeight: bChecked ? 600 : 400,
+                                      }}>
+                                        <input type="checkbox" checked={bChecked}
+                                          onChange={() => toggleWardBed(w.id, b.bed_name)}
+                                          style={{ accentColor: "var(--primary)", flexShrink: 0 }} />
+                                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                          {b.bed_name}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {wards.length === 0 && (
+                  <div className="dim" style={{ fontSize: 12 }}>No wards available.</div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Ward (edit mode — locked to the row's existing ward) */}
+              <label className="label">Ward</label>
+              <select className="field" value={wardId} disabled style={{ opacity: 0.6 }}>
+                <option value="">— Select ward —</option>
+                {wards.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}{w.block_name ? ` · Block ${w.block_name}` : ""}{w.floor_name ? ` · ${w.floor_name}` : ""}
+                    {w.operational === false ? " · non-operational" : " · operational"}
+                  </option>
+                ))}
+              </select>
+              <div style={{ height: 14 }} />
+
+              {/* Access type */}
+              <label className="label">Access Type</label>
+              <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                {[["FULL", "Full Ward Access"], ["BEDS", "Selected Beds"]].map(([val, label]) => (
+                  <label key={val} style={{
+                    flex: 1, display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                    padding: "9px 12px", borderRadius: 10, border: "1.5px solid",
+                    borderColor: accType === val ? "var(--primary)" : "var(--line)",
+                    background: accType === val ? "var(--primary-bg, #EFF6FF)" : "var(--panel-2)",
+                    fontWeight: accType === val ? 600 : 400, fontSize: 13,
+                  }}>
+                    <input type="radio" name="accType" value={val}
+                      checked={accType === val}
+                      onChange={() => { setAccType(val); setSelBeds(new Set()); }}
+                      style={{ accentColor: "var(--primary)" }} />
+                    {label}
+                  </label>
+                ))}
+              </div>
+
+              {/* Bed picker (BEDS only) */}
+              {accType === "BEDS" && wardId && (
+                <div style={{ marginBottom: 14 }}>
+                  <div className="row between" style={{ marginBottom: 8 }}>
+                    <label className="label" style={{ margin: 0 }}>
+                      Select Beds
+                      {selBeds.size > 0 && (
+                        <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{selBeds.size} selected</span>
+                      )}
+                      {selWard && (
+                        <span className="dim" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
+                          ({selWard.name})
+                        </span>
+                      )}
+                    </label>
+                    <div className="row" style={{ gap: 6 }}>
+                      <button className="chip" style={{ fontSize: 11 }}
+                        onClick={() => setSelBeds(new Set(beds.map((b) => b.bed_name)))}>
+                        Select all
+                      </button>
+                      <button className="chip" style={{ fontSize: 11, color: "var(--ink-3)" }}
+                        onClick={() => setSelBeds(new Set())}>
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  {loadBeds ? (
+                    <div className="dim" style={{ fontSize: 12, padding: "10px 0" }}>Loading beds…</div>
+                  ) : beds.length === 0 ? (
+                    <div className="dim" style={{ fontSize: 12, padding: "10px 0" }}>
+                      No beds configured for this ward yet.
+                    </div>
+                  ) : (
+                    <div style={{
+                      display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))",
+                      gap: 6, maxHeight: 260, overflowY: "auto",
+                      border: "1px solid var(--line)", borderRadius: 10, padding: 10,
+                    }}>
+                      {beds.map((b) => {
+                        const checked = selBeds.has(b.bed_name);
+                        return (
+                          <label key={b.id} style={{
+                            display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
+                            padding: "6px 8px", borderRadius: 8, fontSize: 12,
+                            background: checked ? "var(--primary-bg, #EFF6FF)" : "var(--panel-2)",
+                            border: "1.5px solid", borderColor: checked ? "var(--primary)" : "var(--line)",
+                            fontWeight: checked ? 600 : 400,
+                          }}>
+                            <input type="checkbox" checked={checked}
+                              onChange={() => toggleBed(b.bed_name)}
+                              style={{ accentColor: "var(--primary)", flexShrink: 0 }} />
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {b.bed_name}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
 
           {/* Status (edit only) */}
@@ -4109,21 +4321,26 @@ function NurseAccessManager({ showToast, stationId }) {
     if (stationId != null) {
       api.mgrUsers().then((r) => {
         const ids = new Set(
-          (r.users || []).filter((u) => u.role === "NURSE" && u.station_id === stationId).map((u) => u.id)
+          (r.users || []).filter((u) => u.role === "NURSE" && u.station_ids?.includes(stationId)).map((u) => u.id)
         );
         setStationNurseIds(ids);
       }).catch(() => {});
     }
   }, [stationId]);
 
-  const nurses = [...new Map(assignments.map((a) => [a.nurse_id, a.nurse_name])).entries()]
-    .filter(([id]) => stationNurseIds == null || stationNurseIds.has(id))
+  // A nurse can cover several stations — only show this station's OWN rows:
+  // both the nurse and the ward in the row must belong to this station,
+  // otherwise a nurse's access in Station A leaks into Station B's list.
+  const inThisStation = (a) =>
+    stationId == null || (a.ward_station_id === stationId && stationNurseIds?.has(a.nurse_id));
+
+  const nurses = [...new Map(assignments.filter(inThisStation).map((a) => [a.nurse_id, a.nurse_name])).entries()]
     .sort((x, y) => x[1].localeCompare(y[1]));
-  const allWards = [...new Map(assignments.map((a) => [a.ward_id, a.ward_name])).entries()]
+  const allWards = [...new Map(assignments.filter(inThisStation).map((a) => [a.ward_id, a.ward_name])).entries()]
     .sort((x, y) => x[1].localeCompare(y[1]));
 
   const visible = assignments.filter((a) => {
-    if (stationNurseIds != null && !stationNurseIds.has(a.nurse_id)) return false;
+    if (!inThisStation(a)) return false;
     if (filterNurse && a.nurse_id !== Number(filterNurse)) return false;
     if (filterWard  && a.ward_id  !== Number(filterWard))  return false;
     if (filterType  && a.access_type !== filterType)        return false;
@@ -4199,7 +4416,15 @@ function NurseAccessManager({ showToast, stationId }) {
                     <div style={{ fontWeight: 600 }}>{a.nurse_name}</div>
                     <div className="dim" style={{ fontSize: 11 }}>@{a.nurse_username}</div>
                   </td>
-                  <td>{a.ward_name}</td>
+                  <td>
+                    {a.ward_name}{" "}
+                    <span className="chip" style={{
+                      fontSize: 10, marginLeft: 4,
+                      color: a.ward_operational === false ? "var(--amber)" : "var(--teal)",
+                    }}>
+                      {a.ward_operational === false ? "non-operational" : "operational"}
+                    </span>
+                  </td>
                   <td>
                     <span className={"tag " + (a.access_type === "FULL" ? "v" : "r")}>
                       {a.access_type === "FULL" ? "Full Access" : "Selected Beds"}
@@ -5285,6 +5510,7 @@ function DoctorBlockEditor({ block, allWards, allDoctors, onClose, onSaved, show
 
       {showPicker && (
         <WardPickerModal allWards={allWards} selectedIds={wardIds}
+          currentDoctorBlockId={isNew ? null : block.id}
           onClose={() => setShowPicker(false)}
           onDone={(ids) => { setWardIds(ids); setShowPicker(false); }} />
       )}
@@ -5297,13 +5523,15 @@ function DoctorBlockEditor({ block, allWards, allDoctors, onClose, onSaved, show
 // ══════════════════════════════════════════════════════════════════════════════
 export function DoctorManager({ showToast }) {
   const [users,   setUsers]   = useState([]);
+  const [blocks,  setBlocks]  = useState([]);
   const [editing, setEditing] = useState(null);
   const [confirm, confirmDialog] = useConfirm();
 
   const load = async () => {
     try {
-      const u = await api.mgrUsers();
+      const [u, b] = await Promise.all([api.mgrUsers(), api.mgrDoctorBlocks()]);
       setUsers((u.users || []).filter((x) => x.role === "DOCTOR"));
+      setBlocks(b.blocks || []);
     } catch (e) { showToast(toastErr(e)); }
   };
   useEffect(() => { load(); }, []);
@@ -5365,6 +5593,7 @@ export function DoctorManager({ showToast }) {
 
       {editing !== null && (
         <DoctorEditor user={editing === "new" ? null : editing}
+          blocks={blocks}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); showToast("Saved ✓"); }}
           showToast={showToast} />
@@ -5374,7 +5603,7 @@ export function DoctorManager({ showToast }) {
   );
 }
 
-function DoctorEditor({ user, onClose, onSaved, showToast }) {
+function DoctorEditor({ user, blocks, onClose, onSaved, showToast }) {
   useModal(onClose);
   const isNew = !user;
   const [username, setUsername] = useState(user?.username || "");
@@ -5383,9 +5612,8 @@ function DoctorEditor({ user, onClose, onSaved, showToast }) {
   const [showPwd,  setShowPwd]  = useState(false);
   const [status,   setStatus]   = useState(user?.status   || "active");
   const [remarks,  setRemarks]  = useState(user?.remarks  || "");
+  const [blockId,  setBlockId]  = useState("");
   const [busy,     setBusy]     = useState(false);
-
-  const strong = (p) => p.length >= 8 && /[A-Za-z]/.test(p) && /[0-9]/.test(p);
 
   const save = async () => {
     if (!name.trim()) { showToast("Display name is required."); return; }
@@ -5393,14 +5621,19 @@ function DoctorEditor({ user, onClose, onSaved, showToast }) {
       const uname = username.trim().toLowerCase();
       if (!uname) { showToast("Username is required."); return; }
       if (!/^[a-z0-9_]+$/.test(uname)) { showToast("Username can only contain letters, numbers, and underscores."); return; }
-      if (!strong(password)) { showToast("Password must be ≥8 chars with a letter and a number."); return; }
-    } else if (password && !strong(password)) {
-      showToast("New password must be ≥8 chars with a letter and a number."); return;
+      if (password.length < 8) { showToast("Password must be at least 8 characters."); return; }
+    } else if (password && password.length < 8) {
+      showToast("New password must be at least 8 characters."); return;
     }
     setBusy(true);
     try {
       if (isNew) {
-        await api.mgrCreateDoctor({ username: username.trim().toLowerCase(), password, name: name.trim(), status, remarks: remarks.trim() || undefined });
+        const r = await api.mgrCreateDoctor({ username: username.trim().toLowerCase(), password, name: name.trim(), status, remarks: remarks.trim() || undefined });
+        if (blockId) {
+          const block = await api.mgrDoctorBlock(Number(blockId));
+          const currentIds = (block.doctors || []).map((d) => d.id);
+          await api.mgrEditDoctorBlock(Number(blockId), { doctorIds: [...currentIds, r.id] });
+        }
       } else {
         const data = { name: name.trim(), status, remarks: remarks.trim() || null };
         if (password) data.password = password;
@@ -5435,7 +5668,7 @@ function DoctorEditor({ user, onClose, onSaved, showToast }) {
 
           <label className="label">{isNew ? "Password" : "New password (blank = keep current)"}</label>
           <div style={{ position: "relative" }}>
-            <input className="field" type={showPwd ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="≥8 chars, a letter and a number" maxLength={72} style={{ paddingRight: 42 }} />
+            <input className="field" type={showPwd ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="min 8 characters" maxLength={72} style={{ paddingRight: 42 }} />
             <button type="button" onClick={() => setShowPwd((v) => !v)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--ink-3)", display: "flex", alignItems: "center" }} aria-label={showPwd ? "Hide password" : "Show password"}>
               <Ic d={showPwd ? icons.eyeOff : icons.eye} s={18} />
             </button>
@@ -5452,6 +5685,26 @@ function DoctorEditor({ user, onClose, onSaved, showToast }) {
           <label className="label">Remarks <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
           <textarea className="field" rows={3} value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="e.g. Cardiology consultant" maxLength={500} style={{ resize: "none", overflowWrap: "anywhere" }} />
           <div className="dim" style={{ fontSize: 11, textAlign: "right", marginTop: 4 }}>{remarks.length}/500</div>
+          <div style={{ height: 12 }} />
+
+          {isNew && (
+            <>
+              <label className="label">Doctor Block <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
+              {blocks?.length > 0 ? (
+                <select className="field" value={blockId} onChange={(e) => setBlockId(e.target.value)}>
+                  <option value="">— No block yet —</option>
+                  {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              ) : (
+                <div className="field" style={{ color: "var(--ink-3)", fontStyle: "italic" }}>
+                  No Doctor Blocks yet — create one in the Doctor Blocks tab first.
+                </div>
+              )}
+              <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
+                Assign more blocks later from each block's own page.
+              </div>
+            </>
+          )}
 
           <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
             {busy ? "Saving…" : isNew ? "Create Doctor" : "Save changes"}

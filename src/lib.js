@@ -121,8 +121,10 @@ export const api = {
   mgrCreateNurse: (data) => req("/manager/nurses", { method: "POST", body: JSON.stringify(data) }),
   mgrEditNurse: (id, data) => req(`/manager/nurses/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeleteNurse: (id) => req(`/manager/nurses/${id}`, { method: "DELETE" }),
-  mgrSetNurseStation: (nurseId, stationId) =>
-    req(`/manager/nurses/${nurseId}`, { method: "PUT", body: JSON.stringify({ stationId }) }),
+  mgrAddNurseStation: (nurseId, stationId) =>
+    req(`/manager/nurses/${nurseId}/stations`, { method: "POST", body: JSON.stringify({ stationId }) }),
+  mgrRemoveNurseStation: (nurseId, stationId) =>
+    req(`/manager/nurses/${nurseId}/stations/${stationId}`, { method: "DELETE" }),
   mgrStationCoverage: (id) => req(`/manager/stations/${id}/coverage`),
   // ── manager — PRE Blocks ─────────────────────────────────────────────────────
   mgrPreBlocks: () => req("/manager/pre-blocks"),

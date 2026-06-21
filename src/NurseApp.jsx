@@ -590,6 +590,7 @@ export default function NurseApp({ user, onLogout }) {
   const [configError, setConfigError] = useState(null); // null | string — account config issues
   const [modalWardId, setModalWardId] = useState(null);
   const [stationName, setStationName] = useState(user.nursing_station || "");
+  const [stations,    setStations]    = useState([]); // [{id, name}] — every station this nurse covers
   const [toast,       setToast]       = useState("");
   const [lastSync,    setLastSync]    = useState(null);
   // Ref so the socket event handler always calls the latest load without recreating the socket
@@ -609,6 +610,7 @@ export default function NurseApp({ user, onLogout }) {
       setConfigError(null);
       setWards(data.wards || []);
       setStationName(data.nursing_station || "");
+      setStations(data.stations || []);
       setLastSync(new Date());
     } catch (e) {
       const msg = e?.message ?? "";
@@ -732,6 +734,27 @@ export default function NurseApp({ user, onLogout }) {
             {configError ?? `Ask the Manager to assign wards to ${stationName || "your nursing station"}.`}
           </div>
         </div>
+      ) : stations.length > 1 ? (
+        stations.map((st) => {
+          const list = wards.filter((w) => w.station_id === st.id);
+          if (list.length === 0) return null;
+          const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
+          return (
+            <div key={st.id} style={{ marginBottom: 18 }}>
+              <div className="floor-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>{st.name}</span>
+                <span className="dim" style={{ fontSize: 11, fontWeight: 600 }}>
+                  {list.length} ward{list.length !== 1 ? "s" : ""} · {beds} beds
+                </span>
+              </div>
+              <div className="card-grid">
+                {list.map((ward, i) => (
+                  <WardCard key={ward.id} ward={ward} index={i} onManage={(w) => setModalWardId(w.id)} />
+                ))}
+              </div>
+            </div>
+          );
+        })
       ) : (
         <>
           <div className="floor-head">Ward summary</div>
