@@ -1,5 +1,20 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect, createContext, useContext } from "react";
 import { Ic, icons, ThemeToggle } from "./ui.jsx";
+
+// Lets a screen deep inside <AppShell>{children}</AppShell> (e.g. the admin
+// dashboard) drop content into the profile dropdown in the topbar, without
+// AppShell needing to know anything about that screen. Value is the slot DOM
+// node while the dropdown is open, otherwise null — consumers should portal
+// into it (see useProfileMenuSlot) and render nothing when it's null.
+const ProfileMenuSlotContext = createContext(null);
+export function useProfileMenuSlot() { return useContext(ProfileMenuSlotContext); }
+
+// Same idea, but for the topbar itself rather than the dropdown — always
+// mounted (no open/close gating), so a screen can portal small live-status
+// content (e.g. "Live · 09:15 AM") next to the profile chip. Renders nothing
+// extra when no screen is using it.
+const TopBarSlotContext = createContext(null);
+export function useTopBarSlot() { return useContext(TopBarSlotContext); }
 
 /**
  * AppShell — shared sidebar + topbar layout for all role apps.
@@ -18,6 +33,9 @@ import { Ic, icons, ThemeToggle } from "./ui.jsx";
  * Behavior:
  *  - Desktop/tablet (≥768px): fixed sidebar, toggle collapses to icon rail (70px).
  *  - Mobile (<768px): sidebar becomes a drawer; toggle/scrim open & close it.
+ *  - Clicking the profile chip (top right) opens a dropdown. Screens further
+ *    down the tree can inject content into it via useProfileMenuSlot() +
+ *    createPortal — used by the admin dashboard for its layout controls.
  */
 export function AppShell({ menu, active, onSelect, title, user, onLogout, topExtra, alarm, children }) {
   const [collapsed, setCollapsed] = useState(
@@ -41,6 +59,28 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
     });
 
   const isMobile = () => window.innerWidth < 768;
+
+  // Profile dropdown (top-right chip) — closes on outside click or Escape.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileSlot, setProfileSlot] = useState(null);
+  const profileWrapRef = useRef(null);
+
+  // Always-on topbar slot (next to the profile chip) — see TopBarSlotContext above.
+  const [topBarSlot, setTopBarSlot] = useState(null);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onPointerDown = (e) => {
+      if (profileWrapRef.current && !profileWrapRef.current.contains(e.target)) setProfileOpen(false);
+    };
+    const onKeyDown = (e) => { if (e.key === "Escape") setProfileOpen(false); };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profileOpen]);
 
   const toggle = useCallback(() => {
     if (isMobile()) {
@@ -133,17 +173,43 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
           <div className="page-title">{title}</div>
           <div className="spacer" />
           {topExtra}
+          <span ref={setTopBarSlot} className="topbar-slot" />
           <ThemeToggle />
-          <div className="user-chip">
-            <div className="avatar">{initial}</div>
-            <div>
-              <div className="uname">{user?.name}</div>
-              {user?.role && <div className="role-badge">{user.role}</div>}
-            </div>
+          <div className="profile-wrap" ref={profileWrapRef}>
+            <button
+              type="button"
+              className="user-chip"
+              onClick={() => setProfileOpen((o) => !o)}
+              aria-haspopup="menu"
+              aria-expanded={profileOpen}
+            >
+              <div className="avatar">{initial}</div>
+              <div>
+                <div className="uname">{user?.name}</div>
+                {user?.role && <div className="role-badge">{user.role}</div>}
+              </div>
+              <Ic d={icons.chevron} s={13} className={"profile-chev" + (profileOpen ? " open" : "")} />
+            </button>
+            {profileOpen && (
+              <div className="profile-menu" role="menu">
+                <div className="profile-menu-head">
+                  <div className="avatar">{initial}</div>
+                  <div>
+                    <div className="uname">{user?.name}</div>
+                    {user?.role && <div className="role-badge">{user.role}</div>}
+                  </div>
+                </div>
+                <div className="profile-menu-slot" ref={setProfileSlot} />
+              </div>
+            )}
           </div>
         </header>
         <main className={"content" + (alarm ? " alarm-flash" : "")}>
-          {children}
+          <ProfileMenuSlotContext.Provider value={profileOpen ? profileSlot : null}>
+            <TopBarSlotContext.Provider value={topBarSlot}>
+              {children}
+            </TopBarSlotContext.Provider>
+          </ProfileMenuSlotContext.Provider>
         </main>
       </div>
     </div>

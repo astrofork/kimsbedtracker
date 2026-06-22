@@ -210,14 +210,14 @@ function BedDetailSheet({ bed, onSave, onClose }) {
 
           {needsDestination && (
             <div style={{ marginBottom: 22 }}>
-              <div className="doc-field-lbl">Destination <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span></div>
+              <div className="doc-field-lbl">Current Location <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span></div>
               <select className="field" value={destination} onChange={(e) => setDestination(e.target.value)}
                 style={{ borderColor: !destination ? "var(--red)" : undefined }}>
-                <option value="">— Where is the patient going? —</option>
+                <option value="">— Choose Location —</option>
                 {destinations.map(dt => <option key={dt.id} value={dt.name}>{dt.name}</option>)}
               </select>
               {!destination && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Destination is required for Occupied + Reserved beds.</div>
+                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Current location is required for Occupied + Reserved beds.</div>
               )}
             </div>
           )}

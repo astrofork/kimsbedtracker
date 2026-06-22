@@ -214,26 +214,57 @@ input,select,textarea{font-size:16px;}
 }
 .appbar .page-title{font-size:17px;font-weight:700;letter-spacing:-.01em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .appbar .spacer{flex:1;}
+.topbar-slot{display:contents;}
 .appbar-btn{
   width:36px;height:36px;border-radius:8px;flex-shrink:0;
   display:inline-flex;align-items:center;justify-content:center;
   color:var(--ink-2);transition:background .12s;
 }
 .appbar-btn:hover{background:var(--panel-2);}
-.user-chip{display:flex;align-items:center;gap:9px;min-width:0;}
-.user-chip .avatar{
+.profile-wrap{position:relative;}
+.user-chip{
+  display:flex;align-items:center;gap:9px;min-width:0;
+  background:none;border:none;cursor:pointer;
+  padding:5px 8px 5px 5px;border-radius:11px;transition:background .12s;
+}
+.user-chip:hover,.user-chip[aria-expanded="true"]{background:var(--panel-2);}
+.user-chip .avatar,.profile-menu-head .avatar{
   width:32px;height:32px;border-radius:99px;flex-shrink:0;
   background:var(--primary);color:#fff;
   display:flex;align-items:center;justify-content:center;
   font-weight:700;font-size:13px;text-transform:uppercase;
 }
-.user-chip .uname{font-size:13px;font-weight:700;line-height:1.15;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.user-chip .uname,.profile-menu-head .uname{font-size:13px;font-weight:700;line-height:1.15;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .role-badge{
   font-size:10px;font-weight:800;letter-spacing:.05em;
   padding:1px 7px;border-radius:99px;
   background:var(--blue-bg);color:var(--primary);
   text-transform:uppercase;width:fit-content;
 }
+.profile-chev{transform:rotate(90deg);transition:transform .15s;color:var(--ink-3);flex-shrink:0;}
+.profile-chev.open{transform:rotate(-90deg);}
+
+/* Profile dropdown */
+.profile-menu{
+  position:absolute;top:calc(100% + 8px);right:0;z-index:60;
+  min-width:230px;max-width:300px;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow-md);overflow:hidden;
+  animation:profileMenuIn .14s ease-out;
+}
+@keyframes profileMenuIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+.profile-menu-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);}
+.profile-menu-slot:empty{display:none;}
+.profile-menu-slot{padding:8px;}
+.profile-menu-section{padding:4px 4px 6px;}
+.profile-menu-label{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);padding:8px 10px 4px;}
+.profile-menu-item{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;
+  text-align:left;padding:9px 10px;border-radius:9px;font-size:13px;font-weight:600;
+  color:var(--ink);background:none;border:none;cursor:pointer;transition:background .12s;
+}
+.profile-menu-item:hover{background:var(--panel-2);}
+.profile-menu-note{font-size:11px;color:var(--ink-3);padding:6px 10px 2px;line-height:1.4;}
 
 /* Content area */
 .content{flex:1;width:100%;max-width:1240px;margin:0 auto;padding:20px;}
@@ -260,6 +291,7 @@ input,select,textarea{font-size:16px;}
   .content{padding:12px;}
   .appbar{padding:0 12px;}
   .user-chip .uname,.user-chip .role-badge{display:none;}
+  .profile-menu{min-width:200px;max-width:calc(100vw - 24px);}
   /* Sheets on mobile: full-width bottom drawer, respect safe areas */
   .sheet{padding-bottom:env(safe-area-inset-bottom, 0px);}
   .overlay{padding-bottom:env(safe-area-inset-bottom, 0px);}
@@ -363,6 +395,18 @@ input,select,textarea{font-size:16px;}
 .pre-pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--line);padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;}
 .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;padding:4px 10px;border-radius:99px;background:var(--panel);border:1px solid var(--line);color:var(--ink-2);transition:background .12s;}
 .chip:hover{background:var(--panel-2);}
+
+/* ── Multi-select chip picker (nurse stations, doctor blocks, …) ──────────── */
+.chip-pick-grid{display:flex;flex-wrap:wrap;gap:8px;}
+.chip-pick{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:8px 12px;border-radius:10px;border:1.5px solid var(--line);
+  background:var(--panel);font-size:13px;font-weight:600;color:var(--ink);
+  cursor:pointer;transition:border-color .12s,background .12s;user-select:none;
+}
+.chip-pick:hover{border-color:var(--primary);}
+.chip-pick.on{border-color:var(--primary);background:var(--primary-bg, #EFF6FF);color:var(--primary);}
+.chip-pick input{accent-color:var(--primary);margin:0;flex-shrink:0;}
 .floor-head{font-size:11px;font-weight:700;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase;margin:18px 2px 9px;}
 
 /* ── Ward cards ───────────────────────────────────────────────────────────── */
@@ -484,32 +528,29 @@ input,select,textarea{font-size:16px;}
 /* ── Dashboard toolbar ─────────────────────────────────────────────────────
    Labelled groups (icon tile + label over a control), segmented pills, and
    thin dividers. Collapses to a compact, stacked layout on tablet/phone. */
-.dash-toolbar{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;}
-.dash-toolbar .dtg{display:flex;flex-direction:column;gap:7px;}
-.dash-toolbar .dtg-head{display:flex;align-items:center;gap:8px;}
+.dash-toolbar{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;}
+.dash-toolbar .dtg{display:flex;flex-direction:column;gap:5px;}
+.dash-toolbar .dtg-head{display:flex;align-items:center;gap:6px;}
 .dash-toolbar .dtg-ic{
-  width:30px;height:30px;border-radius:9px;flex-shrink:0;
+  width:24px;height:24px;border-radius:7px;flex-shrink:0;
   display:inline-flex;align-items:center;justify-content:center;
   background:var(--panel-2);color:var(--ink-2);
 }
-.dash-toolbar .dtg-label{font-size:13px;font-weight:700;color:var(--ink);white-space:nowrap;}
-.dash-toolbar .dt-search{position:relative;flex:1 1 200px;min-width:150px;}
+.dash-toolbar .dtg-label{font-size:11px;font-weight:700;color:var(--ink);white-space:nowrap;}
+.dash-toolbar .dt-search{position:relative;flex:1 1 180px;min-width:140px;}
 .dash-toolbar .dt-divider{align-self:stretch;width:1px;background:var(--line);margin:0 2px;}
-/* No margin-left:auto here — the growing search already pushes the trailing
-   controls (Group by + actions) to the right. Adding an auto margin on top of
-   flex-grow over-allocates the free space and wraps the actions to a new row. */
-.dash-toolbar .dt-actions{display:flex;gap:8px;align-items:center;flex-shrink:0;}
-/* Square icon-only action buttons (Snapshot / Copy / Share) */
+/* Square icon-only action buttons (Snapshot / Copy / Share) — now only used
+   inside the profile dropdown, not the toolbar itself. */
 .dt-iconbtn{
-  width:40px;height:40px;border-radius:10px;padding:0;
+  width:34px;height:34px;border-radius:9px;padding:0;
   display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;
 }
 
 /* Segmented pill control: a soft track with a coloured active pill. */
-.seg-pill{display:inline-flex;background:var(--panel-2);border-radius:10px;padding:3px;gap:2px;border:1px solid var(--line);}
+.seg-pill{display:inline-flex;background:var(--panel-2);border-radius:9px;padding:3px;gap:2px;border:1px solid var(--line);}
 .seg-pill button{
   border:none;background:transparent;cursor:pointer;white-space:nowrap;
-  padding:7px 15px;border-radius:7px;font-size:13px;font-weight:700;
+  padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;
   color:var(--ink-3);transition:background .15s,color .15s,box-shadow .15s;
 }
 .seg-pill button:hover{color:var(--ink);}
@@ -520,13 +561,11 @@ input,select,textarea{font-size:16px;}
 
 /* Tablet: drop the dividers, let groups wrap, search takes its own full row. */
 @media (max-width:900px){
-  .dash-toolbar{gap:10px 14px;}
+  .dash-toolbar{gap:8px 10px;}
   .dash-toolbar .dt-divider{display:none;}
   .dash-toolbar .dt-search{flex-basis:100%;order:-1;}
-  .dash-toolbar .dt-actions{margin-left:auto;}
 }
-/* Phone: hide the icon tiles + labels (controls speak for themselves), shrink
-   the pills, and make the action buttons full-width with even split. */
+/* Phone: hide the icon tiles + labels (controls speak for themselves) and shrink the pills. */
 @media (max-width:560px){
   .dash-toolbar{gap:8px;align-items:stretch;}
   .dash-toolbar .dtg{flex:1 1 100%;}
@@ -535,8 +574,6 @@ input,select,textarea{font-size:16px;}
   .seg-pill{width:100%;}
   .seg-pill button{flex:1;padding:8px 8px;font-size:12px;}
   .dash-toolbar .field{width:100%;}
-  .dash-toolbar .dt-actions{width:100%;margin-left:0;}
-  .dash-toolbar .dt-actions > *{flex:1;justify-content:center;}
 }
 
 /* ── Alarm banner ─────────────────────────────────────────────────────────── */
@@ -799,9 +836,50 @@ input,select,textarea{font-size:16px;}
 .cc-trend-stat-v{font-size:22px;font-weight:800;letter-spacing:-.02em;margin-top:4px;}
 
 /* ══ Dashboard — gradient KPI cards + greeting (image style) ════════════════════ */
-.dash-greet{font-size:24px;font-weight:800;letter-spacing:-.03em;line-height:1.1;}
-.dash-greet-sub{font-size:13px;color:var(--ink-2);margin-top:4px;}
+.dash-greet-row{margin-bottom:10px;}
+.dash-greet{font-size:15px;font-weight:700;letter-spacing:-.01em;line-height:1.2;}
+.dash-greet-sub{font-size:11px;color:var(--ink-3);margin-top:2px;}
 .kc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(152px,1fr));gap:12px;margin:18px 0;}
+/* KPI cards only (not the variable-count By Payer grid below it) — fixed 6
+   columns on desktop so an even card count (e.g. 12) splits into clean rows
+   instead of auto-fill packing in however many 152px columns happen to fit.
+   Same 1fr stretch + 12px gap as the base rule, just a fixed column count. */
+.kc-grid-kpi{grid-template-columns:repeat(6,1fr);}
+.kc-grid.kc-editing{
+  outline:2px solid var(--teal, #14b8a6);
+  outline-offset:8px;
+  border-radius:20px;
+  background:rgba(20,184,166,.05);
+  transition:outline-color .2s ease, background .2s ease;
+}
+.kc.kc-draggable{cursor:grab;touch-action:none;transition:transform .14s ease, box-shadow .2s ease;}
+.kc.kc-draggable:active{cursor:grabbing;}
+.kc.kc-draggable:focus-visible{outline:2px solid var(--teal, #14b8a6);outline-offset:2px;}
+/* The slot left behind by a lifted card becomes a soft dashed drop zone that
+   glides (via the FLIP reflow) to wherever the card will land. */
+.kc.kc-dragging{pointer-events:none;box-shadow:none !important;background:transparent !important;border-color:transparent !important;}
+.kc.kc-dragging > *{opacity:0;}
+.kc.kc-dragging::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;
+  border:2.5px dashed var(--teal,#14b8a6);background:rgba(20,184,166,.13);
+  box-shadow:inset 0 0 0 1px rgba(20,184,166,.18);
+}
+/* The floating "lifted" card that follows the cursor while dragging. */
+.kc-ghost{
+  cursor:grabbing;opacity:.94;
+  box-shadow:0 26px 55px rgba(3,8,20,.5);
+  will-change:transform;
+}
+.kc-handle{
+  position:absolute;top:8px;right:10px;width:22px;height:22px;border-radius:7px;
+  display:flex;align-items:center;justify-content:center;
+  color:#9aa6bb;background:rgba(255,255,255,.06);cursor:grab;touch-action:none;
+  font-size:13px;line-height:1;letter-spacing:1px;
+}
+.kc-handle:active{cursor:grabbing;}
+[data-theme="light"] .kc-handle,
+[data-theme="purple"] .kc-handle,
+[data-theme="teal"] .kc-handle{background:rgba(16,24,40,.06);color:#5b6577;}
 .kc{
   position:relative;
   border-radius:18px;
@@ -822,7 +900,7 @@ input,select,textarea{font-size:16px;}
 }
 .kc-val{font-size:19px;font-weight:800;letter-spacing:-.03em;line-height:1.05;margin-top:7px;color:#f5f7fb;}
 .kc-sub{font-size:11px;color:#8a97ad;margin-top:6px;font-weight:600;}
-.kc-spark{margin:auto -14px 0;height:26px;}
+.kc-spark{margin:auto -14px 0;height:26px;width:calc(100% + 28px);}
 .kc-spark svg{display:block;}
 [data-theme="light"] .kc,
 [data-theme="purple"] .kc,
@@ -862,7 +940,7 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   .kc-val{font-size:20px;margin-top:3px;}
   .kc-sub{font-size:8.5px;margin-top:2px;}
   .kc-icon{width:24px;height:24px;}
-.kc-spark{height:22px;margin:6px -9px 0;}
+.kc-spark{height:22px;margin:6px -9px 0;width:calc(100% + 18px);}
 }
 .dash-2col{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:14px;}
 @media (min-width:1040px){.dash-2col{grid-template-columns:minmax(0,1.08fr) minmax(420px,1fr);align-items:start;}}

@@ -3109,12 +3109,21 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
   const [name,       setName]       = useState(nurse?.name        || "");
   const [password,   setPassword]   = useState("");
   const [showPwd,    setShowPwd]    = useState(false);
-  const initialPrimaryId = nurse?.station_id || "";
-  const [stationId,  setStationId]  = useState(String(initialPrimaryId));
+  const [stationIds, setStationIds] = useState(() => new Set(
+    nurse?.station_ids?.length ? nurse.station_ids : (nurse?.station_id ? [nurse.station_id] : [])
+  ));
   const [employeeId, setEmployeeId] = useState(nurse?.employee_id || "");
   const [phone,      setPhone]      = useState(nurse?.phone       || "");
   const [email,      setEmail]      = useState(nurse?.email       || "");
   const [busy,       setBusy]       = useState(false);
+
+  const toggleStation = (id) => {
+    setStationIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const save = async () => {
     if (!name.trim()) { showToast("Display name is required."); return; }
@@ -3133,29 +3142,24 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
     }
     setBusy(true);
     try {
-      const sid = stationId ? Number(stationId) : null;
+      const sids = [...stationIds];
       if (isNew) {
         await api.mgrCreateNurse({
           username: username.trim().toLowerCase(), password, name: name.trim(),
-          stationIds: sid ? [sid] : [],
+          stationIds: sids,
           employeeId: employeeId.trim() || undefined,
           phone: phone.trim() || undefined,
           email: email.trim() || undefined,
         });
       } else {
         const data = { name: name.trim(),
+          stationIds: sids,
           employeeId: employeeId.trim() || undefined,
           phone: phone.trim() || undefined,
           email: email.trim() || undefined,
         };
         if (password) data.password = password;
         await api.mgrEditNurse(nurse.id, data);
-        // Swap only the primary station here — other stations this nurse covers
-        // (assigned from a station's own page) are left untouched.
-        if (sid !== (initialPrimaryId || null)) {
-          if (initialPrimaryId) await api.mgrRemoveNurseStation(nurse.id, initialPrimaryId);
-          if (sid) await api.mgrAddNurseStation(nurse.id, sid);
-        }
       }
       onSaved();
     } catch (e) { showToast(toastErr(e)); setBusy(false); }
@@ -3205,25 +3209,32 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
           </div>
           <div style={{ height: 12 }} />
 
-          <label className="label">Nursing station <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
+          <label className="label">
+            Nursing station{stationIds.size === 1 ? "" : "s"} <span className="dim" style={{ fontSize: 11 }}>(optional)</span>
+            {stationIds.size > 0 && (
+              <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{stationIds.size} selected</span>
+            )}
+          </label>
           {stations.length > 0 ? (
-            <select className="field" value={stationId} onChange={(e) => setStationId(e.target.value)}>
-              <option value="">— No station yet —</option>
-              {stations.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <div className="chip-pick-grid">
+              {stations.map((s) => {
+                const checked = stationIds.has(s.id);
+                return (
+                  <label key={s.id} className={"chip-pick" + (checked ? " on" : "")}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleStation(s.id)} />
+                    <span>{s.name}</span>
+                  </label>
+                );
+              })}
+            </div>
           ) : (
             <div className="field" style={{ color: "var(--ink-3)", fontStyle: "italic" }}>
               No stations yet — create one in the Stations tab first.
             </div>
           )}
-          {!isNew && nurse?.station_ids?.length > 1 && (
-            <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-              Also covers: {nurse.station_ids
-                .map((id, i) => (id === Number(initialPrimaryId) ? null : nurse.station_names[i]))
-                .filter(Boolean).join(", ")}.
-              Manage extra stations from each station's page.
-            </div>
-          )}
+          <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>
+            A nurse with no station selected won't see any wards until assigned.
+          </div>
           <div style={{ height: 12 }} />
 
           <label className="label">Employee ID <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
@@ -5612,8 +5623,17 @@ function DoctorEditor({ user, blocks, onClose, onSaved, showToast }) {
   const [showPwd,  setShowPwd]  = useState(false);
   const [status,   setStatus]   = useState(user?.status   || "active");
   const [remarks,  setRemarks]  = useState(user?.remarks  || "");
-  const [blockId,  setBlockId]  = useState("");
+  const initialBlockIds = user?.block_ids || [];
+  const [blockIds,  setBlockIds]  = useState(() => new Set(initialBlockIds));
   const [busy,     setBusy]     = useState(false);
+
+  const toggleBlock = (id) => {
+    setBlockIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const save = async () => {
     if (!name.trim()) { showToast("Display name is required."); return; }
@@ -5627,18 +5647,31 @@ function DoctorEditor({ user, blocks, onClose, onSaved, showToast }) {
     }
     setBusy(true);
     try {
+      let doctorId = user?.id;
       if (isNew) {
         const r = await api.mgrCreateDoctor({ username: username.trim().toLowerCase(), password, name: name.trim(), status, remarks: remarks.trim() || undefined });
-        if (blockId) {
-          const block = await api.mgrDoctorBlock(Number(blockId));
-          const currentIds = (block.doctors || []).map((d) => d.id);
-          await api.mgrEditDoctorBlock(Number(blockId), { doctorIds: [...currentIds, r.id] });
-        }
+        doctorId = r.id;
       } else {
         const data = { name: name.trim(), status, remarks: remarks.trim() || null };
         if (password) data.password = password;
         await api.mgrEditDoctor(user.id, data);
       }
+
+      // Doctor Blocks are many-to-many but only expose a block-level "replace
+      // all doctors" endpoint, so add/remove this one doctor from each block
+      // whose membership actually changed.
+      const before = new Set(initialBlockIds);
+      const toAdd    = [...blockIds].filter((id) => !before.has(id));
+      const toRemove = [...before].filter((id) => !blockIds.has(id));
+      for (const blockId of [...toAdd, ...toRemove]) {
+        const block = await api.mgrDoctorBlock(blockId);
+        const currentIds = (block.doctors || []).map((d) => d.id);
+        const nextIds = toAdd.includes(blockId)
+          ? [...currentIds, doctorId]
+          : currentIds.filter((id) => id !== doctorId);
+        await api.mgrEditDoctorBlock(blockId, { doctorIds: nextIds });
+      }
+
       onSaved();
     } catch (e) { showToast(toastErr(e)); setBusy(false); }
   };
@@ -5687,24 +5720,33 @@ function DoctorEditor({ user, blocks, onClose, onSaved, showToast }) {
           <div className="dim" style={{ fontSize: 11, textAlign: "right", marginTop: 4 }}>{remarks.length}/500</div>
           <div style={{ height: 12 }} />
 
-          {isNew && (
-            <>
-              <label className="label">Doctor Block <span className="dim" style={{ fontSize: 11 }}>(optional)</span></label>
-              {blocks?.length > 0 ? (
-                <select className="field" value={blockId} onChange={(e) => setBlockId(e.target.value)}>
-                  <option value="">— No block yet —</option>
-                  {blocks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              ) : (
-                <div className="field" style={{ color: "var(--ink-3)", fontStyle: "italic" }}>
-                  No Doctor Blocks yet — create one in the Doctor Blocks tab first.
-                </div>
-              )}
-              <div className="dim" style={{ fontSize: 11, marginTop: 4 }}>
-                Assign more blocks later from each block's own page.
-              </div>
-            </>
+          <label className="label">
+            Doctor Block{blockIds.size === 1 ? "" : "s"} <span className="dim" style={{ fontSize: 11 }}>(optional)</span>
+            {blockIds.size > 0 && (
+              <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{blockIds.size} selected</span>
+            )}
+          </label>
+          {blocks?.length > 0 ? (
+            <div className="chip-pick-grid">
+              {blocks.map((b) => {
+                const checked = blockIds.has(b.id);
+                return (
+                  <label key={b.id} className={"chip-pick" + (checked ? " on" : "")}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleBlock(b.id)} />
+                    <span>{b.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="field" style={{ color: "var(--ink-3)", fontStyle: "italic" }}>
+              No Doctor Blocks yet — create one in the Doctor Blocks tab first.
+            </div>
           )}
+          <div className="dim" style={{ fontSize: 11, marginTop: 6 }}>
+            A doctor with no block selected won't see any wards until assigned.
+          </div>
+          <div style={{ height: 12 }} />
 
           <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
             {busy ? "Saving…" : isNew ? "Create Doctor" : "Save changes"}

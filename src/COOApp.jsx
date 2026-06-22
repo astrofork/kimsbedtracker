@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
 import {
   Ic, icons, StatusBar, useModal, AppError, useConfirm, BlockAvatar,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
 } from "./ui.jsx";
-import { AppShell } from "./shell.jsx";
+import { AppShell, useProfileMenuSlot, useTopBarSlot } from "./shell.jsx";
 import {
   HistoryViewer, actionLabel,
   HierarchyManager, PreBlockManager, PreManager,
@@ -17,6 +18,15 @@ import {
 import { naturalSort, calculateWardTotals } from "./bedUtils.js";
 
 const HOSPITAL_NAME = "KIMS Hospitals";
+
+// Canonical KPI card order — mirrors the labels in LiveBedDashboard's KPIS
+// array. Kept static (not derived from live data) so the drag-to-reorder
+// hooks can run unconditionally even before the dashboard's data has loaded.
+const KPI_DEFAULT_ORDER = [
+  "Total Beds", "Operational Beds", "Census Beds", "Non-Census Beds",
+  "Total Occupied", "Census Occupied", "On Bed", "OCC + RES",
+  "Non-Census Occupied", "Total Vacant", "Vacant", "VAC + RES",
+];
 
 function fmtReminderLabel(hhmm) {
   const [h] = hhmm.split(":").map(Number);
@@ -170,10 +180,12 @@ export default function COOApp({ user, meta, onLogout }) {
       user={{ name: user?.name || user?.username || "Admin", role: "ADMIN" }}
       onLogout={onLogout}
       topExtra={
-        <span className="pre-pill" style={{ fontSize: 11, flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
-          <span><Ic d={icons.clock} s={11} /> {fmtTime(Date.now())}</span>
-          <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
-        </span>
+        tab === "dashboard" ? null : (
+          <span className="pre-pill" style={{ fontSize: 11, flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
+            <span><Ic d={icons.clock} s={11} /> {fmtTime(Date.now())}</span>
+            <span style={{ fontSize: 10, color: "var(--ink-3)" }}>{new Date().toLocaleDateString("en-GB")}</span>
+          </span>
+        )
       }
     >
       {due && !dismissed[due] && tab !== "alerts" && (
@@ -450,6 +462,8 @@ const payerIcon = (name) => {
 };
 
 function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
+  const profileMenuSlot = useProfileMenuSlot();
+  const topBarSlot = useTopBarSlot();
   const [liveData,  setLiveData]  = useState(null);
   const [snaps,     setSnaps]     = useState(null);
   const [lastSync,  setLastSync]  = useState(new Date());
@@ -461,6 +475,309 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   const [snapToast, setSnapToast] = useState("");
   const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
   const snapshotRef = useRef(null);
+
+  // ── KPI card layout customization — frontend/localStorage only, never touches
+  // the backend. Locked by default on every load; an admin can unlock, drag
+  // cards into a preferred order, then Save (persists) or Reset (clears it).
+  const KPI_LAYOUT_KEY = "dashboard_layout_admin";
+  const [layoutLocked, setLayoutLocked] = useState(true);
+  const [kpiOrder,     setKpiOrder]     = useState(null); // string[] of labels, or null = default order
+  const [dragKey,      setDragKey]      = useState(null);
+  const [confirm, confirmDialog]        = useConfirm();
+  const kpiGridRef   = useRef(null);
+  const prevRectsRef  = useRef(new Map());
+  const draggingRef   = useRef(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(KPI_LAYOUT_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setKpiOrder(parsed);
+      }
+    } catch { /* corrupt/old value — fall back to default order */ }
+  }, []);
+
+  const toggleLayoutLock = () => {
+    setLayoutLocked((was) => {
+      const nowLocked = !was;
+      showSnapToast(nowLocked ? "Layout locked" : "Layout editing enabled");
+      return nowLocked;
+    });
+  };
+
+  const saveLayout = (order) => {
+    try { localStorage.setItem(KPI_LAYOUT_KEY, JSON.stringify(order)); } catch { /* storage unavailable */ }
+    showSnapToast("Layout saved");
+  };
+
+  const requestResetLayout = async () => {
+    const ok = await confirm({
+      title: "Reset dashboard layout to default?",
+      message: "This clears your saved card order on this device and restores the original layout.",
+      confirmLabel: "Reset",
+      danger: true,
+    });
+    if (!ok) return;
+    try { localStorage.removeItem(KPI_LAYOUT_KEY); } catch { /* ignore */ }
+    setKpiOrder(null);
+    showSnapToast("Layout reset to default");
+  };
+
+  const reorder = (fromKey, toKey, baseOrder) => {
+    const arr = [...baseOrder];
+    const fromIdx = arr.indexOf(fromKey);
+    const toIdx   = arr.indexOf(toKey);
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return arr;
+    arr.splice(fromIdx, 1);
+    arr.splice(toIdx, 0, fromKey);
+    return arr;
+  };
+
+  // Saved order merged against the static default — independent of whether
+  // live dashboard data has loaded yet, so every hook below can run
+  // unconditionally (this component has an early loading-state return, and
+  // hooks must never be skipped on some renders but not others).
+  const effectiveOrder = (() => {
+    const saved = kpiOrder ?? KPI_DEFAULT_ORDER;
+    const known = saved.filter((l) => KPI_DEFAULT_ORDER.includes(l));
+    const missing = KPI_DEFAULT_ORDER.filter((l) => !known.includes(l));
+    return [...known, ...missing];
+  })();
+
+  // Motion tuning — kept here so the whole drag feel can be adjusted in one
+  // place. Curves favour a calm, deliberate enterprise feel over snappiness.
+  const HOLD_MS     = 220;                       // press-and-hold before a drag arms
+  const HOLD_SLOP   = 10;                        // px of movement that cancels the hold
+  const SWAP_THRESH = 0.65;                      // must cross ≥65% into a neighbour before it swaps
+  const EASE        = "cubic-bezier(.4,0,.2,1)"; // ease-in-out everywhere — calm, predictable
+  const LIFT_MS     = 300;                       // grab lift-off
+  const FLOW_MS     = 320;                       // neighbour reflow
+  const SETTLE_MS   = 300;                       // ghost drop-into-place
+  const DAMP_MS     = 90;                        // ghost follows cursor with slight inertia/damping
+
+  // The lifted card is a detached "ghost": an outer positioner that follows the
+  // cursor via transform-translate (compositor-only, no layout → 60fps) wrapping
+  // an inner visual clone that owns the scale/shadow "lift". The card's real
+  // slot stays in the grid as a dashed drop-zone placeholder that glides (via
+  // the FLIP effect below) to wherever the card will land.
+  const ghostRef       = useRef(null);  // positioner
+  const ghostInnerRef  = useRef(null);  // visual clone
+  const grabOffsetRef  = useRef({ x: 0, y: 0 });
+  const pressTimerRef  = useRef(null);
+  const settleTimerRef = useRef(null);
+
+  const beginDrag = (label, startX, startY) => {
+    if (layoutLocked) return;
+    if (settleTimerRef.current) { clearTimeout(settleTimerRef.current); settleTimerRef.current = null; }
+    const grid = kpiGridRef.current;
+    const cardEl = grid && grid.querySelector(`[data-kpi-key="${label}"]`);
+    if (!cardEl) return;
+    cardEl.style.transform = "";           // drop any press-feedback scale before cloning
+
+    const rect = cardEl.getBoundingClientRect();
+    grabOffsetRef.current = { x: startX - rect.left, y: startY - rect.top };
+
+    const positioner = document.createElement("div");
+    positioner.style.cssText =
+      `position:fixed;left:0;top:0;z-index:999;pointer-events:none;` +
+      // A short transform transition makes the ghost trail the cursor with a
+      // slight, premium inertia rather than locking to it 1:1.
+      `transition:transform ${DAMP_MS}ms ${EASE};` +
+      `transform:translate(${rect.left}px,${rect.top}px);`;
+    const inner = cardEl.cloneNode(true);
+    inner.classList.add("kc-ghost");
+    inner.classList.remove("kc-draggable");
+    inner.style.width = rect.width + "px";
+    inner.style.height = rect.height + "px";
+    inner.style.margin = "0";
+    inner.style.transform = "scale(1)";
+    inner.style.transition = `transform ${LIFT_MS}ms ${EASE}, box-shadow ${LIFT_MS}ms ${EASE}`;
+    positioner.appendChild(inner);
+    document.body.appendChild(positioner);
+    ghostRef.current = positioner;
+    ghostInnerRef.current = inner;
+    // Next frame: animate the "lift" so the card visibly rises off the grid.
+    requestAnimationFrame(() => { inner.style.transform = "scale(1.03)"; });
+
+    draggingRef.current = true;
+    dragStateRef.current.dragKey = label;
+    dragStateRef.current.effectiveOrder = effectiveOrder;
+    setDragKey(label);
+  };
+
+  // Press-and-hold gate: a drag only arms after the pointer is held still for
+  // HOLD_MS. A quick click, or a press that immediately moves (a scroll/slip),
+  // cancels it — this is what prevents accidental card movement.
+  const pressStart = (label, e) => {
+    if (layoutLocked) return;
+    const startX = e.clientX, startY = e.clientY;
+    const grid = kpiGridRef.current;
+    const cardEl = grid && grid.querySelector(`[data-kpi-key="${label}"]`);
+    if (cardEl) {
+      cardEl.style.transition = "transform 140ms ease";
+      cardEl.style.transform = "scale(.97)";   // subtle "pressed" feedback while holding
+    }
+    const cleanup = () => {
+      if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
+      if (cardEl) cardEl.style.transform = "";
+      window.removeEventListener("pointermove", onPressMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+    };
+    const onPressMove = (ev) => {
+      if (Math.abs(ev.clientX - startX) > HOLD_SLOP || Math.abs(ev.clientY - startY) > HOLD_SLOP) cleanup();
+    };
+    pressTimerRef.current = setTimeout(() => {
+      pressTimerRef.current = null;
+      window.removeEventListener("pointermove", onPressMove);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      beginDrag(label, startX, startY);
+    }, HOLD_MS);
+    window.addEventListener("pointermove", onPressMove);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
+  };
+
+  const moveByKeyboard = (label, dir) => {
+    if (layoutLocked) return;
+    const arr = [...effectiveOrder];
+    const idx = arr.indexOf(label);
+    const target = idx + dir;
+    if (idx === -1 || target < 0 || target >= arr.length) return;
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    setKpiOrder(arr);
+  };
+
+  // Always-fresh snapshot for the mount-time window listeners below, so they
+  // never act on stale closures from whatever render they happened to mount in.
+  // Also written to synchronously during onMove so rapid pointermove events
+  // within a single render cycle never reorder off a stale array.
+  const dragStateRef = useRef({ dragKey: null, effectiveOrder: [] });
+  useEffect(() => { dragStateRef.current = { dragKey, effectiveOrder }; });
+
+  // Track the drag via elementFromPoint rather than per-card pointerenter —
+  // pointerenter is unreliable for touch once a pointer is mid-drag, while
+  // elementFromPoint works identically for mouse, touch, and pen.
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!draggingRef.current) return;
+      const { dragKey: dk, effectiveOrder: eo } = dragStateRef.current;
+      if (dk == null) return;
+
+      const ghost = ghostRef.current;
+      if (ghost) {
+        const { x, y } = grabOffsetRef.current;
+        ghost.style.transform = `translate(${e.clientX - x}px, ${e.clientY - y}px)`;
+      }
+
+      // elementFromPoint would otherwise resolve to the ghost itself (it's the
+      // topmost element under the cursor) — briefly hide it to see what's below.
+      if (ghost) ghost.style.visibility = "hidden";
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      if (ghost) ghost.style.visibility = "visible";
+      const overEl = el && el.closest && el.closest("[data-kpi-key]");
+      if (!overEl) return;
+      const overLabel = overEl.getAttribute("data-kpi-key");
+      if (overLabel === dk) return;
+
+      // Swap threshold — the cure for twitchiness. Don't reorder the moment the
+      // cursor grazes a neighbour; require it to cross ≥SWAP_THRESH of the way
+      // into that neighbour, measured along the axis that separates it from the
+      // dragged slot (horizontal within a row, vertical across rows). Below the
+      // threshold the layout stays put, so cards don't rearrange "too early".
+      const grid = kpiGridRef.current;
+      const placeholder = grid && grid.querySelector(`[data-kpi-key="${dk}"]`);
+      if (!placeholder) return;
+      const o = overEl.getBoundingClientRect();
+      const p = placeholder.getBoundingClientRect();
+      const forward = eo.indexOf(overLabel) > eo.indexOf(dk);
+      const sameRow = Math.abs(o.top - p.top) < o.height * 0.5;
+      const frac = sameRow
+        ? (e.clientX - o.left) / o.width
+        : (e.clientY - o.top) / o.height;
+      const crossed = forward ? frac >= SWAP_THRESH : frac <= (1 - SWAP_THRESH);
+      if (!crossed) return;
+
+      const next = reorder(dk, overLabel, eo);
+      dragStateRef.current.effectiveOrder = next;
+      setKpiOrder(next);
+    };
+    const onUp = () => {
+      if (!draggingRef.current) return;
+      draggingRef.current = false;
+      const dk = dragStateRef.current.dragKey;
+      const grid = kpiGridRef.current;
+      const cardEl = dk != null && grid && grid.querySelector(`[data-kpi-key="${dk}"]`);
+      const positioner = ghostRef.current;
+      const inner = ghostInnerRef.current;
+
+      // Settle: glide the ghost into the placeholder's final slot, lower it back
+      // to rest scale, then swap the real card back in — the "snap into place".
+      if (positioner && inner && cardEl) {
+        const finalRect = cardEl.getBoundingClientRect();
+        positioner.style.transition = `transform ${SETTLE_MS}ms ${EASE}`;
+        positioner.style.transform = `translate(${finalRect.left}px,${finalRect.top}px)`;
+        inner.style.transition = `transform ${SETTLE_MS}ms ${EASE}, box-shadow ${SETTLE_MS}ms ${EASE}`;
+        inner.style.transform = "scale(1)";
+        inner.style.boxShadow = "0 10px 24px rgba(3,8,20,.18)";
+        settleTimerRef.current = setTimeout(() => {
+          settleTimerRef.current = null;
+          positioner.remove();
+          ghostRef.current = null; ghostInnerRef.current = null;
+          dragStateRef.current.dragKey = null;
+          setDragKey(null);
+        }, SETTLE_MS + 20);
+      } else {
+        if (positioner) positioner.remove();
+        ghostRef.current = null; ghostInnerRef.current = null;
+        dragStateRef.current.dragKey = null;
+        setDragKey(null);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
+
+  // FLIP animation: whenever the order changes, slide each card (incl. the
+  // dashed placeholder) from its old screen position to its new one instead of
+  // letting the grid just snap — this is what makes neighbours glide smoothly
+  // aside and the drop-zone follow the cursor.
+  const orderKey = effectiveOrder.join("|");
+  useLayoutEffect(() => {
+    const grid = kpiGridRef.current;
+    const prevRects = prevRectsRef.current;
+    if (grid) {
+      const cards = grid.querySelectorAll("[data-kpi-key]");
+      cards.forEach((el) => {
+        const key = el.getAttribute("data-kpi-key");
+        const prev = prevRects.get(key);
+        const next = el.getBoundingClientRect();
+        if (prev) {
+          const dx = prev.left - next.left;
+          const dy = prev.top - next.top;
+          if (dx || dy) {
+            el.style.transition = "none";
+            el.style.transform = `translate(${dx}px, ${dy}px)`;
+            requestAnimationFrame(() => {
+              el.style.transition = `transform ${FLOW_MS}ms ${EASE}`;
+              el.style.transform = "";
+            });
+          }
+        }
+      });
+      const newRects = new Map();
+      cards.forEach((el) => newRects.set(el.getAttribute("data-kpi-key"), el.getBoundingClientRect()));
+      prevRectsRef.current = newRects;
+    }
+  }, [orderKey]);
 
   const load = useCallback(async () => {
     try { setLiveData(await api.cooLiveWards()); setLastSync(new Date()); } catch { /* keep stale */ }
@@ -602,19 +919,130 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
 
   const canShare = snapshotCanShare();
 
+  // Apply the shared order onto the live KPI data — defensive against the
+  // card set itself changing (renamed/added/removed) since the layout was
+  // last saved: unknown saved labels are dropped, new cards are appended at
+  // the end, so a stale localStorage entry (or a future edit to KPIS that
+  // forgets to update KPI_DEFAULT_ORDER) can never crash this.
+  const kpiByLabel = new Map(KPIS.map((k) => [k.label, k]));
+  const orderedLabels = [
+    ...effectiveOrder.filter((l) => kpiByLabel.has(l)),
+    ...KPIS.map((k) => k.label).filter((l) => !effectiveOrder.includes(l)),
+  ];
+  const orderedKpis = orderedLabels.map((l) => kpiByLabel.get(l));
+
   return (
     <div className="cc-wrap">
-      <div className="row between" style={{ alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 4 }}>
-        <div>
-          <div className="dash-greet">{greetOf()}, {userName} <span style={{ fontWeight: 400 }}>👋</span></div>
-          <div className="dash-greet-sub">Here's your real-time overview of bed status across all units.</div>
+      <div className="dash-greet-row">
+        <div className="dash-greet">{greetOf()}, {userName} <span style={{ fontWeight: 400 }}>👋</span></div>
+        <div className="dash-greet-sub">Here's your real-time overview of bed status across all units.</div>
+      </div>
+
+      {/* "Live · HH:MM" now lives in the top nav bar next to the profile chip —
+          portaled into the slot AppShell always exposes while this tab is open. */}
+      {topBarSlot && createPortal(
+        <span className="cc-live"><i /> Live · {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>,
+        topBarSlot
+      )}
+
+      {/* Layout controls + Snapshot actions live in the profile dropdown (top
+          right), not inline here — portaled into the slot AppShell exposes
+          while it's open. */}
+      {profileMenuSlot && createPortal(
+        <>
+          <div className="profile-menu-section">
+            <div className="profile-menu-label">Dashboard Layout</div>
+            <button className="profile-menu-item" onClick={toggleLayoutLock}>
+              <span>{layoutLocked ? "🔒 Layout Locked" : "🔓 Editing Layout"}</span>
+            </button>
+            {!layoutLocked && (
+              <>
+                <button className="profile-menu-item" onClick={() => saveLayout(effectiveOrder)}>
+                  <span>💾 Save Layout</span>
+                </button>
+                <button className="profile-menu-item" onClick={requestResetLayout}>
+                  <span>↺ Reset Layout</span>
+                </button>
+                <div className="profile-menu-note">Editing enabled — drag cards on the dashboard to reorder.</div>
+              </>
+            )}
+          </div>
+          <div className="profile-menu-section" style={{ borderTop: "1px solid var(--line)" }}>
+            <div className="profile-menu-label">Snapshot</div>
+            <button className="profile-menu-item" disabled={snapBusy !== null}
+              onClick={() => runSnap("download", snapshotDownload, "Snapshot downloaded")}>
+              <span>📷 {snapBusy === "download" ? "Downloading…" : "Download Snapshot"}</span>
+            </button>
+            <button className="profile-menu-item" disabled={snapBusy !== null}
+              onClick={() => runSnap("copy", snapshotCopy, "Snapshot copied to clipboard")}>
+              <span>📋 {snapBusy === "copy" ? "Copying…" : "Copy to Clipboard"}</span>
+            </button>
+            {canShare && (
+              <button className="profile-menu-item" disabled={snapBusy !== null}
+                onClick={() => runSnap("share", snapshotShare, "Shared successfully")}>
+                <span>📤 {snapBusy === "share" ? "Sharing…" : "Share"}</span>
+              </button>
+            )}
+          </div>
+        </>,
+        profileMenuSlot
+      )}
+
+      {/* Toolbar — Unit filter + View-by + Search + Group-by + Snapshot. Sits at
+          the top so its filter applies to everything below: KPI cards, By Payer
+          cards and the ward tables all already derive from this same filter. */}
+      <div className="card" style={{ padding: "8px 10px", marginBottom: 10 }}>
+        <div className="dash-toolbar">
+          <div className="dtg">
+            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
+            {unitOptions.length <= 4 ? (
+              <div className="seg-pill">
+                {unitOptions.map((k) => (
+                  <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
+                ))}
+              </div>
+            ) : (
+              <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
+                style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 140 }}>
+                {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
+              </select>
+            )}
+          </div>
+
+          <div className="dt-divider" />
+
+          <div className="dtg">
+            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
+            <div className="seg-pill">
+              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }].map((opt) => (
+                <button key={opt.value} className={searchBy === opt.value ? "on" : ""}
+                  onClick={() => { setSearchBy(opt.value); setSearch(""); }}>{opt.label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="dtg dt-search">
+            <span style={{ position: "absolute", left: 11, bottom: 9, color: "var(--ink-3)", pointerEvents: "none", display: "flex" }}>
+              <Ic d={icons.search} s={14} />
+            </span>
+            <input className="field" value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder={searchBy === "room_type" ? "Search room type…" : "Search ward name…"}
+              style={{ paddingLeft: 31, fontSize: 12, height: 34, width: "100%", borderRadius: 9 }} maxLength={60} />
+          </div>
+
+          <div className="dtg">
+            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.users} s={15} /></span><span className="dtg-label">Group by</span></div>
+            <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
+              style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 140 }}>
+              {GROUP_BY_OPTIONS.map((o2) => <option key={o2.value} value={o2.value}>{o2.label}</option>)}
+            </select>
+          </div>
         </div>
-        <span className="cc-live"><i /> Live · {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
       </div>
 
       {/* When a filter/search narrows the view, the cards & tables below reflect that subset. */}
       {!showingAll && (
-        <div className="row" style={{ gap: 8, margin: "12px 0 2px", alignItems: "center", flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 8, margin: "0 0 12px", alignItems: "center", flexWrap: "wrap" }}>
           <span style={{
             display: "inline-flex", alignItems: "center", gap: 5,
             padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700,
@@ -626,21 +1054,45 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
         </div>
       )}
 
-      {/* Gradient KPI cards with sparklines */}
-      <div className="kc-grid">
-        {KPIS.map((k) => (
-          <div key={k.label} className="kc">
-            <div className="kc-head">
-              <div className="kc-label" style={{ color: k.color }}>{k.label}</div>
-              <div className="kc-icon" style={{ color: k.color, background: `${k.color}1a` }}>
-                <Ic d={k.icon} s={15} />
+      {/* Gradient KPI cards with sparklines — draggable into any order when unlocked */}
+      <div
+        ref={kpiGridRef}
+        className={"kc-grid kc-grid-kpi" + (!layoutLocked ? " kc-editing" : "")}
+        role="list"
+        aria-label="Dashboard KPI cards"
+      >
+        {orderedKpis.map((k, i) => {
+          const isDragging = dragKey === k.label;
+          return (
+            <div
+              key={k.label}
+              data-kpi-key={k.label}
+              className={"kc" + (!layoutLocked ? " kc-draggable" : "") + (isDragging ? " kc-dragging" : "")}
+              role="listitem"
+              aria-label={`${k.label} card, position ${i + 1} of ${orderedKpis.length}${!layoutLocked ? ". Press and hold, then use arrow keys to reorder." : ""}`}
+              tabIndex={!layoutLocked ? 0 : -1}
+              onPointerDown={layoutLocked ? undefined : (e) => { e.preventDefault(); pressStart(k.label, e); }}
+              onKeyDown={(e) => {
+                if (layoutLocked) return;
+                if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); moveByKeyboard(k.label, -1); }
+                else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); moveByKeyboard(k.label, 1); }
+              }}
+            >
+              {!layoutLocked && (
+                <span className="kc-handle" aria-hidden="true" title="Hold and drag to reorder">⠿</span>
+              )}
+              <div className="kc-head">
+                <div className="kc-label" style={{ color: k.color }}>{k.label}</div>
+                <div className="kc-icon" style={{ color: k.color, background: `${k.color}1a` }}>
+                  <Ic d={k.icon} s={15} />
+                </div>
               </div>
+              <div className="kc-val">{k.val}</div>
+              <div className="kc-sub">{k.sub}</div>
+              <Sparkline values={k.series} color={k.color} id={k.label.replace(/[^a-z0-9]/gi, "")} />
             </div>
-            <div className="kc-val">{k.val}</div>
-            <div className="kc-sub">{k.sub}</div>
-            <Sparkline values={k.series} color={k.color} id={k.label.replace(/[^a-z0-9]/gi, "")} />
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* By Payer — one dynamic card per active payer type */}
@@ -665,80 +1117,6 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
         </>
       )}
 
-      {/* Toolbar — Unit filter + View-by + Search + Group-by + Snapshot */}
-      <div className="card" style={{ padding: "10px 12px", marginBottom: 16 }}>
-        <div className="dash-toolbar">
-          <div className="dtg">
-            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
-            {unitOptions.length <= 4 ? (
-              <div className="seg-pill">
-                {unitOptions.map((k) => (
-                  <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
-                ))}
-              </div>
-            ) : (
-              <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
-                style={{ fontSize: 13, fontWeight: 600, height: 40, borderRadius: 10, paddingTop: 0, paddingBottom: 0, minWidth: 150 }}>
-                {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
-              </select>
-            )}
-          </div>
-
-          <div className="dt-divider" />
-
-          <div className="dtg">
-            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
-            <div className="seg-pill">
-              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }].map((opt) => (
-                <button key={opt.value} className={searchBy === opt.value ? "on" : ""}
-                  onClick={() => { setSearchBy(opt.value); setSearch(""); }}>{opt.label}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="dtg dt-search">
-            <span style={{ position: "absolute", left: 12, bottom: 12, color: "var(--ink-3)", pointerEvents: "none", display: "flex" }}>
-              <Ic d={icons.search} s={15} />
-            </span>
-            <input className="field" value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder={searchBy === "room_type" ? "Search room type…" : "Search ward name…"}
-              style={{ paddingLeft: 34, fontSize: 13, height: 40, width: "100%", borderRadius: 10 }} maxLength={60} />
-          </div>
-
-          <div className="dtg">
-            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.users} s={15} /></span><span className="dtg-label">Group by</span></div>
-            <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
-              style={{ fontSize: 13, fontWeight: 600, height: 40, borderRadius: 10, paddingTop: 0, paddingBottom: 0, minWidth: 150 }}>
-              {GROUP_BY_OPTIONS.map((o2) => <option key={o2.value} value={o2.value}>{o2.label}</option>)}
-            </select>
-          </div>
-
-          <div className="dt-divider" />
-
-          <div className="dt-actions">
-            <button className="btn btn-primary dt-iconbtn"
-              disabled={snapBusy !== null} title="Download snapshot image" aria-label="Download snapshot image"
-              onClick={() => runSnap("download", snapshotDownload, "Snapshot downloaded")}>
-              <span className={snapBusy === "download" ? "spin" : ""} style={{ display: "inline-flex" }}>
-                <Ic d={snapBusy === "download" ? icons.refresh : icons.camera} s={17} />
-              </span>
-            </button>
-            <button className="chip dt-iconbtn"
-              disabled={snapBusy !== null} title="Copy snapshot to clipboard" aria-label="Copy snapshot to clipboard"
-              onClick={() => runSnap("copy", snapshotCopy, "Snapshot copied to clipboard")}>
-              <Ic d={snapBusy === "copy" ? icons.refresh : icons.copy} s={17} />
-            </button>
-            {canShare && (
-              <button className="chip dt-iconbtn"
-                disabled={snapBusy !== null} title="Share snapshot" aria-label="Share snapshot"
-                onClick={() => runSnap("share", snapshotShare, "Shared successfully")}>
-                <Ic d={snapBusy === "share" ? icons.refresh : icons.share} s={17} />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Ward tables — this is what gets captured by Snapshot/Copy/Share */}
       <div ref={snapshotRef}>
         {groupBy === "none" ? (
@@ -761,6 +1139,7 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
       </div>
 
       {snapToast && <div className="toast">{snapToast}</div>}
+      {confirmDialog}
     </div>
   );
 }
