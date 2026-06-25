@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from
 import { createPortal } from "react-dom";
 import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
 import {
-  Ic, icons, StatusBar, useModal, AppError, useConfirm, BlockAvatar,
+  Ic, icons, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
 } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot, useTopBarSlot } from "./shell.jsx";
@@ -16,6 +16,7 @@ import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
 } from "./snapshot.js";
 import { naturalSort, calculateWardTotals } from "./bedUtils.js";
+import BedExplorerModal from "./BedExplorerModal.jsx";
 
 const HOSPITAL_NAME = "KIMS Hospitals";
 
@@ -461,6 +462,15 @@ const payerIcon = (name) => {
   return icons.clipboard;
 };
 
+// Cards absent from this set (Total/Operational/Census/Non-Census Beds) are
+// plain inventory counts, not occupancy filters — they don't open the Bed
+// Explorer. The matching default-filter logic for each of these labels lives
+// in BedExplorerModal's ENTRY_PRESETS.
+const CLICKABLE_KPI_LABELS = new Set([
+  "Total Occupied", "Census Occupied", "Non-Census Occupied", "On Bed", "OCC + RES",
+  "Total Vacant", "Vacant", "VAC + RES",
+]);
+
 function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   const profileMenuSlot = useProfileMenuSlot();
   const topBarSlot = useTopBarSlot();
@@ -475,6 +485,13 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   const [snapToast, setSnapToast] = useState("");
   const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
   const snapshotRef = useRef(null);
+
+  // ── "Tap a card → open the Bed Explorer" — BedExplorerModal does its own
+  // fetching/filtering, so this just records which card was clicked.
+  const [bedExplorer, setBedExplorer] = useState(null); // null | { label, color, payer? }
+  const openBedExplorer = useCallback((label, color, payer) => {
+    setBedExplorer({ label, color, payer });
+  }, []);
 
   // ── KPI card layout customization — frontend/localStorage only, never touches
   // the backend. Locked by default on every load; an admin can unlock, drag
@@ -900,6 +917,21 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
     { label: "VAC + RES", val: rr,  sub: pct(rr),  color: "#0ea5b7", icon: icons.clock, series: S.reserved },
   ];
 
+  // Ward ids currently in scope (Unit + Search) — the Bed Explorer only looks
+  // up beds within this set, so its counts always match the dashboard's filter.
+  const wardIdsInScope = shownRows.map((r) => r.id);
+
+  // Per-ward metadata for the Bed Explorer's grouping/floor filter and
+  // authoritative ward-level counts (so its accordion headers stay correct
+  // even on the 2 wards whose bed_details rows don't quite add up — see
+  // BedExplorerModal's "incomplete" note).
+  const wardMeta = new Map(allRows.map((r) => [r.id, {
+    ward: r.ward, floor_name: r.floor_name, block_name: r.block_name,
+    unit_type: r.unit_type, room_type: r.room_type, bed_type: r.bed_type,
+    total: r.total, vacant: r.vacant, occupied: r.occupied,
+    reserved: r.reserved, occupied_reserved: r.occupied_reserved,
+  }]));
+
   // One card per active payer type (dynamic — auto-adjusts if Setup → Payer
   // Types changes). Value = live occupied count for that payer over the
   // current Unit + Search filter; sparkline = that payer's real hourly trend
@@ -1063,17 +1095,26 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
       >
         {orderedKpis.map((k, i) => {
           const isDragging = dragKey === k.label;
+          const clickable = layoutLocked && CLICKABLE_KPI_LABELS.has(k.label);
           return (
             <div
               key={k.label}
               data-kpi-key={k.label}
-              className={"kc" + (!layoutLocked ? " kc-draggable" : "") + (isDragging ? " kc-dragging" : "")}
-              role="listitem"
-              aria-label={`${k.label} card, position ${i + 1} of ${orderedKpis.length}${!layoutLocked ? ". Press and hold, then use arrow keys to reorder." : ""}`}
-              tabIndex={!layoutLocked ? 0 : -1}
+              className={"kc" + (!layoutLocked ? " kc-draggable" : "") + (isDragging ? " kc-dragging" : "") + (clickable ? " kc-clickable" : "")}
+              role={clickable ? "button" : "listitem"}
+              aria-label={clickable
+                ? `${k.label} card — ${k.val}. Press Enter to see these beds.`
+                : `${k.label} card, position ${i + 1} of ${orderedKpis.length}${!layoutLocked ? ". Press and hold, then use arrow keys to reorder." : ""}`}
+              tabIndex={!layoutLocked || clickable ? 0 : -1}
               onPointerDown={layoutLocked ? undefined : (e) => { e.preventDefault(); pressStart(k.label, e); }}
+              onClick={clickable ? () => openBedExplorer(k.label, k.color) : undefined}
               onKeyDown={(e) => {
-                if (layoutLocked) return;
+                if (layoutLocked) {
+                  if (clickable && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault(); openBedExplorer(k.label, k.color);
+                  }
+                  return;
+                }
                 if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); moveByKeyboard(k.label, -1); }
                 else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); moveByKeyboard(k.label, 1); }
               }}
@@ -1101,7 +1142,13 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
           <div className="floor-head" style={{ marginTop: 4 }}>By Payer</div>
           <div className="kc-grid">
             {payerCards.map((k) => (
-              <div key={k.label} className="kc">
+              <div key={k.label} className="kc kc-clickable" role="button" tabIndex={0}
+                aria-label={`${k.label} card — ${k.val}. Press Enter to see these beds.`}
+                onClick={() => openBedExplorer(k.label, k.color, k.label)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.label, k.color, k.label); }
+                }}
+              >
                 <div className="kc-head">
                   <div className="kc-label" style={{ color: k.color }}>{k.label}</div>
                   <div className="kc-icon" style={{ color: k.color, background: `${k.color}1a` }}>
@@ -1140,9 +1187,18 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
 
       {snapToast && <div className="toast">{snapToast}</div>}
       {confirmDialog}
+      {bedExplorer && (
+        <BedExplorerModal
+          entry={bedExplorer}
+          wardIds={wardIdsInScope}
+          wardMeta={wardMeta}
+          onClose={() => setBedExplorer(null)}
+        />
+      )}
     </div>
   );
 }
+
 
 function greetOf() {
   const hour = new Date().getHours();
@@ -2144,36 +2200,6 @@ function bedStateText(p, res) {
 }
 
 // Reusable numbered pagination (Prev · 1 2 … N · Next), shared by Activity + Bed History.
-function Pagination({ page, pages, onPage }) {
-  if (!pages || pages <= 1) return null;
-  const nums = [];
-  const win = 2;
-  const start = Math.max(1, page - win), end = Math.min(pages, page + win);
-  if (start > 1) { nums.push(1); if (start > 2) nums.push("…l"); }
-  for (let i = start; i <= end; i++) nums.push(i);
-  if (end < pages) { if (end < pages - 1) nums.push("…r"); nums.push(pages); }
-  const btn = (label, target, { disabled, active, key } = {}) => (
-    <button key={key || label} disabled={disabled}
-      onClick={() => !disabled && target != null && onPage(target)}
-      className="chip" style={{
-        minWidth: 36, justifyContent: "center", padding: "7px 11px", fontSize: 13,
-        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1,
-        background: active ? "var(--primary)" : "var(--panel)",
-        color: active ? "#fff" : "var(--ink-2)",
-        borderColor: active ? "var(--primary)" : "var(--line)",
-      }}>{label}</button>
-  );
-  return (
-    <div className="row" style={{ gap: 6, justifyContent: "center", flexWrap: "wrap", marginTop: 16 }}>
-      {btn("‹ Prev", page - 1, { disabled: page <= 1, key: "prev" })}
-      {nums.map((n, i) => typeof n === "string"
-        ? <span key={n + i} className="dim" style={{ padding: "0 4px", alignSelf: "center" }}>…</span>
-        : btn(String(n), n, { active: n === page, key: "p" + n }))}
-      {btn("Next ›", page + 1, { disabled: page >= pages, key: "next" })}
-    </div>
-  );
-}
-
 // Friendly (non-raw) detail panel — renders the server-resolved `info` list.
 function ActivityDetail({ r }) {
   const info = Array.isArray(r.info) ? r.info : [];

@@ -45,6 +45,9 @@ export const icons = {
   eye:    <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></>,
   eyeOff: <><path d="M9.9 4.2A10 10 0 0 1 12 4c7 0 10 8 10 8a13.3 13.3 0 0 1-1.7 2.7M6.6 6.6A10 10 0 0 0 2 12s3 8 10 8a10 10 0 0 0 5.4-1.6" /><circle cx="12" cy="12" r="3" /><path d="m2 2 20 20" /></>,
   search: <><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></>,
+  filter: <><path d="M3 4h18l-7 9v6l-4 2v-8L3 4Z" /></>,
+  sort:   <><path d="M11 5v14M11 5 7 9M11 5l4 4" /><path d="M19 5v14M19 19l-4-4M19 19l4-4" /></>,
+  x:      <><path d="M18 6 6 18M6 6l12 12" /></>,
 };
 
 /* ── Modal / sheet helpers ────────────────────────────────────────────────── */
@@ -74,6 +77,37 @@ export function useModal(onClose) {
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
   }, [onClose]);
+}
+
+/** Numbered pagination row with a ±2-page window and smart ellipsis. */
+export function Pagination({ page, pages, onPage }) {
+  if (!pages || pages <= 1) return null;
+  const nums = [];
+  const win = 2;
+  const start = Math.max(1, page - win), end = Math.min(pages, page + win);
+  if (start > 1) { nums.push(1); if (start > 2) nums.push("…l"); }
+  for (let i = start; i <= end; i++) nums.push(i);
+  if (end < pages) { if (end < pages - 1) nums.push("…r"); nums.push(pages); }
+  const btn = (label, target, { disabled, active, key } = {}) => (
+    <button key={key || label} disabled={disabled}
+      onClick={() => !disabled && target != null && onPage(target)}
+      className="chip" style={{
+        minWidth: 36, justifyContent: "center", padding: "7px 11px", fontSize: 13,
+        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1,
+        background: active ? "var(--primary)" : "var(--panel)",
+        color: active ? "#fff" : "var(--ink-2)",
+        borderColor: active ? "var(--primary)" : "var(--line)",
+      }}>{label}</button>
+  );
+  return (
+    <div className="row" style={{ gap: 6, justifyContent: "center", flexWrap: "wrap", marginTop: 16 }}>
+      {btn("‹ Prev", page - 1, { disabled: page <= 1, key: "prev" })}
+      {nums.map((n, i) => typeof n === "string"
+        ? <span key={n + i} className="dim" style={{ padding: "0 4px", alignSelf: "center" }}>…</span>
+        : btn(String(n), n, { active: n === page, key: "p" + n }))}
+      {btn("Next ›", page + 1, { disabled: page >= pages, key: "next" })}
+    </div>
+  );
 }
 
 /* ── Theme system ─────────────────────────────────────────────────────────── */

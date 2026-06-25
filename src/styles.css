@@ -422,6 +422,9 @@ input,select,textarea{font-size:16px;}
 .bed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;}
 @media (max-width:1023px){.bed-grid{grid-template-columns:repeat(auto-fill,minmax(80px,1fr));}}
 @media (max-width:767px){.bed-grid{grid-template-columns:repeat(auto-fill,minmax(72px,1fr));}}
+/* Card-popup variant — same tiles, a touch wider sheet so more beds fit per
+   row, but still capped so it stays compact on large/TV screens. */
+.sheet.bed-modal{max-width:760px;}
 .bed-tile{
   min-height:60px;border-radius:9px;border:1.5px solid var(--line);
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -440,6 +443,57 @@ input,select,textarea{font-size:16px;}
   cursor:pointer;transition:all .15s;white-space:nowrap;
 }
 .fchip.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+
+/* ── Bed Explorer (card-click viewer) ────────────────────────────────────────
+   Plain viewer: header (fixed) → scrollable ward list. No filters/search/
+   sort — each card has a fixed set of beds it shows. min()/max() sizing lets
+   the modal degrade gracefully on small screens on its own; it still
+   inherits the shared .sheet/.overlay bottom-sheet chrome at ≤767px. */
+.sheet.bx-modal{
+  max-width:min(94vw,760px);
+  height:min(88vh,760px);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.bx-header{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding:18px 20px 14px;border-bottom:1px solid var(--line);flex-shrink:0;
+}
+.bx-header-title{display:flex;align-items:flex-start;gap:12px;min-width:0;}
+.bx-header-icon{width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.bx-close{
+  width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  background:var(--panel-2);border:1px solid var(--line);color:var(--ink-2);cursor:pointer;
+  transition:background .12s,color .12s;
+}
+.bx-close:hover{background:var(--line);color:var(--ink);}
+
+.bx-main{flex:1;min-width:0;overflow-y:auto;padding:16px 20px;}
+
+.bx-ward{margin-bottom:14px;}
+.bx-ward-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;}
+.bx-ward-name{font-weight:700;font-size:13.5px;color:var(--ink);}
+
+.bx-bed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px;}
+.bx-bed{border:1.5px solid var(--line);border-radius:12px;padding:10px 11px;transition:transform .12s,box-shadow .12s;}
+.bx-bed:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+.bx-bed-top{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.bx-bed-name{font-weight:700;font-size:13px;color:var(--ink);}
+.bx-bed-status{font-size:10.5px;font-weight:700;white-space:nowrap;}
+.bx-bed-detail{margin-top:7px;display:flex;flex-direction:column;gap:5px;}
+.bx-bed-row{display:flex;align-items:flex-start;gap:5px;font-size:11.5px;color:var(--ink-2);font-weight:600;}
+.bx-bed-row svg{flex-shrink:0;margin-top:1px;}
+.bx-clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.bx-bed-time{margin-top:7px;display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--ink-3);font-weight:600;}
+
+@media (max-width:560px){
+  .bx-header{padding:14px 16px 12px;}
+  .bx-header-title .h1{font-size:16px;}
+  .bx-main{padding:12px 14px;}
+  .bx-bed-grid{grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:8px;}
+}
+@media (max-width:380px){
+  .bx-bed-grid{grid-template-columns:1fr 1fr;}
+}
 
 /* ── Tables ───────────────────────────────────────────────────────────────── */
 .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);}
@@ -855,6 +909,8 @@ input,select,textarea{font-size:16px;}
 .kc.kc-draggable{cursor:grab;touch-action:none;transition:transform .14s ease, box-shadow .2s ease;}
 .kc.kc-draggable:active{cursor:grabbing;}
 .kc.kc-draggable:focus-visible{outline:2px solid var(--teal, #14b8a6);outline-offset:2px;}
+.kc.kc-clickable{cursor:pointer;}
+.kc.kc-clickable:focus-visible{outline:2px solid var(--teal, #14b8a6);outline-offset:2px;}
 /* The slot left behind by a lifted card becomes a soft dashed drop zone that
    glides (via the FLIP reflow) to wherever the card will land. */
 .kc.kc-dragging{pointer-events:none;box-shadow:none !important;background:transparent !important;border-color:transparent !important;}
@@ -891,7 +947,15 @@ input,select,textarea{font-size:16px;}
   display:flex;
   flex-direction:column;
   box-shadow:0 16px 34px rgba(3,8,20,.24);
+  transition:transform .22s cubic-bezier(.2,.7,.3,1), box-shadow .22s ease;
+  will-change:transform;
 }
+.kc:hover{
+  transform:translateY(-6px) scale(1.015);
+  box-shadow:0 22px 40px rgba(3,8,20,.34);
+}
+.kc.kc-dragging:hover,
+.kc-grid.kc-editing .kc:hover{transform:none;}
 .kc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
 .kc-label{font-size:11px;font-weight:700;letter-spacing:-.01em;line-height:1.2;color:#d7ddea;}
 .kc-icon{
@@ -908,6 +972,11 @@ input,select,textarea{font-size:16px;}
   border-color:#e9edf5;
   background:linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
   box-shadow:0 12px 30px rgba(31,41,55,.08);
+}
+[data-theme="light"] .kc:hover,
+[data-theme="purple"] .kc:hover,
+[data-theme="teal"] .kc:hover{
+  box-shadow:0 20px 38px rgba(31,41,55,.16);
 }
 [data-theme="light"] .kc-val,
 [data-theme="purple"] .kc-val,

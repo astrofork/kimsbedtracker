@@ -57,6 +57,7 @@ export const api = {
   submitRound: () => req("/pre/submit", { method: "POST" }),
   cooOverview: () => req("/coo/overview"),
   cooLiveWards: () => req("/coo/live-wards"),
+  cooBedDetails: () => req("/coo/bed-details"),
   cooPreActivity: () => req("/coo/pre-activity"),
   cooNurseActivity: () => req("/coo/nurse-activity"),
   cooAudit: () => req("/coo/audit"),
