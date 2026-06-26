@@ -14,7 +14,7 @@ const occOf = (w) => {
   return { total, on, or, vr, vn, occ, pct: total > 0 ? Math.round((occ / total) * 100) : 0 };
 };
 const pctColor = (pct) => pct >= 90 ? "var(--st-or)" : pct >= 60 ? "var(--st-o)" : "var(--st-v)";
-const pctBg    = (pct) => pct >= 90 ? "rgba(255,59,138,.12)" : pct >= 60 ? "rgba(249,115,22,.12)" : "rgba(34,197,94,.12)";
+const pctBg    = (pct) => pct >= 90 ? "var(--st-or-bg)" : pct >= 60 ? "var(--st-o-bg)" : "var(--st-v-bg)";
 
 // ── OccBar ───────────────────────────────────────────────────────────────────────
 function OccBar({ w, hero }) {
@@ -157,7 +157,7 @@ function BedDetailSheet({ bed, onSave, onClose }) {
             {physOpts.map(({ val, color: c, icon, lbl, sub }) => (
               <div key={val} className={"doc-status-card" + (physical === val ? " active" : "")}
                 style={{ color: physical === val ? c : "var(--ink-2)" }}
-                onClick={() => handleSetPhysical(val)} role="button" tabIndex={0}
+                onClick={() => handleSetPhysical(val)} role="button" tabIndex={0} aria-pressed={physical === val}
                 onKeyDown={e => (e.key === "Enter" || e.key === " ") && handleSetPhysical(val)}>
                 <div className="doc-status-card-icon"
                   style={{ background: physical === val ? `${c}22` : "var(--line)", color: physical === val ? c : "var(--ink-3)" }}>
@@ -175,7 +175,7 @@ function BedDetailSheet({ bed, onSave, onClose }) {
             {resOpts.map(({ val, color: c, icon, lbl, sub }) => (
               <div key={val} className={"doc-status-card" + (reservation === val ? " active" : "")}
                 style={{ color: reservation === val ? c : "var(--ink-2)" }}
-                onClick={() => setReservation(val)} role="button" tabIndex={0}
+                onClick={() => setReservation(val)} role="button" tabIndex={0} aria-pressed={reservation === val}
                 onKeyDown={e => (e.key === "Enter" || e.key === " ") && setReservation(val)}>
                 <div className="doc-status-card-icon"
                   style={{ background: reservation === val ? `${c}22` : "var(--line)", color: reservation === val ? c : "var(--ink-3)" }}>
@@ -750,18 +750,10 @@ function AddAdmissionModal({ me, onClose, showToast }) {
 }
 
 // ── FindBedModal ─────────────────────────────────────────────────────────────────
-function FindBedModal({ me, onClose, onNavigateToWard }) {
+function FindBedModal({ me, blockDetails, onClose, onNavigateToWard }) {
   useModal(onClose);
-  const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.allSettled(me.blocks.map(b => api.doctorBlock(b.id))).then(results => {
-      const d = {};
-      results.forEach((r, i) => { if (r.status === "fulfilled") d[me.blocks[i].id] = r.value; });
-      setData(d); setLoading(false);
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const data    = blockDetails;
+  const loading = me.blocks.some(b => !blockDetails[b.id]);
 
   const hasAny = !loading && me.blocks.some(b => data?.[b.id]?.wards?.some(w => occOf(w).vn > 0));
 
@@ -821,18 +813,10 @@ function FindBedModal({ me, onClose, onNavigateToWard }) {
 }
 
 // ── ReportsModal ─────────────────────────────────────────────────────────────────
-function ReportsModal({ me, onClose }) {
+function ReportsModal({ me, blockDetails, onClose }) {
   useModal(onClose);
-  const [data,    setData]    = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.allSettled(me.blocks.map(b => api.doctorBlock(b.id))).then(results => {
-      const d = {};
-      results.forEach((r, i) => { if (r.status === "fulfilled") d[me.blocks[i].id] = r.value; });
-      setData(d); setLoading(false);
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const data    = blockDetails;
+  const loading = me.blocks.some(b => !blockDetails[b.id]);
 
   return createPortal(
     <div className="overlay" onClick={onClose}>
@@ -1157,6 +1141,7 @@ export default function DoctorApp({ user, onLogout }) {
   useEffect(() => {
     const socket = createSocket();
     let timer = null;
+    let connected = false;
     const onChange = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
@@ -1166,7 +1151,10 @@ export default function DoctorApp({ user, onLogout }) {
       }, 300);
     };
     socket.on("bed:update", onChange);
-    socket.on("connect", onChange);
+    socket.on("connect", () => {
+      if (connected) onChange();
+      connected = true;
+    });
     return () => { clearTimeout(timer); socket.disconnect(); };
   }, []);
 
@@ -1220,7 +1208,7 @@ export default function DoctorApp({ user, onLogout }) {
     </div>
   );
 
-  const title = ward ? ward.name : blockId ? "Block Details" : menu.find(m => m.key === tab)?.label || "Doctor";
+  const title = ward ? ward.name : blockId ? (me.blocks?.find(b => b.id === blockId)?.name || "Block Details") : menu.find(m => m.key === tab)?.label || "Doctor";
 
   return (
     <AppShell
@@ -1263,8 +1251,8 @@ export default function DoctorApp({ user, onLogout }) {
       )}
 
       {quickAction === "add"     && <AddAdmissionModal me={me} onClose={() => setQuickAction(null)} showToast={showToast} />}
-      {quickAction === "find"    && <FindBedModal me={me} onClose={() => setQuickAction(null)} onNavigateToWard={navigateToWard} />}
-      {quickAction === "reports" && <ReportsModal me={me} onClose={() => setQuickAction(null)} />}
+      {quickAction === "find"    && <FindBedModal me={me} blockDetails={blockDetails} onClose={() => setQuickAction(null)} onNavigateToWard={navigateToWard} />}
+      {quickAction === "reports" && <ReportsModal me={me} blockDetails={blockDetails} onClose={() => setQuickAction(null)} />}
       {quickAction === "blocks"  && createPortal(
         <div className="overlay" onClick={() => setQuickAction(null)}>
           <div className="sheet" role="dialog" aria-modal="true" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>

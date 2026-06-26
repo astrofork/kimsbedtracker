@@ -909,17 +909,12 @@ input,select,textarea{font-size:16px;}
 .doc-block-row-meta{font-size:12px;color:var(--ink-2);margin-top:2px;}
 .doc-block-row-right{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;min-width:76px;}
 .doc-block-row-pct{font-size:18px;font-weight:800;letter-spacing:-.02em;line-height:1;}
-/* Override doc-tile for reports modal (lighter bg, no shadow) */
-.doc-tile{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:10px 8px;text-align:center;}
-.doc-tile-v{font-size:20px;font-weight:800;line-height:1;letter-spacing:-.02em;}
-.doc-tile-l{font-size:9px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;margin-top:5px;}
-
 /* ══ Doctor App v3 — Premium Internal Pages ════════════════════════════════════ */
 .doc-blk-hero{background:linear-gradient(135deg,var(--primary) 0%,var(--primary-deep,#4338ca) 100%);border-radius:20px;padding:22px 20px 18px;margin-bottom:18px;position:relative;overflow:hidden;}
 .doc-blk-hero::before{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.07);pointer-events:none;}
 .doc-blk-hero::after{content:"";position:absolute;right:30px;bottom:-50px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.05);pointer-events:none;}
 .doc-blk-hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px;}
-.doc-blk-hero-name{font-size:22px;font-weight:900;letter-spacing:-.02em;line-height:1.15;color:#fff;}
+.doc-blk-hero-name{font-size:22px;font-weight:900;letter-spacing:-.02em;line-height:1.15;color:#fff;word-break:break-word;overflow-wrap:anywhere;}
 .doc-blk-hero-sub{font-size:12.5px;font-weight:600;color:rgba(255,255,255,.68);margin-top:5px;}
 .doc-blk-hero-right{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex-shrink:0;}
 .doc-blk-hero-pct{font-size:38px;font-weight:900;letter-spacing:-.03em;line-height:1;color:#fff;}
@@ -1063,6 +1058,7 @@ input,select,textarea{font-size:16px;}
   /* KPI val smaller on tiny phones */
   .doc-kpi-val{font-size:22px;}
 }
+@media(max-width:360px){.doc-notif-drop{width:calc(100vw - 24px);right:-12px;}}
 
 /* ══ Executive Dashboard (Command Center) ══════════════════════════════════════ */
 .cc-wrap{max-width:1600px;margin:0 auto;}
