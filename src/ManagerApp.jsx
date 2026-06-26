@@ -2480,7 +2480,7 @@ function PreBlockDetail({ block, allWards, onBack, onChanged, showToast }) {
   const loadPreUsers = async () => {
     try {
       const u = await api.mgrUsers();
-      setPreUsers((u.users || []).filter((x) => x.role === "PRE" && x.pre_block_id === blockData.id));
+      setPreUsers((u.users || []).filter((x) => x.role === "PRE" && (x.pre_block_ids || []).includes(blockData.id)));
     } catch (e) { showToast(toastErr(e)); }
   };
   useEffect(() => { loadPreUsers(); }, [blockData.id]);
@@ -2495,12 +2495,13 @@ function PreBlockDetail({ block, allWards, onBack, onChanged, showToast }) {
   const removePre = async (u) => {
     const ok = await confirm({
       title: `Remove "${u.name}" from block?`,
-      message: `${u.name} will be unassigned from ${blockData.name}. They keep their login access.`,
+      message: `${u.name} will be removed from ${blockData.name}. They keep their login and any other block assignments.`,
       confirmLabel: "Remove", danger: true,
     });
     if (!ok) return;
     try {
-      await api.mgrEditPre(u.id, { preBlockId: null });
+      const newBlockIds = (u.pre_block_ids || []).filter(id => id !== blockData.id);
+      await api.mgrEditPre(u.id, { preBlockIds: newBlockIds });
       loadPreUsers();
       onChanged();
       showToast(`${u.name} removed from block`);
@@ -2593,22 +2594,25 @@ function PreBlockDetail({ block, allWards, onBack, onChanged, showToast }) {
 
 function AssignPreModal({ blockId, blockName, onClose, onSaved }) {
   useModal(onClose);
-  const [unassigned, setUnassigned] = useState([]);
+  const [candidates, setCandidates] = useState([]);
   const [userId,     setUserId]     = useState("");
   const [busy,       setBusy]       = useState(false);
   const [err,        setErr]        = useState("");
 
   useEffect(() => {
     api.mgrUsers().then((r) => {
-      setUnassigned((r.users || []).filter((u) => u.role === "PRE" && !u.pre_block_id));
+      // Show all PRE users who are NOT already in this block
+      setCandidates((r.users || []).filter((u) => u.role === "PRE" && !(u.pre_block_ids || []).includes(blockId)));
     }).catch(() => {});
-  }, []);
+  }, [blockId]);
 
   const save = async () => {
     if (!userId) { setErr("Select a PRE user"); return; }
     setBusy(true);
+    const selectedUser = candidates.find(u => String(u.id) === userId);
+    const currentIds = selectedUser?.pre_block_ids || [];
     try {
-      await api.mgrEditPre(Number(userId), { preBlockId: blockId });
+      await api.mgrEditPre(Number(userId), { preBlockIds: [...currentIds, blockId] });
       onSaved();
     } catch (e) { setErr(friendlyError(e).message); setBusy(false); }
   };
@@ -2623,16 +2627,18 @@ function AssignPreModal({ blockId, blockName, onClose, onSaved }) {
             <button className="chip" onClick={onClose}>Close</button>
           </div>
 
-          <label className="label">PRE User (unassigned)</label>
+          <label className="label">PRE User (not yet in this block)</label>
           <select className="field" value={userId} onChange={(e) => setUserId(e.target.value)}>
             <option value="">— Select PRE user —</option>
-            {unassigned.map((u) => (
-              <option key={u.id} value={u.id}>{u.name} (@{u.username})</option>
+            {candidates.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name} (@{u.username}){(u.pre_block_names || []).length > 0 ? ` · also in: ${u.pre_block_names.join(", ")}` : ""}
+              </option>
             ))}
           </select>
-          {unassigned.length === 0 && (
+          {candidates.length === 0 && (
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-              All PRE users are already assigned to a block.
+              All PRE users are already in this block.
             </div>
           )}
 
@@ -2817,20 +2823,20 @@ export function PreManager({ showToast }) {
         </button>
       </div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-        Each PRE user is assigned to a PRE Block and submits hourly rounds for its wards.
+        Each PRE user can be assigned to one or more PRE Blocks and submits hourly rounds for all their wards.
       </div>
 
       {users.map((u) => (
         <div className="card" key={u.id} style={{ padding: 14, marginBottom: 10 }}>
           <div className="row between">
             <div className="row" style={{ gap: 10 }}>
-              <BlockAvatar code={u.pre_block_name || "?"} size={36} />
+              <BlockAvatar code={(u.pre_block_names || [])[0] || "?"} size={36} />
               <div>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
                 <div className="dim" style={{ fontSize: 11 }}>
                   @{u.username}
-                  {u.pre_block_name
-                    ? <> · <span style={{ color: "var(--teal)" }}>{u.pre_block_name}</span></>
+                  {(u.pre_block_names || []).length > 0
+                    ? <> · <span style={{ color: "var(--teal)" }}>{u.pre_block_names.join(", ")}</span></>
                     : <span style={{ color: "var(--red)" }}> · ⚠ no PRE Block assigned</span>}
                 </div>
               </div>
@@ -2881,15 +2887,19 @@ export function PreManager({ showToast }) {
 function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
   useModal(onClose);
   const isNew = !user;
-  const [username,   setUsername]   = useState(user?.username || "");
-  const [name,       setName]       = useState(user?.name     || "");
-  const [password,   setPassword]   = useState("");
-  const [showPwd,    setShowPwd]    = useState(false);
-  const [shift,      setShift]      = useState(user?.shift    || "morning");
-  const [preBlockId, setPreBlockId] = useState(
-    user?.pre_block_id != null ? String(user.pre_block_id) : ""
+  const [username,    setUsername]    = useState(user?.username || "");
+  const [name,        setName]        = useState(user?.name     || "");
+  const [password,    setPassword]    = useState("");
+  const [showPwd,     setShowPwd]     = useState(false);
+  const [shift,       setShift]       = useState(user?.shift    || "morning");
+  const [preBlockIds, setPreBlockIds] = useState(
+    (user?.pre_block_ids || []).map(Number)
   );
   const [busy, setBusy] = useState(false);
+
+  const toggleBlock = (id) => {
+    setPreBlockIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
 
   const save = async () => {
     if (!name.trim()) { showToast("Display name is required."); return; }
@@ -2911,10 +2921,10 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
       if (isNew) {
         await api.mgrCreatePre({
           username: username.trim().toLowerCase(), password, name, shift,
-          preBlockId: preBlockId ? Number(preBlockId) : null,
+          preBlockIds,
         });
       } else {
-        const data = { name, shift, preBlockId: preBlockId ? Number(preBlockId) : null };
+        const data = { name, shift, preBlockIds };
         if (password) data.password = password;
         await api.mgrEditPre(user.id, data);
       }
@@ -2967,7 +2977,12 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
           </div>
           <div style={{ height: 12 }} />
 
-          <label className="label">Assigned PRE Block</label>
+          <label className="label">
+            Assigned PRE Blocks
+            {preBlockIds.length > 0 && (
+              <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{preBlockIds.length} selected</span>
+            )}
+          </label>
           {preBlocks.length === 0 ? (
             <div style={{
               padding: "10px 14px", borderRadius: 10, background: "#fff8e1",
@@ -2976,14 +2991,28 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
               No active PRE Blocks — create one in the PRE Blks tab first.
             </div>
           ) : (
-            <select className="field" value={preBlockId} onChange={(e) => setPreBlockId(e.target.value)}>
-              <option value="">— Unassigned —</option>
-              {preBlocks.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name} ({b.ward_count} ward{b.ward_count !== 1 ? "s" : ""})
-                </option>
-              ))}
-            </select>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {preBlocks.map((b) => {
+                const checked = preBlockIds.includes(b.id);
+                return (
+                  <label key={b.id} style={{
+                    display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                    padding: "10px 12px", borderRadius: 10,
+                    background: checked ? "var(--primary-10, rgba(79,70,229,.08))" : "var(--panel-2)",
+                    border: `1.5px solid ${checked ? "var(--primary)" : "var(--line)"}`,
+                  }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleBlock(b.id)}
+                      style={{ accentColor: "var(--primary)", width: 16, height: 16, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{b.name}</div>
+                      <div className="dim" style={{ fontSize: 11 }}>
+                        {b.ward_count} ward{b.ward_count !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
           )}
           <div style={{ height: 12 }} />
 
@@ -4018,7 +4047,7 @@ function NurseAccessModal({ assignment, onClose, onSaved, showToast, stationId }
         }
         onSaved();
       } catch (e) {
-        setErr(e?.message || "Save failed");
+        setErr(toastErr(e));
         setBusy(false);
       }
       return;
@@ -4031,7 +4060,7 @@ function NurseAccessModal({ assignment, onClose, onSaved, showToast, stationId }
       await api.mgrEditNurseAccess(assignment.id, { accessType: accType, bedNames: [...selBeds], status });
       onSaved();
     } catch (e) {
-      setErr(e?.message || "Save failed");
+      setErr(toastErr(e));
       setBusy(false);
     }
   };

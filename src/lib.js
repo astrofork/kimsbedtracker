@@ -282,6 +282,18 @@ export function friendlyError(err) {
     return { title: null, message: "Session expired. Please sign in again." };
   if (/500|internal server error/i.test(msg))
     return { title: null, message: "Server error. Please try again in a moment." };
+  // Handle "Request failed (HTTP NNN)" — fires when the server returns no JSON error body
+  // (e.g. nginx 502, unknown route, proxy timeout).
+  const httpMatch = msg.match(/request failed \(HTTP (\d+)\)/i);
+  if (httpMatch) {
+    const code = Number(httpMatch[1]);
+    if (code === 401) return { title: null, message: "Please sign in to continue." };
+    if (code === 403) return { title: null, message: "You don't have permission to do that." };
+    if (code === 404) return { title: null, message: "The requested item was not found. It may have been deleted." };
+    if (code === 409) return { title: null, message: "This change conflicts with existing data. Please refresh and try again." };
+    if (code >= 500) return { title: null, message: "Server error. Please try again in a moment." };
+    return { title: null, message: "Something went wrong. Please try again." };
+  }
   // The server returns specific, already-friendly messages for all other cases
   // (wrong password, wrong role, missing fields, etc.) — pass them through as-is.
   return { title: null, message: msg };

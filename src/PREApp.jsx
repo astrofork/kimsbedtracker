@@ -278,98 +278,108 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
         Open each ward to manage individual bed status, then submit.
       </div>
 
-      <div className="card-grid">
-        {data.wards.map((w, i) => {
-          const entered = w.vacant !== null;
-          const nonOp = w.operational === false;
-          return (
-            <div className="ward-card slide-up" key={w.id}
-              style={{
-                animationDelay: i * 0.03 + "s",
-                borderColor: nonOp ? "var(--line)" : entered ? "var(--st-v)" : "var(--line)",
-                padding: 16,
-                display: "flex", flexDirection: "column",
-                opacity: nonOp ? 0.75 : 1,
-              }}>
-              {/* Header */}
-              <div className="row between" style={{ marginBottom: (entered && !nonOp) ? 14 : 12 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
-                  <div className="dim" style={{ fontSize: 12 }}>
-                    {w.total} beds
-                    {!nonOp && entered && <span style={{ color: "var(--st-v)" }}> · complete</span>}
-                  </div>
-                </div>
-                {nonOp
-                  ? <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
-                      <Ic d={icons.alert} s={12} /> Non-op
-                    </span>
-                  : entered
-                    ? <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
-                    : <span className="tag b">no data</span>}
-              </div>
-
-              {/* Non-operational warning */}
-              {nonOp && (
-                <div style={{
-                  background: "var(--panel-2)", borderRadius: 10, padding: "12px 14px",
-                  display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14,
-                }}>
-                  <Ic d={icons.alert} s={15} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
-                  <div className="dim" style={{ fontSize: 12 }}>
-                    Ward non-operational — excluded from this round.
-                  </div>
-                </div>
-              )}
-
-              {/* Stats block */}
-              {entered && !nonOp && (
-                <div style={{
-                  display: "flex",
-                  background: "var(--panel-2)",
-                  borderRadius: 10,
-                  overflow: "hidden",
-                  marginBottom: 14,
-                }}>
-                  {[
-                    { label: "Vacant",   val: w.vacant,             color: "var(--st-v)"  },
-                    { label: "Vac+Res",  val: w.reserved  ?? 0,     color: "var(--st-vr)" },
-                    { label: "Occupied", val: w.occupied  ?? 0,     color: "var(--st-o)"  },
-                    { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "var(--st-or)" },
-                  ].map(({ label, val, color }, idx) => (
-                    <div key={label} style={{
-                      flex: 1,
-                      textAlign: "center",
-                      padding: "12px 6px",
-                      borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
-                      </div>
-                      <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Action buttons */}
-              {!nonOp && (
-                <div className="row" style={{ gap: 8, marginTop: "auto" }}>
-                  <button className="btn btn-ghost" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
-                    onClick={() => setBedModal({ ward: w, tab: "view" })}>
-                    <Ic d={icons.grid} s={13} /> View Beds
-                  </button>
-                  <button className="btn btn-primary" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
-                    onClick={() => setBedModal({ ward: w, tab: "manage" })}>
-                    <Ic d={icons.bed} s={13} /> Manage Beds
-                  </button>
-                </div>
-              )}
+      {(data.blocks ?? [{ id: data.preBlockId, name: "", wards: data.wards }]).map((block, bi) => (
+        <div key={block.id}>
+          {(data.blocks ?? []).length > 1 && (
+            <div className="floor-head" style={{ marginTop: bi > 0 ? 24 : 0, marginBottom: 12 }}>
+              {block.name}
+              <span className="chip" style={{ marginLeft: 8, fontSize: 11, verticalAlign: "middle" }}>
+                {block.wards.length} ward{block.wards.length !== 1 ? "s" : ""}
+              </span>
             </div>
-          );
-        })}
-      </div>
+          )}
+          <div className="card-grid">
+            {block.wards.map((w, i) => {
+              const entered = w.vacant !== null;
+              const nonOp = w.operational === false;
+              return (
+                <div className="ward-card slide-up" key={w.id}
+                  style={{
+                    animationDelay: i * 0.03 + "s",
+                    borderColor: nonOp ? "var(--line)" : entered ? "var(--st-v)" : "var(--line)",
+                    padding: 16,
+                    display: "flex", flexDirection: "column",
+                    opacity: nonOp ? 0.75 : 1,
+                  }}>
+                  {/* Header */}
+                  <div className="row between" style={{ marginBottom: (entered && !nonOp) ? 14 : 12 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
+                      <div className="dim" style={{ fontSize: 12 }}>
+                        {w.total} beds
+                        {!nonOp && entered && <span style={{ color: "var(--st-v)" }}> · complete</span>}
+                      </div>
+                    </div>
+                    {nonOp
+                      ? <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
+                          <Ic d={icons.alert} s={12} /> Non-op
+                        </span>
+                      : entered
+                        ? <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
+                        : <span className="tag b">no data</span>}
+                  </div>
+
+                  {/* Non-operational warning */}
+                  {nonOp && (
+                    <div style={{
+                      background: "var(--panel-2)", borderRadius: 10, padding: "12px 14px",
+                      display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14,
+                    }}>
+                      <Ic d={icons.alert} s={15} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
+                      <div className="dim" style={{ fontSize: 12 }}>
+                        Ward non-operational — excluded from this round.
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stats block */}
+                  {entered && !nonOp && (
+                    <div style={{
+                      display: "flex",
+                      background: "var(--panel-2)",
+                      borderRadius: 10,
+                      overflow: "hidden",
+                      marginBottom: 14,
+                    }}>
+                      {[
+                        { label: "Vacant",   val: w.vacant,                color: "var(--st-v)"  },
+                        { label: "Vac+Res",  val: w.reserved  ?? 0,        color: "var(--st-vr)" },
+                        { label: "Occupied", val: w.occupied  ?? 0,        color: "var(--st-o)"  },
+                        { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "var(--st-or)" },
+                      ].map(({ label, val, color }, idx) => (
+                        <div key={label} style={{
+                          flex: 1, textAlign: "center", padding: "12px 6px",
+                          borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                            <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
+                          </div>
+                          <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action buttons */}
+                  {!nonOp && (
+                    <div className="row" style={{ gap: 8, marginTop: "auto" }}>
+                      <button className="btn btn-ghost" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
+                        onClick={() => setBedModal({ ward: w, tab: "view" })}>
+                        <Ic d={icons.grid} s={13} /> View Beds
+                      </button>
+                      <button className="btn btn-primary" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
+                        onClick={() => setBedModal({ ward: w, tab: "manage" })}>
+                        <Ic d={icons.bed} s={13} /> Manage Beds
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
 
       <button
         className={"btn btn-primary btn-block" + (alarmActive ? " pulse" : "")}
