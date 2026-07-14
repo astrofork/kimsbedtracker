@@ -1441,9 +1441,10 @@ function BedManagerModal({ ward, onClose, showToast }) {
   const [confirm, confirmDialog]    = useConfirm();
 
   // ── Add Bed tab state ─────────────────────────────────────────────────────
+  // Bed type isn't chosen here anymore — every new bed always inherits the
+  // ward's own type (Census/Non-Census is ward-level only).
   const [addName,    setAddName]    = useState("");
   const [addOpStatus, setAddOp]    = useState(true);
-  const [addBedType,  setAddType]  = useState(ward.bed_type || "Non-Census");
   const [addAcStatus, setAddAc]    = useState(true);
 
   // ── Generate Beds tab state ───────────────────────────────────────────────
@@ -1453,7 +1454,6 @@ function BedManagerModal({ ward, onClose, showToast }) {
   const [genEnd,     setGenEnd]     = useState(ward.total_beds || 10);
   const [genRooms,   setGenRooms]   = useState("");
   const [genOpStatus, setGenOp]     = useState(true);
-  const [genBedType,  setGenType]   = useState(ward.bed_type || "Non-Census");
   const [genAcStatus, setGenAc]     = useState(true);
 
   // ── Search / filter / pagination ─────────────────────────────────────────
@@ -1488,7 +1488,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
     if (names.length === 0) { showToast("No bed names to generate"); return; }
     setBusy(true);
     try {
-      const res = await api.generateBeds(ward.id, names, { operationalStatus: genOpStatus, bedType: genBedType, acStatus: genAcStatus });
+      const res = await api.generateBeds(ward.id, names, { operationalStatus: genOpStatus, acStatus: genAcStatus });
       await load(); setTab("beds");
       showToast(`Generated ${res.generated} bed${res.generated !== 1 ? "s" : ""} ✓`);
     } catch (e) { showToast(toastErr(e)); }
@@ -1500,7 +1500,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
     if (!name) return;
     setBusy(true);
     try {
-      await api.addBed(ward.id, name, { operationalStatus: addOpStatus, bedType: addBedType, acStatus: addAcStatus });
+      await api.addBed(ward.id, name, { operationalStatus: addOpStatus, acStatus: addAcStatus });
       setAddName("");
       await load(); setTab("beds");
       showToast(`Bed "${name}" added ✓`);
@@ -1754,14 +1754,6 @@ function BedManagerModal({ ward, onClose, showToast }) {
                   </select>
                 </div>
                 <div style={{ flex: 1, minWidth: 130 }}>
-                  <label className="label">Bed Type</label>
-                  <select className="field" value={addBedType}
-                    onChange={(e) => setAddType(e.target.value)}>
-                    <option value="Census">Census</option>
-                    <option value="Non-Census">Non-Census</option>
-                  </select>
-                </div>
-                <div style={{ flex: 1, minWidth: 130 }}>
                   <label className="label">AC Status</label>
                   <select className="field" value={addAcStatus ? "true" : "false"}
                     onChange={(e) => setAddAc(e.target.value === "true")}>
@@ -1769,6 +1761,9 @@ function BedManagerModal({ ward, onClose, showToast }) {
                     <option value="false">Non-AC</option>
                   </select>
                 </div>
+              </div>
+              <div className="dim" style={{ fontSize: 11, marginTop: -6, marginBottom: 12 }}>
+                Bed type follows this ward ({ward.bed_type || "Census"}) — change it from Edit Ward if needed.
               </div>
 
               <button className="btn btn-primary" disabled={busy || !addName.trim()}
@@ -1833,14 +1828,6 @@ function BedManagerModal({ ward, onClose, showToast }) {
                   </select>
                 </div>
                 <div style={{ flex: 1, minWidth: 130 }}>
-                  <label className="label">Bed Type</label>
-                  <select className="field" value={genBedType}
-                    onChange={(e) => setGenType(e.target.value)}>
-                    <option value="Census">Census</option>
-                    <option value="Non-Census">Non-Census</option>
-                  </select>
-                </div>
-                <div style={{ flex: 1, minWidth: 130 }}>
                   <label className="label">AC Status</label>
                   <select className="field" value={genAcStatus ? "true" : "false"}
                     onChange={(e) => setGenAc(e.target.value === "true")}>
@@ -1848,6 +1835,9 @@ function BedManagerModal({ ward, onClose, showToast }) {
                     <option value="false">Non-AC</option>
                   </select>
                 </div>
+              </div>
+              <div className="dim" style={{ fontSize: 11, marginTop: -8, marginBottom: 14 }}>
+                Bed type follows this ward ({ward.bed_type || "Census"}) — change it from Edit Ward if needed.
               </div>
 
               {genPreview.length > 0 && (
@@ -1876,6 +1866,7 @@ function BedManagerModal({ ward, onClose, showToast }) {
         <BedEditModal
           bed={editingBed}
           wardName={ward.name}
+          wardBedType={ward.bed_type}
           onClose={() => setEditingBed(null)}
           onSaved={async (msg) => { setEditingBed(null); await load(); showToast(msg); }}
           onRemove={async () => { const b = editingBed; setEditingBed(null); await removeBed(b); }}
@@ -1888,11 +1879,10 @@ function BedManagerModal({ ward, onClose, showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  BED EDIT MODAL
 // ══════════════════════════════════════════════════════════════════════════════
-function BedEditModal({ bed, wardName, onClose, onSaved, onRemove }) {
+function BedEditModal({ bed, wardName, wardBedType, onClose, onSaved, onRemove }) {
   useModal(onClose);
   const [name,      setName]      = useState(bed.bed_name);
   const [opStatus,  setOpStatus]  = useState(bed.operational_status !== false);
-  const [bedType,   setBedType]   = useState(bed.bed_type || "Census");
   const [acStatus,  setAcStatus]  = useState(bed.ac_status !== false);
   const [busy,      setBusy]      = useState(false);
   const [err,       setErr]       = useState("");
@@ -1903,16 +1893,14 @@ function BedEditModal({ bed, wardName, onClose, onSaved, onRemove }) {
     try {
       const nameChanged = name.trim() !== bed.bed_name;
       const opChanged   = opStatus  !== (bed.operational_status !== false);
-      const typeChanged = bedType   !== (bed.bed_type || "Census");
       const acChanged   = acStatus  !== (bed.ac_status !== false);
 
       if (nameChanged)
         await api.renameBed(bed.id, name.trim());
-      if (opChanged || typeChanged || acChanged)
+      if (opChanged || acChanged)
         await api.updateBedMaster(bed.id, {
-          ...(opChanged   ? { operationalStatus: opStatus } : {}),
-          ...(typeChanged ? { bedType }                     : {}),
-          ...(acChanged   ? { acStatus }                    : {}),
+          ...(opChanged ? { operationalStatus: opStatus } : {}),
+          ...(acChanged ? { acStatus }                    : {}),
         });
 
       await onSaved(`Bed "${name.trim()}" updated ✓`);
@@ -1961,16 +1949,10 @@ function BedEditModal({ bed, wardName, onClose, onSaved, onRemove }) {
               : "Bed is offline — excluded from occupancy counts."}
           </div>
 
-          {/* Bed type */}
+          {/* Bed type — ward-level only, not editable per bed */}
           <label className="label">Bed type</label>
-          <div className="seg" style={{ marginBottom: 4 }}>
-            <button className={bedType === "Census"     ? "on" : ""} onClick={() => setBedType("Census")}>Census</button>
-            <button className={bedType === "Non-Census" ? "on" : ""} onClick={() => setBedType("Non-Census")}>Non-Census</button>
-          </div>
-          <div className="dim" style={{ fontSize: 11, marginBottom: 16 }}>
-            {bedType === "Census"
-              ? "Counted in official hospital census figures."
-              : "Excluded from census — day-care, observation, etc."}
+          <div className="dim" style={{ fontSize: 12, marginBottom: 16, fontWeight: 600 }}>
+            {wardBedType || "Census"} <span style={{ fontWeight: 400 }}>— follows {wardName}. Change it from Edit Ward.</span>
           </div>
 
           {/* AC status */}
@@ -4848,6 +4830,571 @@ export function DestinationManager({ showToast }) {
           ))
         )}
       </div>
+      {confirmDialog}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DEPARTMENTS & DOCTORS — master data for the admission form's searchable
+//  dropdowns. Deliberately separate from the ward/floor/building-block hierarchy:
+//  a department/doctor isn't a physical place, so nothing here touches wards or beds.
+// ══════════════════════════════════════════════════════════════════════════════
+export function DepartmentDoctorManager({ showToast }) {
+  const [section, setSection] = useState("departments"); // "departments" | "doctors"
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div className="h2" style={{ marginBottom: 4 }}>Departments & Doctors</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 16 }}>
+        Master data for the Department / Consultant dropdowns shown when admitting a patient.
+        A doctor can belong to multiple departments.
+      </div>
+      <div className="seg" style={{ marginBottom: 16, maxWidth: 320 }}>
+        <button className={section === "departments" ? "on" : ""} onClick={() => setSection("departments")}>
+          <Ic d={icons.layers} s={14} /> Departments
+        </button>
+        <button className={section === "doctors" ? "on" : ""} onClick={() => setSection("doctors")}>
+          <Ic d={icons.stethoscope} s={14} /> Doctors
+        </button>
+      </div>
+      {section === "departments" ? <DepartmentSection showToast={showToast} /> : <DoctorMasterSection showToast={showToast} />}
+    </div>
+  );
+}
+
+function DepartmentSection({ showToast }) {
+  const [depts,    setDepts]    = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [busy,     setBusy]     = useState(false);
+  const [newName,  setNewName]  = useState("");
+  const [editId,   setEditId]   = useState(null);
+  const [editName, setEditName] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async () => {
+    setLoading(true);
+    try { setDepts((await api.mgrDepartments()).departments || []); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const add = async () => {
+    const n = newName.trim();
+    if (!n) return;
+    setBusy(true);
+    try {
+      await api.mgrCreateDepartment(n);
+      setNewName("");
+      await load();
+      showToast(`"${n}" added ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const saveRename = async (d) => {
+    const n = editName.trim();
+    if (!n || n === d.name) { setEditId(null); return; }
+    setBusy(true);
+    try {
+      await api.mgrUpdateDepartment(d.id, { name: n });
+      setEditId(null);
+      await load();
+      showToast(`Renamed to "${n}" ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const toggleActive = async (d) => {
+    setBusy(true);
+    try {
+      await api.mgrUpdateDepartment(d.id, { active: !d.active });
+      await load();
+      showToast(`"${d.name}" ${d.active ? "deactivated" : "activated"}`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (d) => {
+    const ok = await confirm({
+      title: `Delete "${d.name}"?`,
+      message: "This cannot be undone. Blocked if any patient admission has used this department.",
+      confirmLabel: "Delete", danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.mgrDeleteDepartment(d.id);
+      await load();
+      showToast(`"${d.name}" deleted`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--line)" };
+  const iconBtn  = (onClick, color, title, icon) => (
+    <button title={title} onClick={onClick} disabled={busy}
+      style={{ background: "none", border: "none", cursor: busy ? "default" : "pointer", color, padding: 4, borderRadius: 6, display: "flex" }}>
+      <Ic d={icon} s={16} />
+    </button>
+  );
+
+  return (
+    <div>
+      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+        <label className="label">Add new department</label>
+        <div className="row" style={{ gap: 8 }}>
+          <input className="field" value={newName} style={{ flex: 1 }} maxLength={150}
+            placeholder='e.g. "Cardiology"'
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()} />
+          <button className="btn btn-primary" disabled={busy || !newName.trim()} onClick={add} style={{ whiteSpace: "nowrap" }}>
+            <Ic d={icons.plus} s={15} /> Add
+          </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {loading ? (
+          <div className="dim" style={{ padding: 32, textAlign: "center" }}>
+            <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
+          </div>
+        ) : depts.length === 0 ? (
+          <div className="empty">No departments yet.</div>
+        ) : (
+          depts.map((d) => (
+            <div key={d.id} style={{ ...rowStyle, background: d.active ? "transparent" : "var(--panel-2)", opacity: d.active ? 1 : 0.65 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {editId === d.id ? (
+                  <input className="field" autoFocus maxLength={150} value={editName}
+                    style={{ padding: "6px 10px", fontSize: 13 }}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") saveRename(d); if (e.key === "Escape") setEditId(null); }}
+                    onBlur={() => saveRename(d)} />
+                ) : (
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{d.name}</span>
+                )}
+              </div>
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
+                background: d.active ? "var(--green-bg)" : "var(--panel-2)",
+                color: d.active ? "var(--green)" : "var(--ink-3)",
+                border: `1px solid ${d.active ? "var(--green)" : "var(--line)"}`,
+                flexShrink: 0, whiteSpace: "nowrap",
+              }}>{d.active ? "Active" : "Inactive"}</span>
+              <div className="row" style={{ gap: 0, flexShrink: 0 }}>
+                {iconBtn(() => { setEditId(d.id); setEditName(d.name); }, "var(--primary)", "Rename", icons.pencil)}
+                {iconBtn(() => toggleActive(d), d.active ? "var(--amber)" : "var(--green)", d.active ? "Deactivate" : "Activate", d.active ? icons.eyeOff : icons.eye)}
+                {iconBtn(() => remove(d), "var(--red)", "Delete", icons.trash)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      {confirmDialog}
+    </div>
+  );
+}
+
+function DoctorMasterSection({ showToast }) {
+  const [doctors,  setDoctors]  = useState([]);
+  const [depts,    setDepts]    = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [busy,     setBusy]     = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
+
+  // Add-new form
+  const [newName, setNewName] = useState("");
+  const [newDeptIds, setNewDeptIds] = useState([]);
+
+  // Edit-in-place
+  const [editId, setEditId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editDeptIds, setEditDeptIds] = useState([]);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [d, dept] = await Promise.all([api.mgrDoctorsMaster(), api.mgrDepartments()]);
+      setDoctors(d.doctors || []);
+      setDepts(dept.departments || []);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const toggleDeptId = (list, setList, id) => {
+    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  };
+
+  const add = async () => {
+    const n = newName.trim();
+    if (!n || newDeptIds.length === 0) return;
+    setBusy(true);
+    try {
+      await api.mgrCreateDoctorMaster(n, newDeptIds);
+      setNewName(""); setNewDeptIds([]);
+      await load();
+      showToast(`"${n}" added ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const startEdit = (doc) => {
+    setEditId(doc.id); setEditName(doc.name); setEditDeptIds(doc.departments.map((d) => d.id));
+  };
+
+  const saveEdit = async () => {
+    const n = editName.trim();
+    if (!n || editDeptIds.length === 0) return;
+    setBusy(true);
+    try {
+      await api.mgrUpdateDoctorMaster(editId, { name: n, departmentIds: editDeptIds });
+      setEditId(null);
+      await load();
+      showToast("Saved ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const toggleActive = async (doc) => {
+    setBusy(true);
+    try {
+      await api.mgrUpdateDoctorMaster(doc.id, { active: !doc.active });
+      await load();
+      showToast(`"${doc.name}" ${doc.active ? "deactivated" : "activated"}`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (doc) => {
+    const ok = await confirm({
+      title: `Delete "${doc.name}"?`,
+      message: "This cannot be undone. Blocked if this doctor has been used in any patient admission.",
+      confirmLabel: "Delete", danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.mgrDeleteDoctorMaster(doc.id);
+      await load();
+      showToast(`"${doc.name}" deleted`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const deptChips = (list, setList) => (
+    <div className="chip-pick-grid" style={{ marginTop: 8 }}>
+      {depts.map((d) => {
+        const checked = list.includes(d.id);
+        return (
+          <label key={d.id} className={"chip-pick" + (checked ? " on" : "")}>
+            <input type="checkbox" checked={checked} onChange={() => toggleDeptId(list, setList, d.id)} />
+            <span>{d.name}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+
+  const iconBtn = (onClick, color, title, icon) => (
+    <button title={title} onClick={onClick} disabled={busy}
+      style={{ background: "none", border: "none", cursor: busy ? "default" : "pointer", color, padding: 4, borderRadius: 6, display: "flex" }}>
+      <Ic d={icon} s={16} />
+    </button>
+  );
+
+  return (
+    <div>
+      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+        <label className="label">Add new doctor</label>
+        <input className="field" value={newName} maxLength={150}
+          placeholder='e.g. "Dr. Ramesh Kumar"'
+          onChange={(e) => setNewName(e.target.value)} />
+        <div className="dim" style={{ fontSize: 11, marginTop: 10 }}>Departments (select at least one)</div>
+        {deptChips(newDeptIds, setNewDeptIds)}
+        <button className="btn btn-primary" disabled={busy || !newName.trim() || newDeptIds.length === 0} onClick={add}
+          style={{ marginTop: 12 }}>
+          <Ic d={icons.plus} s={15} /> Add doctor
+        </button>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {loading ? (
+          <div className="dim" style={{ padding: 32, textAlign: "center" }}>
+            <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
+          </div>
+        ) : doctors.length === 0 ? (
+          <div className="empty">No doctors yet.</div>
+        ) : (
+          doctors.map((doc) => (
+            <div key={doc.id} style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: doc.active ? "transparent" : "var(--panel-2)", opacity: doc.active ? 1 : 0.65 }}>
+              {editId === doc.id ? (
+                <div>
+                  <input className="field" autoFocus maxLength={150} value={editName}
+                    style={{ padding: "6px 10px", fontSize: 13, marginBottom: 8 }}
+                    onChange={(e) => setEditName(e.target.value)} />
+                  {deptChips(editDeptIds, setEditDeptIds)}
+                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                    <button className="btn btn-primary" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy} onClick={saveEdit}>Save</button>
+                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="row between" style={{ gap: 10 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{doc.name}</span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
+                        background: doc.active ? "var(--green-bg)" : "var(--panel-2)",
+                        color: doc.active ? "var(--green)" : "var(--ink-3)",
+                        border: `1px solid ${doc.active ? "var(--green)" : "var(--line)"}`,
+                      }}>{doc.active ? "Active" : "Inactive"}</span>
+                    </div>
+                    <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }}>
+                      {doc.departments.length ? doc.departments.map((d) => d.name).join(", ") : "No departments"}
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: 0, flexShrink: 0 }}>
+                    {iconBtn(() => startEdit(doc), "var(--primary)", "Edit", icons.pencil)}
+                    {iconBtn(() => toggleActive(doc), doc.active ? "var(--amber)" : "var(--green)", doc.active ? "Deactivate" : "Activate", doc.active ? icons.eyeOff : icons.eye)}
+                    {iconBtn(() => remove(doc), "var(--red)", "Delete", icons.trash)}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      {confirmDialog}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DISCHARGE LOUNGE — a virtual holding ward, set up once by an admin. Lives
+//  outside the floor/building-block hierarchy (no floor, ever) and its beds never
+//  count toward hospital total/Census/Non-Census anywhere in the app — they only
+//  exist so a physically-vacated bed can free up before System Checkout finishes.
+// ══════════════════════════════════════════════════════════════════════════════
+export function DischargeLoungeManager({ showToast }) {
+  const [data,    setData]    = useState(null); // { configured, ward, beds } | null (loading)
+  const [busy,    setBusy]    = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
+
+  // Setup form (shown only when not yet configured)
+  const [setupName, setSetupName] = useState("Discharge Lounge");
+  const [setupBeds, setSetupBeds] = useState(10);
+
+  // Rename + add-beds controls (shown once configured)
+  const [renaming,  setRenaming]  = useState(false);
+  const [renameVal, setRenameVal] = useState("");
+  const [addCount,  setAddCount]  = useState(5);
+
+  // Per-bed rename
+  const [editBedId, setEditBedId] = useState(null);
+  const [editBedName, setEditBedName] = useState("");
+
+  const load = async () => {
+    try { setData(await api.mgrDischargeLounge()); }
+    catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const setup = async () => {
+    const n = setupName.trim();
+    if (!n) return;
+    setBusy(true);
+    try {
+      await api.mgrSetupDischargeLounge(n, Math.max(0, Math.floor(setupBeds) || 0));
+      await load();
+      showToast("Discharge Lounge created ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const rename = async () => {
+    const n = renameVal.trim();
+    if (!n) { setRenaming(false); return; }
+    setBusy(true);
+    try {
+      await api.mgrRenameDischargeLounge(n);
+      setRenaming(false);
+      await load();
+      showToast("Renamed ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const addBeds = async () => {
+    const count = Math.max(1, Math.floor(addCount) || 0);
+    const existingNums = (data.beds || [])
+      .map((b) => parseInt(b.bed_name, 10))
+      .filter((n) => !Number.isNaN(n));
+    const start = (existingNums.length ? Math.max(...existingNums) : 0) + 1;
+    const names = Array.from({ length: count }, (_, i) => String(start + i));
+    setBusy(true);
+    try {
+      const res = await api.generateBeds(data.ward.id, names, {});
+      await load();
+      showToast(`Added ${res.generated} bed${res.generated !== 1 ? "s" : ""} ✓`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const toggleBedOp = async (bed) => {
+    setBusy(true);
+    try {
+      await api.updateBedMaster(bed.id, { operationalStatus: !(bed.operational_status !== false) });
+      await load();
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const saveBedRename = async (bed) => {
+    const n = editBedName.trim();
+    if (!n || n === bed.bed_name) { setEditBedId(null); return; }
+    setBusy(true);
+    try {
+      await api.renameBed(bed.id, n);
+      setEditBedId(null);
+      await load();
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const removeBed = async (bed) => {
+    const ok = await confirm({
+      title: `Delete bed "${bed.bed_name}"?`,
+      message: bed.physical_status === "OCCUPIED"
+        ? "This bed currently holds a patient — deleting it will not move them. Free it up first."
+        : "This cannot be undone.",
+      confirmLabel: "Delete", danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.deleteBed(bed.id);
+      await load();
+      showToast(`Bed "${bed.bed_name}" deleted`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!data) return (
+    <div className="dim" style={{ padding: 32, textAlign: "center" }}>
+      <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div className="h2" style={{ marginBottom: 4 }}>Discharge Lounge</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 18 }}>
+        A virtual holding area — not a real physical ward on any floor. When Physical Checkout
+        completes but System Checkout is still pending, PRE can move the patient here so the real
+        bed frees up immediately. Its beds never count toward hospital total, Census, or Non-Census beds.
+      </div>
+
+      {!data.configured ? (
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Not set up yet</div>
+          <label className="label">Name</label>
+          <input className="field" value={setupName} maxLength={150} style={{ marginBottom: 12 }}
+            onChange={(e) => setSetupName(e.target.value)} />
+          <label className="label">Initial number of beds</label>
+          <input className="field" type="number" min={0} max={200} value={setupBeds} style={{ marginBottom: 14, maxWidth: 140 }}
+            onChange={(e) => setSetupBeds(e.target.value)} />
+          <button className="btn btn-primary" disabled={busy || !setupName.trim()} onClick={setup}>
+            <Ic d={icons.plus} s={15} /> Create Discharge Lounge
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+            <div className="row between" style={{ gap: 10, marginBottom: renaming ? 10 : 0 }}>
+              {renaming ? (
+                <input className="field" autoFocus value={renameVal} maxLength={150} style={{ flex: 1 }}
+                  onChange={(e) => setRenameVal(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") rename(); if (e.key === "Escape") setRenaming(false); }} />
+              ) : (
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{data.ward.name}</div>
+                  <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
+                    {data.beds.length} bed{data.beds.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+              )}
+              {renaming ? (
+                <div className="row" style={{ gap: 6 }}>
+                  <button className="btn btn-primary" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy} onClick={rename}>Save</button>
+                  <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy} onClick={() => setRenaming(false)}>Cancel</button>
+                </div>
+              ) : (
+                <button className="chip" style={{ fontSize: 12 }} onClick={() => { setRenaming(true); setRenameVal(data.ward.name); }}>
+                  <Ic d={icons.pencil} s={12} /> Rename
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+            <label className="label">Add more beds</label>
+            <div className="row" style={{ gap: 8 }}>
+              <input className="field" type="number" min={1} max={200} value={addCount} style={{ width: 100 }}
+                onChange={(e) => setAddCount(e.target.value)} />
+              <button className="btn btn-primary" disabled={busy} onClick={addBeds} style={{ whiteSpace: "nowrap" }}>
+                <Ic d={icons.plus} s={15} /> Add beds
+              </button>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            {data.beds.length === 0 ? (
+              <div className="empty">No beds yet — add some above.</div>
+            ) : (
+              data.beds.map((bed) => {
+                const op = bed.operational_status !== false;
+                return (
+                  <div key={bed.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--line)", opacity: op ? 1 : 0.6 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {editBedId === bed.id ? (
+                        <input className="field" autoFocus maxLength={40} value={editBedName}
+                          style={{ padding: "6px 10px", fontSize: 13 }}
+                          onChange={(e) => setEditBedName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") saveBedRename(bed); if (e.key === "Escape") setEditBedId(null); }}
+                          onBlur={() => saveBedRename(bed)} />
+                      ) : (
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{bed.bed_name}</span>
+                      )}
+                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, flexShrink: 0,
+                      background: bed.physical_status === "OCCUPIED" ? "var(--st-o-bg, rgba(249,115,22,.12))" : "var(--st-v-bg, rgba(34,197,94,.12))",
+                      color: bed.physical_status === "OCCUPIED" ? "var(--st-o, #F97316)" : "var(--st-v, #22C55E)",
+                    }}>{bed.physical_status === "OCCUPIED" ? "Occupied" : "Vacant"}</span>
+                    <div className="row" style={{ gap: 0, flexShrink: 0 }}>
+                      <button title="Rename" onClick={() => { setEditBedId(bed.id); setEditBedName(bed.bed_name); }} disabled={busy}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--primary)", padding: 4, borderRadius: 6, display: "flex" }}>
+                        <Ic d={icons.pencil} s={16} />
+                      </button>
+                      <button title={op ? "Mark non-operational" : "Mark operational"} onClick={() => toggleBedOp(bed)} disabled={busy}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: op ? "var(--amber)" : "var(--green)", padding: 4, borderRadius: 6, display: "flex" }}>
+                        <Ic d={op ? icons.eyeOff : icons.eye} s={16} />
+                      </button>
+                      <button title="Delete" onClick={() => removeBed(bed)} disabled={busy}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", padding: 4, borderRadius: 6, display: "flex" }}>
+                        <Ic d={icons.trash} s={16} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </>
+      )}
       {confirmDialog}
     </div>
   );

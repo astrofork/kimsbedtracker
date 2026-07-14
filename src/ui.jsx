@@ -48,6 +48,14 @@ export const icons = {
   filter: <><path d="M3 4h18l-7 9v6l-4 2v-8L3 4Z" /></>,
   sort:   <><path d="M11 5v14M11 5 7 9M11 5l4 4" /><path d="M19 5v14M19 19l-4-4M19 19l4-4" /></>,
   x:      <><path d="M18 6 6 18M6 6l12 12" /></>,
+  exchange: <><path d="m17 3 4 4-4 4" /><path d="M3 7h18" /><path d="m7 21-4-4 4-4" /><path d="M21 17H3" /></>,
+  pill:   <><rect x="3" y="9" width="18" height="6" rx="3" transform="rotate(-45 12 12)" /><path d="m8.5 8.5 7 7" /></>,
+  info:     <><circle cx="12" cy="12" r="9" /><path d="M12 8h.01" /><path d="M12 11v5" /></>,
+  target:   <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="1" fill="currentColor" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></>,
+  ban:      <><circle cx="12" cy="12" r="9" /><path d="m5.7 5.7 12.6 12.6" /></>,
+  bookmark: <><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z" /></>,
+  wallet:   <><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" /><path d="M3 5v14a2 2 0 0 0 2 2h16v-5" /><path d="M18 12a2 2 0 0 0 0 4h4v-4Z" /></>,
+  save:     <><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" /><path d="M17 21v-8H7v8" /><path d="M7 3v5h8" /></>,
 };
 
 /* ── Modal / sheet helpers ────────────────────────────────────────────────── */

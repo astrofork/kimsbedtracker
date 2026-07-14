@@ -43,6 +43,13 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Exposed as a CSS var so body-level portals (e.g. modals escaping a
+  // transformed ancestor) can offset their centering to match the content
+  // column instead of the full viewport — see .overlay's use of --sb-w.
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sb-w", collapsed ? "70px" : "240px");
+  }, [collapsed]);
+
   // A "sectioned" menu is an array of { section, items:[…] } groups. A flat menu
   // (array of nav items) is still supported for the PRE / Nurse apps.
   const sectioned = Array.isArray(menu) && menu.some((m) => Array.isArray(m?.items));

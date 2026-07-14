@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/loginfc", "destination": "/index.html" }
+  ]
+}

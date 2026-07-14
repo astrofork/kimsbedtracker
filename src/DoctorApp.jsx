@@ -1,9 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { createPortal } from "react-dom";
 import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
-import { Ic, icons, useModal } from "./ui.jsx";
+import { Ic, icons } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { naturalSort, bedStateColor, bedStateBg, bedStateShort } from "./bedUtils.js";
+import { bedStateColor } from "./bedUtils.js";
+import { WardPage, ProfileThemeRow, BackBtn } from "./PREApp.jsx";
+import DischargesPage from "./DischargesPage.jsx";
+
+// Doctor endpoints for the shared ward/bed pages (same UI as PRE, doctor APIs + role).
+const DOCTOR_CFG = {
+  role: "DOCTOR",
+  listBeds: (wardId) => api.doctorBeds(wardId),
+  updateBedStatus: (...a) => api.doctorUpdateBedStatus(...a),
+  payerTypes: () => api.doctorPayerTypes(),
+  destinations: () => api.doctorDestinations(),
+};
+import DischargeMiniWidget from "./DischargeMiniWidget.jsx";
 
 // ── Small helpers ───────────────────────────────────────────────────────────────
 const initialsOf = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
@@ -27,309 +38,6 @@ function OccBar({ w }) {
   );
 }
 
-// ── Bed tile ────────────────────────────────────────────────────────────────────
-const BedCard = React.memo(function BedCard({ bed, onClick }) {
-  const color = bedStateColor(bed.physical_status, bed.reservation_status);
-  const bg    = bedStateBg(bed.physical_status, bed.reservation_status);
-  const dimmed = bed.operational_status === false;
-  return (
-    <div
-      className={"bed-tile" + (onClick ? " tap" : "")}
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
-      onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
-      style={{ borderColor: color, background: bg, opacity: dimmed ? 0.5 : 1, cursor: onClick ? undefined : "default" }}
-    >
-      <span className="bname">{bed.bed_name}</span>
-      <span className="bstate" style={{ color }}>{bedStateShort(bed.physical_status, bed.reservation_status)}</span>
-      {bed.physical_status === "OCCUPIED" && bed.payer_type && (
-        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--primary)", lineHeight: 1.1,
-          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {bed.payer_type}
-        </span>
-      )}
-      {bed.reservation_status === "RESERVED" && bed.physical_status === "OCCUPIED" && bed.destination && (
-        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--st-or)", lineHeight: 1.1,
-          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          → {bed.destination}
-        </span>
-      )}
-      {bed.reservation_status === "RESERVED" && bed.physical_status === "VACANT" && bed.reservation_note && (
-        <span title={bed.reservation_note} style={{ fontSize: 9, fontWeight: 700, color: "var(--st-vr)", lineHeight: 1.1,
-          maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          📝 {bed.reservation_note}
-        </span>
-      )}
-    </div>
-  );
-});
-
-// ── Bed status update dialog ────────────────────────────────────────────────────
-function BedDetailSheet({ bed, onSave, onClose }) {
-  useModal(onClose);
-  const [physical,     setPhysical]     = useState(bed.physical_status);
-  const [reservation,  setReservation]  = useState(bed.reservation_status);
-  const [payer,        setPayer]        = useState(bed.payer_type || "");
-  const [payerTypes,   setPayerTypes]   = useState([]);
-  const [destination,  setDestination]  = useState(bed.destination || "");
-  const [destinations, setDestinations] = useState([]);
-  const [resNote,      setResNote]      = useState(bed.reservation_note || "");
-  const [saving,       setSaving]       = useState(false);
-  const [noteOpen,     setNoteOpen]     = useState(false);
-  const color = bedStateColor(physical, reservation);
-
-  useEffect(() => { api.doctorPayerTypes().then(r => setPayerTypes(r.payerTypes || [])).catch(() => {}); }, []);
-  useEffect(() => { api.doctorDestinations().then(r => setDestinations(r.destinations || [])).catch(() => {}); }, []);
-
-  const handleSetPhysical = (val) => { setPhysical(val); if (val === "VACANT") setPayer(""); };
-  const needsPayer  = physical === "OCCUPIED";
-  const payerLocked = physical === "OCCUPIED" && reservation === "RESERVED" && bed.physical_status === "OCCUPIED";
-
-  // OCC+RES = patient temporarily away at a destination (OT, Scanning) — bed
-  // held for them. Destination is required to enter/stay in this state.
-  const needsDestination = physical === "OCCUPIED" && reservation === "RESERVED";
-
-  // VAC+RES = bed held for an incoming patient. Note describing why is required.
-  const needsResNote = physical === "VACANT" && reservation === "RESERVED";
-
-  const handleSave = async () => {
-    if (needsPayer && !payer && !payerLocked) return;
-    if (needsDestination && !destination) return;
-    if (needsResNote && !resNote.trim()) return;
-    setSaving(true);
-    const payerArg = physical === "VACANT" ? null : (payerLocked && payer === (bed.payer_type || "") ? undefined : payer || null);
-    const destinationArg = needsDestination ? destination : undefined;
-    const resNoteArg = needsResNote ? resNote : undefined;
-    try { await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg); onClose(); }
-    catch { /* parent toasts + rolls back */ }
-    finally { setSaving(false); }
-  };
-
-  const info = [
-    ["Bed Type", bed.bed_type || "Census", "var(--ink)"],
-    ["Operational", bed.operational_status !== false ? "Yes" : "No", bed.operational_status !== false ? "var(--st-v)" : "var(--st-or)"],
-    ["Current", bedStateShort(physical, reservation), color],
-  ];
-
-  // Portal to <body>: the bed grid sits inside a `.slide-up` wrapper whose
-  // transform would otherwise trap this position:fixed overlay inside the
-  // content column (off-centre, scrim not covering the sidebar).
-  return createPortal(
-    <div className="overlay" onClick={onClose}>
-      <div className="sheet" role="dialog" aria-modal="true" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
-        <div className="grab" />
-        <div className="pad">
-          <div className="row between" style={{ marginBottom: 16 }}>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 17 }}>{bed.bed_name}</div>
-              <div className="dim" style={{ fontSize: 12, marginTop: 1 }}>Update bed status</div>
-            </div>
-            <button className="chip" onClick={onClose}>Close</button>
-          </div>
-
-          <div className="doc-info-strip">
-            {info.map(([label, val, c]) => (
-              <div key={label} className="doc-info-cell">
-                <div className="doc-info-l">{label}</div>
-                <div className="doc-info-v" style={{ color: c }}>{val}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Read-only callouts — always reflect what's actually saved on the bed
-              right now, regardless of which toggle is currently selected below. */}
-          {bed.physical_status === "OCCUPIED" && bed.reservation_status === "RESERVED" && bed.destination && (
-            <div style={{
-              background: "var(--st-or-bg, rgba(255,59,138,.1))", border: "1px solid var(--st-or)",
-              borderRadius: 10, padding: "10px 12px", marginBottom: 16,
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--st-or)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>
-                Sent to
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", wordBreak: "break-word", overflowWrap: "anywhere" }}>{bed.destination}</div>
-            </div>
-          )}
-          {bed.physical_status === "VACANT" && bed.reservation_status === "RESERVED" && bed.reservation_note && (
-            <div onClick={() => setNoteOpen(o => !o)} role="button" tabIndex={0}
-              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setNoteOpen(o => !o)}
-              style={{
-                background: "var(--st-vr-bg, rgba(124,58,237,.1))", border: "1px solid var(--st-vr)",
-                borderRadius: 10, padding: "10px 12px", marginBottom: 16, cursor: "pointer",
-              }}>
-              <div className="row between" style={{ alignItems: "baseline" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "var(--st-vr)", textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 4 }}>
-                  Reservation Note
-                </div>
-                <span className="dim" style={{ fontSize: 10, flexShrink: 0 }}>{noteOpen ? "tap to collapse" : "tap to view full"}</span>
-              </div>
-              <div style={{
-                fontSize: 13, fontWeight: 600, color: "var(--ink)",
-                wordBreak: "break-word", overflowWrap: "anywhere",
-                display: noteOpen ? "block" : "-webkit-box",
-                WebkitLineClamp: noteOpen ? "unset" : 2,
-                WebkitBoxOrient: "vertical",
-                overflow: noteOpen ? "visible" : "hidden",
-              }}>{bed.reservation_note}</div>
-            </div>
-          )}
-
-          <div style={{ marginBottom: 16 }}>
-            <div className="doc-field-lbl">Physical Status</div>
-            <div className="doc-toggle">
-              {[["VACANT", "var(--st-v)", "Vacant"], ["OCCUPIED", "var(--st-o)", "Occupied"]].map(([val, c, lbl]) => (
-                <button key={val} onClick={() => handleSetPhysical(val)} className="doc-toggle-btn"
-                  style={{ borderColor: physical === val ? c : "var(--line)", background: physical === val ? c : "transparent", color: physical === val ? "#fff" : "var(--ink-2)" }}>{lbl}</button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ marginBottom: physical === "OCCUPIED" ? 16 : 22 }}>
-            <div className="doc-field-lbl">Reservation Status</div>
-            <div className="doc-toggle">
-              {[["NONE", "var(--ink-2)", "None"], ["RESERVED", "var(--st-vr)", "Reserved"]].map(([val, c, lbl]) => (
-                <button key={val} onClick={() => setReservation(val)} className="doc-toggle-btn"
-                  style={{ borderColor: reservation === val ? c : "var(--line)", background: reservation === val ? c : "transparent", color: reservation === val ? "#fff" : "var(--ink-2)" }}>{lbl}</button>
-              ))}
-            </div>
-          </div>
-
-          {physical === "OCCUPIED" && (
-            <div style={{ marginBottom: 22 }}>
-              <div className="doc-field-lbl">Payer Type {!payerLocked && <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>}</div>
-              <select className="field" value={payer} onChange={(e) => setPayer(e.target.value)}
-                style={{ borderColor: needsPayer && !payer && !payerLocked ? "var(--red)" : undefined }}>
-                <option value="">{payerLocked ? `— Keep current (${bed.payer_type || "—"}) —` : "— Select payer type —"}</option>
-                {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
-              </select>
-              {needsPayer && !payer && !payerLocked && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Payer type is required for occupied beds.</div>
-              )}
-            </div>
-          )}
-
-          {needsDestination && (
-            <div style={{ marginBottom: 22 }}>
-              <div className="doc-field-lbl">Current Location <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span></div>
-              <select className="field" value={destination} onChange={(e) => setDestination(e.target.value)}
-                style={{ borderColor: !destination ? "var(--red)" : undefined }}>
-                <option value="">— Choose Location —</option>
-                {destinations.map(dt => <option key={dt.id} value={dt.name}>{dt.name}</option>)}
-              </select>
-              {!destination && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Current location is required for Occupied + Reserved beds.</div>
-              )}
-            </div>
-          )}
-
-          {needsResNote && (
-            <div style={{ marginBottom: 22 }}>
-              <div className="doc-field-lbl">Note <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span></div>
-              <textarea className="field" value={resNote} maxLength={255} rows={2}
-                placeholder="e.g. Reserved for incoming transfer from ICU"
-                onChange={(e) => setResNote(e.target.value)}
-                style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", wordBreak: "break-word", overflowWrap: "anywhere", borderColor: !resNote.trim() ? "var(--red)" : undefined }} />
-              {!resNote.trim() && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>A note is required for Vacant + Reserved beds.</div>
-              )}
-            </div>
-          )}
-
-          <div className="row" style={{ gap: 10 }}>
-            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" style={{ flex: 1.5 }} disabled={saving || (needsPayer && !payer && !payerLocked) || (needsDestination && !destination) || (needsResNote && !resNote.trim())} onClick={handleSave}>
-              {saving ? "Saving…" : "Update Status"}
-            </button>
-          </div>
-          <div style={{ height: 8 }} />
-        </div>
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-// ── Ward bed view ────────────────────────────────────────────────────────────────
-const BED_LEGEND = [
-  ["Vacant", "var(--st-v)"], ["Vac+Res", "var(--st-vr)"], ["Occupied", "var(--st-o)"], ["Occ+Res", "var(--st-or)"],
-];
-function WardBedView({ ward, beds, loading, onBack, onSave }) {
-  const [filter,     setFilter]     = useState("ALL");
-  const [editingBed, setEditingBed] = useState(null);
-
-  const sorted = useMemo(() => [...beds].sort((a, b) => naturalSort(a.bed_name, b.bed_name)), [beds]);
-  // Live occupancy derived from the current bed list (stays correct after edits).
-  const live = useMemo(() => {
-    const c = { total: sorted.length, vacant: 0, reserved: 0, occupied: 0, occupied_reserved: 0 };
-    for (const b of sorted) {
-      const o = b.physical_status === "OCCUPIED", r = b.reservation_status === "RESERVED";
-      if (o && r) c.occupied_reserved++; else if (o) c.occupied++; else if (r) c.reserved++; else c.vacant++;
-    }
-    return c;
-  }, [sorted]);
-  const fc = { ALL: sorted.length, Vacant: 0, Occupied: 0, Reserved: 0 };
-  for (const b of sorted) {
-    if (b.physical_status === "VACANT") fc.Vacant++; else fc.Occupied++;
-    if (b.reservation_status === "RESERVED") fc.Reserved++;
-  }
-  const displayed = sorted.filter((b) =>
-    filter === "Vacant"   ? b.physical_status === "VACANT" :
-    filter === "Occupied" ? b.physical_status === "OCCUPIED" :
-    filter === "Reserved" ? b.reservation_status === "RESERVED" : true);
-  const FILTERS = [["ALL", "All"], ["Vacant", "Vacant"], ["Occupied", "Occupied"], ["Reserved", "Reserved"]];
-
-  return (
-    <div className="slide-up">
-      <button className="doc-back" onClick={onBack}>
-        <Ic d={icons.chevron} s={15} style={{ transform: "rotate(180deg)" }} /> Back
-      </button>
-      <div className="row between" style={{ alignItems: "flex-end", marginBottom: 12 }}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 19, letterSpacing: "-.01em" }}>{ward.name}</div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>{sorted.length} beds · {fc.Vacant} vacant · {fc.Occupied} occupied</div>
-        </div>
-      </div>
-      <OccBar w={live} />
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, margin: "16px 0 14px" }}>
-        {FILTERS.map(([key, label]) => (
-          <button key={key} className={"fchip" + (filter === key ? " on" : "")} onClick={() => setFilter(key)}>
-            {label}{fc[key] > 0 ? ` ${fc[key]}` : ""}
-          </button>
-        ))}
-      </div>
-
-      {loading ? (
-        <div className="dim" style={{ textAlign: "center", padding: "32px 0" }}>
-          <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={22} /></span>
-        </div>
-      ) : displayed.length === 0 ? (
-        <div className="card empty"><Ic d={icons.bed} s={26} /><div style={{ marginTop: 8, fontWeight: 600 }}>No beds match this filter.</div></div>
-      ) : (
-        <div className="bed-grid">
-          {displayed.map((bed) => (
-            <BedCard key={bed.id} bed={bed} onClick={bed.operational_status !== false ? () => setEditingBed(bed) : undefined} />
-          ))}
-        </div>
-      )}
-
-      <div className="row" style={{ gap: 14, marginTop: 16, flexWrap: "wrap" }}>
-        {BED_LEGEND.map(([lbl, c]) => (
-          <span key={lbl} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--ink-2)", fontWeight: 600 }}>
-            <span style={{ width: 9, height: 9, borderRadius: 3, background: c }} />{lbl}
-          </span>
-        ))}
-      </div>
-
-      {editingBed && (
-        <BedDetailSheet bed={editingBed}
-          onSave={async (...a) => { await onSave(...a); setEditingBed(null); }}
-          onClose={() => setEditingBed(null)} />
-      )}
-    </div>
-  );
-}
-
 // ── Block detail ─────────────────────────────────────────────────────────────────
 function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
   const [data,      setData]      = useState(null);
@@ -343,6 +51,15 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
   useEffect(() => { load(); }, [load, reloadKey]);
 
   const [reviewingWard, setReviewingWard] = useState(null);
+  const [docsOpen, setDocsOpen] = useState(false); // doctors-list dropdown
+  const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
+
+  // On phones, hide the app top bar while inside a block — the back button is the
+  // way out, and the reclaimed space goes to the ward cards. (CSS: body.ward-focus)
+  useEffect(() => {
+    document.body.classList.add("ward-focus");
+    return () => document.body.classList.remove("ward-focus");
+  }, []);
 
   const review = async () => {
     setReviewing(true);
@@ -380,43 +97,72 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
 
   return (
     <div className="slide-up">
-      <button className="doc-back" onClick={onBack}>
-        <Ic d={icons.chevron} s={15} style={{ transform: "rotate(180deg)" }} /> All blocks
-      </button>
-
-      <div className="doc-review-bar">
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 20, letterSpacing: "-.02em" }}>{data.name}</div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
-            {data.wards.length} wards · {totals.total} beds · {blockPct}% occupied
-            {data.reviewedAt ? <> · reviewed {fmtRelative(data.reviewedAt)}</> : ""}
+      {/* Header — back · block name + meta · doctors dropdown + Mark Reviewed */}
+      <div className="row between" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 12, minWidth: 0, flex: "1 1 240px" }}>
+          <BackBtn onClick={onBack} />
+          <div style={{ minWidth: 0 }}>
+            <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
+            <div className="dim" style={{ fontSize: 11.5 }}>
+              {data.wards.length} wards · {totals.total} beds · {blockPct}% occupied
+              {data.reviewedAt ? <> · reviewed {fmtRelative(data.reviewedAt)}</> : ""}
+            </div>
           </div>
         </div>
-        <button className="btn btn-primary" style={{ padding: "10px 16px", fontSize: 13, whiteSpace: "nowrap" }} disabled={reviewing || data.wards.length === 0} onClick={review}>
-          <Ic d={icons.check} s={15} /> {reviewing ? "Saving…" : "Mark Reviewed"}
-        </button>
+        <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+          {data.doctors.length > 0 && (
+            <div style={{ position: "relative" }}>
+              <button className="chip" onClick={() => setDocsOpen(o => !o)} aria-expanded={docsOpen}>
+                <Ic d={icons.users} s={13} /> {data.doctors.length} doctor{data.doctors.length !== 1 ? "s" : ""}
+                <Ic d={icons.chevron} s={12} style={{ transform: docsOpen ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform .15s" }} />
+              </button>
+              {docsOpen && (
+                <div style={{
+                  position: "absolute", left: 0, top: "calc(100% + 6px)", zIndex: 60,
+                  minWidth: 200, maxWidth: "calc(100vw - 32px)",
+                  background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12,
+                  boxShadow: "var(--shadow-md)", padding: 6,
+                }}>
+                  {data.doctors.map((d) => (
+                    <div key={d.id} className="row" style={{ gap: 10, padding: "8px 10px", borderRadius: 8 }}>
+                      <span className="doc-chip-av">{initialsOf(d.name)}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <button className="btn btn-primary" style={{ padding: "10px 16px", fontSize: 13, whiteSpace: "nowrap" }} disabled={reviewing || data.wards.length === 0} onClick={review}>
+            <Ic d={icons.check} s={15} /> {reviewing ? "Saving…" : "Mark Reviewed"}
+          </button>
+        </div>
       </div>
 
       {data.description && <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>{data.description}</div>}
-
-      {data.doctors.length > 0 && (
-        <div className="doc-chips">
-          {data.doctors.map((d) => (
-            <span key={d.id} className="doc-chip"><span className="doc-chip-av">{initialsOf(d.name)}</span>{d.name}</span>
-          ))}
-        </div>
-      )}
 
       {data.wards.length === 0 ? (
         <div className="card empty"><Ic d={icons.grid} s={28} /><div style={{ marginTop: 8, fontWeight: 600 }}>No wards assigned</div></div>
       ) : (
         <>
           <div className="floor-head">Wards</div>
+          {/* Ward picker — jump straight to one ward when the list is long */}
+          {data.wards.length > 1 && (
+            <select className="field" aria-label="Filter by ward" value={wardFilter}
+              onChange={(e) => setWardFilter(e.target.value)}
+              style={{ marginBottom: 14, maxWidth: 380, fontWeight: 600 }}>
+              <option value="all">All wards ({data.wards.length})</option>
+              {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+            </select>
+          )}
           <div className="card-grid">
-            {data.wards.map((w, i) => {
+            {data.wards.filter((w) => wardFilter === "all" || String(w.id) === wardFilter).map((w, i) => {
               const o = occOf(w);
               return (
-                <div key={w.id} className="doc-ward slide-up" style={{ animationDelay: i * 0.03 + "s" }}>
+                <div key={w.id} className="doc-ward slide-up tap" style={{ animationDelay: i * 0.03 + "s" }}
+                  role="button" tabIndex={0}
+                  onClick={() => w.operational !== false && onOpenWard(w)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && w.operational !== false && onOpenWard(w)}>
                   <div className="row between" style={{ alignItems: "flex-start" }}>
                     <div style={{ minWidth: 0 }}>
                       {(w.block_name || w.floor_name) && <div className="doc-ward-loc">{[w.block_name, w.floor_name].filter(Boolean).join(" · ")}</div>}
@@ -441,11 +187,13 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
                   <OccBar w={w} />
 
                   <div className="row" style={{ gap: 8, marginTop: 14 }}>
-                    <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", fontSize: 13 }} disabled={w.operational === false} onClick={() => onOpenWard(w)}>
+                    <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", fontSize: 13 }} disabled={w.operational === false}
+                      onClick={(e) => { e.stopPropagation(); onOpenWard(w); }}>
                       <Ic d={icons.bed} s={14} /> {w.operational === false ? "Non-operational" : "View / Update Beds"}
                     </button>
                     <button className="btn btn-ghost" style={{ padding: "10px 12px", fontSize: 13, whiteSpace: "nowrap" }}
-                      disabled={reviewingWard === w.id} onClick={() => reviewWard(w.id)} title="Mark this ward reviewed">
+                      disabled={reviewingWard === w.id}
+                      onClick={(e) => { e.stopPropagation(); reviewWard(w.id); }} title="Mark this ward reviewed">
                       <Ic d={icons.check} s={14} /> {reviewingWard === w.id ? "…" : "Review"}
                     </button>
                   </div>
@@ -495,6 +243,8 @@ function Dashboard({ me, user, onOpenBlock, showSummary }) {
               <div key={l} className="doc-stat"><div className="doc-stat-v" style={{ color: c }}>{v}</div><div className="doc-stat-l">{l}</div></div>
             ))}
           </div>
+
+          <DischargeMiniWidget />
         </>
       )}
 
@@ -577,8 +327,6 @@ export default function DoctorApp({ user, onLogout }) {
   const [lastSync,    setLastSync]    = useState(null);
   const [blockId,     setBlockId]     = useState(null);
   const [ward,        setWard]        = useState(null);
-  const [wardBeds,    setWardBeds]    = useState([]);
-  const [bedsLoading, setBedsLoading] = useState(false);
   const [reloadKey,   setReloadKey]   = useState(0);
   const loadRef = useRef(null);
 
@@ -591,38 +339,16 @@ export default function DoctorApp({ user, onLogout }) {
   }, []);
   loadRef.current = load;
 
-  const loadWardBeds = useCallback(async (wardId) => {
-    setBedsLoading(true);
-    try { const r = await api.doctorBeds(wardId); setWardBeds(r.beds || []); }
-    catch (e) { showToast(toastErr(e)); }
-    finally { setBedsLoading(false); }
-  }, [showToast]);
-
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     const socket = createSocket();
     const onChange = () => { loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); };
     socket.on("bed:update", onChange);
+    socket.on("discharge:update", onChange);
     socket.on("connect", onChange);
     return () => { socket.disconnect(); };
   }, []);
-
-  useEffect(() => { if (ward) loadWardBeds(ward.id); /* eslint-disable-next-line */ }, [ward?.id, reloadKey]);
-
-  const handleSave = async (bedId, physical, reservation, payer, destination, reservationNote) => {
-    const prev = wardBeds;
-    const stillOccRes = physical === "OCCUPIED" && reservation === "RESERVED";
-    const stillVacRes = physical === "VACANT" && reservation === "RESERVED";
-    setWardBeds((bs) => bs.map((b) => b.id !== bedId ? b : {
-      ...b, physical_status: physical, reservation_status: reservation,
-      payer_type: physical === "VACANT" ? null : (payer !== undefined ? payer : b.payer_type),
-      destination: stillOccRes ? (destination !== undefined ? destination : b.destination) : null,
-      reservation_note: stillVacRes ? (reservationNote !== undefined ? reservationNote : b.reservation_note) : null,
-    }));
-    try { await api.doctorUpdateBedStatus(bedId, physical, reservation, payer, destination, reservationNote); showToast("Saved ✓"); }
-    catch (e) { setWardBeds(prev); showToast(toastErr(e)); throw e; }
-  };
 
   const openBlock = (id) => { setBlockId(id); setWard(null); };
   const backToBlocks = () => { setBlockId(null); setWard(null); };
@@ -630,11 +356,13 @@ export default function DoctorApp({ user, onLogout }) {
   const menu = [
     { key: "dash",     icon: icons.home,        label: "Dashboard" },
     { key: "blocks",   icon: icons.grid,        label: "My Blocks" },
+    { key: "discharges", icon: icons.clipboard,  label: "Discharges" },
     { key: "activity", icon: icons.clock,       label: "Activity" },
     { key: "profile",  icon: icons.user,        label: "Profile" },
   ];
 
   if (me === null) return (
+    <div className="preui">
     <div className="empty" style={{ paddingTop: 120 }}>
       {loadError ? (
         <>
@@ -650,11 +378,13 @@ export default function DoctorApp({ user, onLogout }) {
       )}
       {toast && <div className="toast">{toast}</div>}
     </div>
+    </div>
   );
 
   const title = ward ? ward.name : blockId ? "Block Details" : menu.find((m) => m.key === tab)?.label || "Doctor";
 
   return (
+    <div className="preui">
     <AppShell
       menu={menu}
       active={tab}
@@ -665,9 +395,17 @@ export default function DoctorApp({ user, onLogout }) {
       topExtra={<button onClick={load} className="appbar-btn" title="Refresh"><Ic d={icons.refresh} s={17} /></button>}
     >
       {ward ? (
-        <WardBedView ward={ward} beds={wardBeds} loading={bedsLoading} onBack={() => setWard(null)} onSave={handleSave} />
+        <WardPage
+          ward={{ ...ward, ward: ward.name }}
+          initialTab="manage"
+          cfg={DOCTOR_CFG}
+          allWards={[]}
+          onBack={() => setWard(null)}
+        />
       ) : blockId ? (
         <BlockDetail blockId={blockId} reloadKey={reloadKey} onBack={backToBlocks} onOpenWard={setWard} showToast={showToast} />
+      ) : tab === "discharges" ? (
+        <DischargesPage role="DOCTOR" />
       ) : tab === "activity" ? (
         <ActivityView />
       ) : tab === "profile" ? (
@@ -704,6 +442,8 @@ export default function DoctorApp({ user, onLogout }) {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+      <ProfileThemeRow />
     </AppShell>
+    </div>
   );
 }

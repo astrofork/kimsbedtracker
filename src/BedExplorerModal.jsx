@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { api, fmtRelative, friendlyError } from "./lib.js";
 import { Ic, icons, useModal, AppError } from "./ui.jsx";
+import { dischargeBadge } from "./bedUtils.js";
 
 // Five mutually-exclusive buckets, checked in priority order so a bed is
 // only ever counted once (a non-operational bed is "Out of Service" first,
@@ -19,8 +20,28 @@ function classify(bed) {
   return bed.reservation_status === "RESERVED" ? "OCC_RES" : "ON_BED";
 }
 
+// System Checkout done but the patient hasn't actually left yet — a plain
+// Occupied bed (classify() still calls it ON_BED) but the admin dashboard's
+// per-type "Overstay" cards need to tell it apart from a regular on-bed
+// patient. Keyed off patient_left, not physical_checkout_status — Physical
+// Checkout can be marked COMPLETED with "Patient left: No", which still means
+// the patient is physically in the bed. Mirrors bedService.ts's
+// bedStateBreakdown() CASE exactly.
+function isOverstay(bed) {
+  return bed.physical_status === "OCCUPIED" && bed.reservation_status === "NONE"
+    && bed.discharge_tracking?.system_checkout_status === "COMPLETED"
+    && bed.discharge_tracking?.patient_left !== true;
+}
+
+const ALL_STATUSES        = ["VACANT", "ON_BED", "OCC_RES", "VAC_RES", "OOS"];
+const OPERATIONAL_STATUSES = ["VACANT", "ON_BED", "OCC_RES", "VAC_RES"];
+
 // Maps a clicked dashboard card to the fixed set of beds it shows — this is
 // a plain viewer, not a filterable explorer, so there's nothing to pivot.
+// Note: classify() doesn't distinguish Lounge beds or "overstay" (System
+// Checkout done, Physical pending) from a plain Occupied bed — so "On Bed"
+// here already includes both, same as the admin dashboard's "Total Patients"
+// (onbed + overstay + lounge) — no separate status needed for that card.
 const ENTRY_PRESETS = {
   "Vacant":              { statuses: ["VACANT"] },
   "On Bed":              { statuses: ["ON_BED"] },
@@ -30,12 +51,53 @@ const ENTRY_PRESETS = {
   "Total Vacant":        { statuses: ["VACANT", "VAC_RES"] },
   "Census Occupied":     { statuses: ["ON_BED", "OCC_RES"], bedType: "Census" },
   "Non-Census Occupied": { statuses: ["ON_BED", "OCC_RES"], bedType: "Non-Census" },
+
+  // Admin dashboard — Hospital Snapshot / Occupancy Board. New keys, distinct
+  // from the ones above, so nothing here can change what an old card shows.
+  // "Lounge" beds are deliberately excluded from every one of these except
+  // Total Patients and the card that's specifically about the lounge — matches
+  // adminDashboard()'s own scoping exactly (see bedService.ts).
+  "admin:Total Beds":           { statuses: ALL_STATUSES, excludeBedType: "Lounge" },
+  "admin:Operational Beds":     { statuses: OPERATIONAL_STATUSES, excludeBedType: "Lounge" },
+  "admin:Census Beds":          { statuses: ALL_STATUSES, bedType: "Census" },
+  "admin:Non-Census Beds":      { statuses: ALL_STATUSES, bedType: "Non-Census" },
+  "admin:Total Patients":       { statuses: ["ON_BED"] },
+  "admin:Total Occ Census":     { statuses: ["ON_BED", "OCC_RES"], bedType: "Census" },
+  "admin:Total Occ Non-Census": { statuses: ["ON_BED", "OCC_RES"], bedType: "Non-Census" },
+  "admin:In Discharge Lounge":  { statuses: ["ON_BED", "OCC_RES"], bedType: "Lounge" },
+  "admin:Vacant":               { statuses: ["VACANT", "VAC_RES"], excludeBedType: "Lounge" },
+  "admin:Census Daycare":       { statuses: ["ON_BED", "OCC_RES"], bedType: "Census", admissionType: "DAYCARE" },
+  "admin:Non-Census Daycare":   { statuses: ["ON_BED", "OCC_RES"], bedType: "Non-Census", admissionType: "DAYCARE" },
+
+  // CEO's Occupancy Board layout. "On Bed" here means the backend's narrower
+  // onbed bucket (excludes Overstay) — different from the plain "On Bed"
+  // preset above, which still lumps onbed+overstay together for old cards.
+  "admin:Census On Bed":        { statuses: ["ON_BED"], bedType: "Census", custom: (b) => !isOverstay(b) },
+  "admin:Census Res":           { statuses: ["OCC_RES"], bedType: "Census" },
+  "admin:Census Overstay":      { statuses: ["ON_BED"], bedType: "Census", custom: isOverstay },
+  "admin:Non-Census On Bed":    { statuses: ["ON_BED"], bedType: "Non-Census", custom: (b) => !isOverstay(b) },
+  "admin:Non-Census Res":       { statuses: ["OCC_RES"], bedType: "Non-Census" },
+  "admin:Non-Census Overstay":  { statuses: ["ON_BED"], bedType: "Non-Census", custom: isOverstay },
+  "admin:Vacant Census":        { statuses: ["VACANT"], bedType: "Census" },
+  "admin:Vacant Census Res":    { statuses: ["VAC_RES"], bedType: "Census" },
+  "admin:Vacant Non-Census":    { statuses: ["VACANT"], bedType: "Non-Census" },
+  "admin:Vacant Non-Census Res":{ statuses: ["VAC_RES"], bedType: "Non-Census" },
+  "admin:Patient Type IPD":     { statuses: ["ON_BED", "OCC_RES"], admissionType: "IP" },
+  "admin:Patient Type Daycare": { statuses: ["ON_BED", "OCC_RES"], admissionType: "DAYCARE" },
+  "admin:Patient Type OPD":     { statuses: ["ON_BED", "OCC_RES"], admissionType: "OPD" },
 };
 
 function entryFilter(entry) {
-  if (entry?.payer) return { statuses: new Set(["ON_BED", "OCC_RES"]), bedType: null, payer: entry.payer };
+  if (entry?.payer) return { statuses: new Set(["ON_BED", "OCC_RES"]), bedType: null, excludeBedType: null, payer: entry.payer, admissionType: null, custom: null };
   const preset = ENTRY_PRESETS[entry?.label];
-  return { statuses: new Set(preset?.statuses || []), bedType: preset?.bedType || null, payer: null };
+  return {
+    statuses: new Set(preset?.statuses || []),
+    bedType: preset?.bedType || null,
+    excludeBedType: preset?.excludeBedType || null,
+    custom: preset?.custom || null,
+    payer: null,
+    admissionType: preset?.admissionType || null,
+  };
 }
 
 export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose }) {
@@ -60,7 +122,10 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose }) 
       if (!wardIdSet.has(b.ward_id)) return false;
       if (!filter.statuses.has(classify(b))) return false;
       if (filter.bedType && (b.bed_type || "Census") !== filter.bedType) return false;
+      if (filter.excludeBedType && (b.bed_type || "Census") === filter.excludeBedType) return false;
       if (filter.payer && b.payer_type !== filter.payer) return false;
+      if (filter.admissionType && b.admission_type !== filter.admissionType) return false;
+      if (filter.custom && !filter.custom(b)) return false;
       return true;
     });
   }, [allBeds, wardIdSet, filter]);
@@ -99,7 +164,7 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose }) 
               <Ic d={icons.bed} s={20} />
             </span>
             <div>
-              <div className="h1" style={{ fontSize: 18 }}>{entry?.label || "Beds"}</div>
+              <div className="h1" style={{ fontSize: 18 }}>{(entry?.label || "Beds").replace(/^admin:/, "")}</div>
               <div className="dim" style={{ fontSize: 12.5 }}>
                 {loading ? "Loading…" : `${matchedBeds.length} bed${matchedBeds.length === 1 ? "" : "s"}`}
               </div>
@@ -154,8 +219,13 @@ function BedCard({ bed }) {
     <div className={"bx-bed" + (rich ? " bx-bed-rich" : "")} style={{ borderColor: meta.color, background: meta.bg }}>
       <div className="bx-bed-top">
         <span className="bx-bed-name">{bed.bed_name}</span>
-        <span className="bx-bed-status" style={{ color: meta.color }}>{meta.label}</span>
+        <span className="bx-bed-status" style={{ color: meta.color, background: meta.bg }}>{meta.label}</span>
       </div>
+      {(status === "ON_BED" || status === "OCC_RES") && dischargeBadge(bed.discharge_tracking) && (
+        <div className="bx-bed-row" style={{ fontSize: 11, fontWeight: 700, color: "var(--primary)" }}>
+          🏷 {dischargeBadge(bed.discharge_tracking)}
+        </div>
+      )}
       {rich && (
         <div className="bx-bed-detail">
           {status === "OCC_RES" ? (

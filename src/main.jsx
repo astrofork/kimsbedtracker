@@ -6,10 +6,16 @@ import { enablePush } from "./push.js";
 import { initTheme, Ic, icons } from "./ui.jsx";
 import { PwaManager } from "./pwa.jsx";
 import Login from "./Login.jsx";
+import LoginFC from "./LoginFC.jsx";
 import PREApp from "./PREApp.jsx";
 import COOApp from "./COOApp.jsx";
 import NurseApp from "./NurseApp.jsx";
 import DoctorApp from "./DoctorApp.jsx";
+import FCApp from "./FCApp.jsx";
+
+// FC (Finance Coordinator) signs in through a separate URL, not the shared
+// role-tab login screen — checked once at module load, not per-render.
+const IS_FC_LOGIN_PATH = window.location.pathname === "/loginfc" || window.location.pathname === "/login2";
 
 // Apply saved theme before first paint — prevents flash-of-wrong-theme.
 initTheme();
@@ -62,7 +68,9 @@ function App() {
     return () => window.removeEventListener("session:expired", handleExpired);
   }, []);
 
-  if (!user) return <><Login onLogin={onLogin} sessionMsg={sessionMsg} /><PwaManager /></>;
+  if (!user) return IS_FC_LOGIN_PATH
+    ? <><LoginFC onLogin={onLogin} sessionMsg={sessionMsg} /><PwaManager /></>
+    : <><Login onLogin={onLogin} sessionMsg={sessionMsg} /><PwaManager /></>;
   if (!meta) return (
     <div className="empty" style={{ paddingTop: 120 }}>
       {metaError ? (
@@ -81,6 +89,7 @@ function App() {
       )}
     </div>
   );
+  if (user.role === "FC")      return <><FCApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "COO")     return <><COOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "NURSE")   return <><NurseApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "DOCTOR")  return <><DoctorApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
