@@ -3,12 +3,14 @@ import { createPortal } from "react-dom";
 import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, createSocket } from "./lib.js";
 import { Ic, icons, StatusBar, ThemeToggle, useModal } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
-import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, fmtIpLast6, bedCurrentStatus } from "./bedUtils.js";
+import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus } from "./bedUtils.js";
 import DischargeTab, { TransferSection } from "./DischargeTab.jsx";
-import DischargeMiniWidget from "./DischargeMiniWidget.jsx";
 import DischargesPage from "./DischargesPage.jsx";
+import { LiveBedDashboard } from "./COOApp.jsx";
 
-const TAB_TITLES = { home: "Dashboard", entry: "Entry — Wards", discharges: "Discharges", map: "My Ward Map" };
+// "dashboard" is no longer a tab of its own — the full dashboard now renders
+// underneath Home on the same page (see the home branch below).
+const TAB_TITLES = { home: "Home", entry: "Bed Entry", discharges: "Discharges" };
 
 // Role configuration for the shared ward/bed pages. Nurse and Doctor reuse the exact
 // same pages (WardPage → bed page → discharge pages) with their own endpoints — only
@@ -19,6 +21,10 @@ export const PRE_CFG = {
   updateBedStatus: (...a) => api.preUpdateBedStatus(...a),
   payerTypes: () => api.prePayerTypes(),
   destinations: () => api.preDestinations(),
+  // PRE-only for now — Nurse/Doctor cfgs deliberately don't define this, so the
+  // edit affordance on Patient Information only renders for PRE.
+  updateAdmission: (bedId, patch) => api.preUpdateAdmission(bedId, patch),
+  reviewWard: (wardId) => api.preReviewWard(wardId),
 };
 
 export default function PREApp({ user, meta, onLogout }) {
@@ -28,6 +34,7 @@ export default function PREApp({ user, meta, onLogout }) {
   const [loadError,   setLoadError]   = useState(null); // null | string — real network errors
   const [configError, setConfigError] = useState(null); // null | string — account config issues
   const [toast,     setToast]     = useState("");
+  const [liveKey,   setLiveKey]   = useState(0); // bumped on every live event — feeds the Dashboard tab
   const loadRef = useRef(null);
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
@@ -55,7 +62,7 @@ export default function PREApp({ user, meta, onLogout }) {
   // Real-time updates via WebSocket — replaces 15-second polling
   useEffect(() => {
     const socket = createSocket();
-    const refresh = () => { loadRef.current(); };
+    const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
     socket.on("bed:update",       refresh); // ward counts changed
     socket.on("discharge:update", refresh); // discharge step/plan/transfer changed
     socket.on("round:submit",     refresh); // round submitted → alarm clears
@@ -143,7 +150,6 @@ export default function PREApp({ user, meta, onLogout }) {
     { key: "home",       icon: icons.home,      label: "Home" },
     { key: "entry",      icon: icons.bed,       label: "Entry", dot: alarmActive },
     { key: "discharges", icon: icons.clipboard, label: "Discharges" },
-    { key: "map",        icon: icons.map,       label: "Map" },
   ];
 
   return (
@@ -155,7 +161,6 @@ export default function PREApp({ user, meta, onLogout }) {
         title={TAB_TITLES[tab]}
         user={{ name: user.username || data.pre, role: "PRE" }}
         onLogout={onLogout}
-        alarm={alarmActive}
         topExtra={
           <span className="pre-pill" style={{ flexDirection: "column", gap: 1, lineHeight: 1.2, padding: "5px 9px" }}>
             <span style={{ fontSize: 11 }}><Ic d={icons.clock} s={11} /> {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}</span>
@@ -163,10 +168,18 @@ export default function PREApp({ user, meta, onLogout }) {
           </span>
         }
       >
-        {tab === "home"  && <Home {...{ data, meta, setTab, alarmActive }} />}
+        {/* Home + the full dashboard are one page now. The dashboard keeps its own
+            top-bar/profile portals, so it must stay mounted only while Home is the
+            active tab — otherwise those portals leak onto Entry/Discharges/Map. */}
+        {tab === "home" && (
+          <>
+            <Home {...{ data, meta, setTab, alarmActive }} />
+            <div style={{ height: 20 }} />
+            <LiveBedDashboard refreshKey={liveKey} userName={user.username || data.pre} scope="pre" />
+          </>
+        )}
         {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} />}
         {tab === "discharges" && <DischargesPage role="PRE" wards={data.wards.map(w => ({ id: w.id, name: w.ward }))} />}
-        {tab === "map"   && <MyMap data={data} />}
 
         <ProfileThemeRow />
         {toast && <div className="toast">{toast}</div>}
@@ -175,72 +188,79 @@ export default function PREApp({ user, meta, onLogout }) {
   );
 }
 
+// Round Update Due — a blocking popup rather than a banner that scrolls away.
+// It leads with the one action that clears it, and can be dismissed to reveal
+// the compact inline strip below (so the alert is never lost, just quieter).
+function RoundDuePopup({ round, onGo, onDismiss }) {
+  useModal(onDismiss);
+  return (
+    <div className="overlay" onClick={onDismiss}>
+      <div className="sheet" role="alertdialog" aria-modal="true" aria-labelledby="round-due-title"
+        style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div style={{ padding: "22px 20px" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+            <span className="pulse" style={{
+              color: "var(--red)", background: "var(--st-or-bg)", borderRadius: "50%",
+              width: 60, height: 60, display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Ic d={icons.bell} s={28} />
+            </span>
+            <div id="round-due-title" style={{ fontWeight: 800, fontSize: 19, marginTop: 14 }}>Round update due</div>
+            <div className="dim" style={{ fontSize: 13, marginTop: 6, lineHeight: 1.5 }}>
+              The alarm keeps ringing until this round is submitted.
+            </div>
+            <span className="chip mono" style={{ marginTop: 12 }}>
+              <Ic d={icons.clock} s={12} /> {fmtClock(round.startMin)} – {fmtClock(round.endMin)}
+            </span>
+          </div>
+          <button className="btn btn-primary btn-block" style={{ marginTop: 20, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }}
+            onClick={onGo}>
+            <Ic d={icons.bed} s={16} /> Enter bed status now
+          </button>
+          <button className="btn btn-ghost btn-block" style={{ marginTop: 10, padding: "10px 0", fontSize: 12.5, color: "var(--ink-3)" }}
+            onClick={onDismiss}>
+            Remind me on this page
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Home({ data, setTab, alarmActive }) {
   const s = data.summary;
   const round = data.alarm.round;
-  const pct = s.wards > 0 ? Math.round((s.wardsDone / s.wards) * 100) : 0;
-  const reported = s.wardsDone > 0;
-  const isMorning = data.alarm.shift === "morning";
+
+  // Popup shows once per alarm activation. Dismissing drops back to the inline
+  // strip; a *new* alarm (or a re-fire after submit) opens the popup again.
+  const [alertDismissed, setAlertDismissed] = useState(false);
+  useEffect(() => { if (!alarmActive) setAlertDismissed(false); }, [alarmActive]);
 
   return (
     <div>
-      {/* Row 1 — context info cards */}
-      <div className="stat-grid" style={{ marginBottom: 14 }}>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic"><Ic d={icons.building} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{data.floor || "—"}</div>
-          </div>
-          <div className="l">BLOCK</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{ background: isMorning ? "var(--amber-bg)" : "var(--blue-bg)", color: isMorning ? "var(--amber)" : "var(--blue)" }}>
-              <Ic d={isMorning ? icons.sun : icons.moon} s={16} />
-            </span>
-            <div className="n" style={{ fontSize: 18 }}>{isMorning ? "Morning" : "Night"}</div>
-          </div>
-          <div className="l">SHIFT · {data.alarm.shiftWindow || (isMorning ? "Morning" : "Night")}</div>
-        </div>
-        <div className="stat">
-          <div>
-            <div className="row" style={{ gap: 10 }}>
-              <span className="ic"><Ic d={icons.chart} s={16} /></span>
-              <div className="n" style={{ fontSize: 18 }}>{pct}%</div>
-            </div>
-            <div className="bar" style={{ marginTop: 8 }}>
-              <span style={{ flex: pct, background: "var(--primary)" }} />
-              <span style={{ flex: 100 - pct, background: "var(--panel-2)" }} />
-            </div>
-          </div>
-          <div className="l">ROUND PROGRESS</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{ background: "var(--st-v-bg)", color: "var(--st-v)" }}><Ic d={icons.check} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{s.wardsDone}/{s.wards}</div>
-          </div>
-          <div className="l">WARDS UPDATED</div>
-        </div>
-      </div>
-
-      <DischargeMiniWidget />
+      {alarmActive && !alertDismissed && (
+        <RoundDuePopup
+          round={round}
+          onGo={() => { setAlertDismissed(true); setTab("entry"); }}
+          onDismiss={() => setAlertDismissed(true)}
+        />
+      )}
 
       {alarmActive && (
-        <div className="alarm-banner slide-up">
+        <div className="alarm-banner slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div className="row">
-            <span className="pulse" style={{ color: "var(--red)" }}><Ic d={icons.bell} s={24} /></span>
+            <span className="pulse" style={{ color: "var(--red)" }}><Ic d={icons.bell} s={22} /></span>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "var(--red)" }}>Round update due</div>
-              <div style={{ fontSize: 12, color: "#DC2626" }}>Alarm rings until you submit this round</div>
+              <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--red)" }}>Round update due</div>
+              <div style={{ fontSize: 12, color: "#DC2626" }}>
+                Window {fmtClock(round.startMin)} – {fmtClock(round.endMin)}
+              </div>
             </div>
           </div>
-          <button className="btn btn-primary btn-block" style={{ marginTop: 14, maxWidth: 360 }} onClick={() => setTab("entry")}>
-            Enter bed status now
+          <button className="btn btn-primary" style={{ padding: "9px 16px", fontSize: 13 }} onClick={() => setTab("entry")}>
+            Enter bed status
           </button>
-          <div style={{ fontSize: 11, color: "#DC2626", marginTop: 9 }}>
-            Window {fmtClock(round.startMin)} – {fmtClock(round.endMin)}
-          </div>
         </div>
       )}
 
@@ -252,30 +272,12 @@ function Home({ data, setTab, alarmActive }) {
         </div>
       )}
 
-      {!data.alarm.onDuty && (
-        <div className="card slide-up" style={{ padding: 16, marginBottom: 14 }}>
-          <div className="row"><span className="dim"><Ic d={icons.clock} s={22} /></span>
-            <div><div style={{ fontWeight: 700 }}>Off shift</div>
-              <div className="dim" style={{ fontSize: 12 }}>No alarms outside your shift hours</div></div></div>
-        </div>
-      )}
-
-      {/* Row 2 — wards summary */}
       <div className="floor-head">Wards summary</div>
       <div className="stat-grid">
-        <div className="stat"><div className="n" style={{ color: "var(--st-v)"  }}>{reported ? s.v  : "–"}</div><div className="l">VACANT</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--st-vr)" }}>{reported ? s.r  : "–"}</div><div className="l">VAC + RES</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--st-o)"  }}>{reported ? s.o  : "–"}</div><div className="l">OCCUPIED</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--st-or)" }}>{reported ? s.or : "–"}</div><div className="l">OCC + RES</div></div>
-      </div>
-
-      <div className="card" style={{ padding: 16, marginTop: 14 }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <span className="h2">Round completion</span>
-          <span className="chip">{s.wardsDone}/{s.wards} wards</span>
-        </div>
-        <div className="bar"><span style={{ flex: pct, background: "var(--primary)" }} /><span style={{ flex: 100 - pct, background: "var(--panel-2)" }} /></div>
-        <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{s.total} beds across {s.wards} ward types</div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-v)"  }}>{s.wardsDone > 0 ? s.v  : "–"}</div><div className="l">VACANT</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-vr)" }}>{s.wardsDone > 0 ? s.r  : "–"}</div><div className="l">VAC + RES</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-o)"  }}>{s.wardsDone > 0 ? s.o  : "–"}</div><div className="l">OCCUPIED</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-or)" }}>{s.wardsDone > 0 ? s.or : "–"}</div><div className="l">OCC + RES</div></div>
       </div>
 
       {s.wards === 0 && (
@@ -314,7 +316,6 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
       </div>
     );
 
-  const round = data.alarm.round;
   // Non-operational wards are visible but excluded from the "done" requirement
   const opWards = data.wards.filter(w => w.operational !== false);
   const allDone = opWards.every(w => w.vacant !== null);
@@ -322,13 +323,7 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
 
   return (
     <div>
-      <div className="row between" style={{ marginBottom: 4 }}>
-        <div className="h1" style={{ fontSize: 18 }}>Bed entry</div>
-        <span className="chip">{fmtClock(round.startMin)}–{fmtClock(round.endMin)}</span>
-      </div>
-      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-        Open each ward to manage individual bed status, then submit.
-      </div>
+      <OccupancyCards data={data} />
 
       {/* Ward picker — jump straight to one ward when the list is long */}
       {data.wards.length > 1 && (
@@ -370,17 +365,16 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
                   <div className="row between" style={{ marginBottom: (entered && !nonOp) ? 14 : 12 }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
-                      <div className="dim" style={{ fontSize: 12 }}>
-                        {w.total} beds
-                        {!nonOp && entered && <span style={{ color: "var(--st-v)" }}> · complete</span>}
-                      </div>
+                      <div className="dim" style={{ fontSize: 12 }}>{w.total} beds</div>
                     </div>
+                    {/* One success state only — the badge is the single source of
+                        truth; the old "· complete" subtitle said the same thing. */}
                     {nonOp
                       ? <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
                           <Ic d={icons.alert} s={12} /> Non-op
                         </span>
                       : entered
-                        ? <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
+                        ? <span className="tag v"><Ic d={icons.check} s={12} /> Complete</span>
                         : <span className="tag b">no data</span>}
                   </div>
 
@@ -467,29 +461,40 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
   );
 }
 
-function MyMap({ data }) {
+// Occupancy Cards — the summary block that used to live inline on the Map page.
+// Now shared: it renders at the top of My Wards and at the top of Entry, and is
+// no longer rendered by the map itself.
+export function OccupancyCards({ data }) {
   const s = data.summary;
   const enteredBeds = s.v + s.r + s.o + s.or;
   const occPct = enteredBeds > 0 ? Math.round((s.o + s.or) / enteredBeds * 100) : 0;
 
   return (
+    <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+      <div className="row between" style={{ marginBottom: 10 }}>
+        <span className="h2">My occupancy</span>
+        <span className="chip mono">{occPct}% full</span>
+      </div>
+      <StatusBar v={s.v} r={s.r} o={s.o} or={s.or} total={s.total} />
+      <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+        <span className="tag v">{s.v} vacant</span>
+        <span className="tag r">{s.r} vac+res</span>
+        <span className="tag o">{s.o} occupied</span>
+        {s.or > 0 && <span className="tag or">{s.or} occ+res</span>}
+      </div>
+    </div>
+  );
+}
+
+function MyMap({ data }) {
+  const s = data.summary;
+
+  return (
     <div>
+      <OccupancyCards data={data} />
+
       <div className="h1" style={{ fontSize: 18, marginBottom: 4 }}>My ward map</div>
       <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>{data.floor} · {data.pre} · {s.wards} wards · {s.total} beds</div>
-
-      <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-        <div className="row between" style={{ marginBottom: 10 }}>
-          <span className="h2">My occupancy</span>
-          <span className="chip mono">{occPct}% full</span>
-        </div>
-        <StatusBar v={s.v} r={s.r} o={s.o} or={s.or} total={s.total} />
-        <div className="row" style={{ gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-          <span className="tag v">{s.v} vacant</span>
-          <span className="tag r">{s.r} vac+res</span>
-          <span className="tag o">{s.o} occupied</span>
-          {s.or > 0 && <span className="tag or">{s.or} occ+res</span>}
-        </div>
-      </div>
 
       <div className="floor-head">Wards ({s.wardsDone}/{s.wards} updated)</div>
       <div className="card-grid">
@@ -565,11 +570,14 @@ const STATE_KEY = (p, r) =>
 const STATE_LABEL = (p, r) =>
   p === "OCCUPIED" ? (r === "RESERVED" ? "OCC[RES]" : "OCCUPIED") : (r === "RESERVED" ? "VAC[RES]" : "VACANT");
 
-const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
+export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
   const sk = STATE_KEY(bed.physical_status, bed.reservation_status);
   const dimmed = bed.operational_status === false;
   const occupied = bed.physical_status === "OCCUPIED";
   const badge = occupied ? dischargeBadge(bed.discharge_tracking) : null;
+  // "Started" = actually initiated or further along, not merely PLANNED — a
+  // planned-but-not-initiated discharge shouldn't show on the bed card yet.
+  const dischargeStarted = !!badge && bed.discharge_tracking?.status !== "PLANNED";
   const color = bedStateColor(bed.physical_status, bed.reservation_status);
   const bg    = bedStateBg(bed.physical_status, bed.reservation_status);
   // Overstay — System Checkout done but the patient hasn't actually left yet
@@ -579,7 +587,7 @@ const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
   const overstay = occupied && bed.discharge_tracking?.system_checkout_status === "COMPLETED"
     && bed.discharge_tracking?.patient_left !== true;
   const hasRows = !!(
-    (occupied && (bed.payer_type || bed.ip_last6 || bed.admission_type || bed.consultant_name || bed.department_name)) || badge ||
+    (occupied && (bed.payer_type || bed.ip_last6 || bed.admission_type || bed.consultant_name || bed.department_name)) || dischargeStarted ||
     (occupied && bed.reservation_status === "RESERVED" && bed.destination) ||
     (!occupied && bed.reservation_status === "RESERVED" && bed.reservation_note)
   );
@@ -604,20 +612,25 @@ const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
       </div>
       {dimmed && <div className="pbed-type">Non-operational</div>}
 
-      {/* Labeled rows — every value says what it is */}
+      {/* Labeled rows — every value says what it is. Sequence: IP, Doctor, Dept,
+          Payer, Type, then Discharge only once it's actually started (not just
+          planned — see dischargeStarted below). */}
       {occupied && bed.ip_last6 && (
-        <div className="pbed-kv"><span className="pk">IP</span><span className="pv" title={fmtIpLast6(bed.ip_last6)}>{fmtIpLast6(bed.ip_last6)}</span></div>
+        <div className="pbed-kv"><span className="pk">IP</span><span className="pv" title={bed.ip_last6}>{bed.ip_last6}</span></div>
       )}
-      {occupied && bed.admission_type && (
-        <div className="pbed-kv"><span className="pk">Type</span><span className="pv">{bed.admission_type === "DAYCARE" ? "Daycare" : bed.admission_type === "OPD" ? "OPD" : "IP"}</span></div>
+      {occupied && bed.consultant_name && (
+        <div className="pbed-kv"><span className="pk">Dr</span><span className="pv" title={bed.consultant_name}>{bed.consultant_name}</span></div>
+      )}
+      {occupied && bed.department_name && (
+        <div className="pbed-kv"><span className="pk">Dept</span><span className="pv" title={bed.department_name}>{bed.department_name}</span></div>
       )}
       {occupied && bed.payer_type && (
         <div className="pbed-kv"><span className="pk">Payer</span><span className="pv" title={bed.payer_type}>{bed.payer_type}</span></div>
       )}
-      {occupied && (bed.consultant_name || bed.department_name) && (
-        <div className="pbed-kv"><span className="pk">{bed.consultant_name ? "Dr" : "Dept"}</span><span className="pv" title={[bed.consultant_name, bed.department_name].filter(Boolean).join(" / ")}>{bed.consultant_name || bed.department_name}</span></div>
+      {occupied && bed.admission_type && (
+        <div className="pbed-kv"><span className="pk">Type</span><span className="pv">{bed.admission_type === "DAYCARE" ? "Daycare" : bed.admission_type === "OPD" ? "OPD" : "IP"}</span></div>
       )}
-      {badge && (
+      {dischargeStarted && (
         <div className="pbed-kv"><span className="pk">Discharge</span><span className="pv" style={{ color: "var(--st-vr)" }} title={badge}>{badge}</span></div>
       )}
       {occupied && bed.reservation_status === "RESERVED" && bed.destination && (
@@ -824,20 +837,17 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
 }
 
 // ── Bed status dialog — centered popup ────────────────────────────────────────
-function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG, onToast, onTransferred }) {
+function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG, onToast, onTransferred, payerTypes = [], destinations = [], departments = [] }) {
   const [physical,     setPhysical]     = useState(bed.physical_status);
   const [reservation,  setReservation]  = useState(bed.reservation_status);
   const [payer,        setPayer]        = useState(bed.payer_type || "");
-  const [payerTypes,   setPayerTypes]   = useState([]);
   const [destination,  setDestination]  = useState(bed.destination || "");
-  const [destinations, setDestinations] = useState([]);
   const [resNote,      setResNote]      = useState(bed.reservation_note || "");
   const [saving,       setSaving]       = useState(false);
   const [ipLast6,      setIpLast6]      = useState("");
   const [admissionType, setAdmissionType] = useState("");
   const [consultantName, setConsultantName] = useState("");
   const [departmentName, setDepartmentName] = useState("");
-  const [departments, setDepartments] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [selectedDeptId, setSelectedDeptId] = useState(null);
   const [selectedDoctorId, setSelectedDoctorId] = useState(null);
@@ -849,25 +859,157 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
   const [reservationOpen, setReservationOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [dischargePlanOpen, setDischargePlanOpen] = useState(false);
+  // Editing Patient Information (IP/consultant/dept) on an already-Occupied bed —
+  // separate from needsIp, which only covers the Vacant→Occupied admission moment.
+  const [editingPatientInfo, setEditingPatientInfo] = useState(false);
+  const [savingPatientInfo, setSavingPatientInfo] = useState(false);
+  const [editPayer, setEditPayer] = useState(bed.payer_type || "");
+  // Snapshot of Patient Information at the moment Edit is opened — savePatientInfo
+  // diffs against this so only actually-changed fields are sent to the backend,
+  // instead of resending every field (including untouched ones) on every save.
+  const patientInfoSnapshotRef = useRef(null);
 
-  useEffect(() => {
-    cfg.payerTypes().then(r => setPayerTypes(r.payerTypes || [])).catch(() => {});
-    cfg.destinations().then(r => setDestinations(r.destinations || [])).catch(() => {});
-  }, [cfg]);
-
-  useEffect(() => {
-    api.departments().then(r => setDepartments(r.departments || [])).catch(() => {});
-  }, []);
-
+  // When opening the edit form we seed selectedDeptId AND selectedDoctorId together
+  // (from the bed's current admission) — this flag stops the effect below from
+  // wiping the seeded doctor the moment selectedDeptId changes, which it otherwise
+  // does on every normal "user picked a different department" change.
+  const skipDoctorResetRef = useRef(false);
   useEffect(() => {
     if (selectedDeptId) {
       api.doctors(selectedDeptId).then(r => setDoctors(r.doctors || [])).catch(() => {});
     } else {
       setDoctors([]);
     }
-    setSelectedDoctorId(null);
-    setDoctorSearch("");
+    if (skipDoctorResetRef.current) {
+      skipDoctorResetRef.current = false;
+    } else {
+      setSelectedDoctorId(null);
+      setDoctorSearch("");
+    }
   }, [selectedDeptId]);
+
+  function openEditPatientInfo() {
+    skipDoctorResetRef.current = true;
+    const ipLast6Init = bed.ip_last6 || "";
+    const admissionTypeInit = bed.admission_type || "";
+    const consultantNameInit = bed.consultant_name || "";
+    const departmentNameInit = bed.department_name || "";
+    const doctorIdInit = bed.doctor_id || null;
+    const deptIdInit = bed.department_id || null;
+    const payerInit = bed.payer_type || "";
+    setIpLast6(ipLast6Init);
+    setAdmissionType(admissionTypeInit);
+    setConsultantName(consultantNameInit);
+    setDepartmentName(departmentNameInit);
+    setSelectedDoctorId(doctorIdInit);
+    setSelectedDeptId(deptIdInit);
+    setEditPayer(payerInit);
+    patientInfoSnapshotRef.current = {
+      ipLast6: ipLast6Init, admissionType: admissionTypeInit,
+      consultantName: consultantNameInit, departmentName: departmentNameInit,
+      doctorId: doctorIdInit, departmentId: deptIdInit, payer: payerInit,
+    };
+    setEditingPatientInfo(true);
+  }
+
+  async function savePatientInfo() {
+    if (!/^\d{6}$/.test(ipLast6)) return;
+    if (!admissionType || !selectedDeptId || !selectedDoctorId) return;
+
+    // Only send fields that actually changed from the snapshot taken when the
+    // edit form opened — avoids resending untouched fields on every save.
+    const snap = patientInfoSnapshotRef.current || {};
+    const patch = {};
+    if (ipLast6 !== snap.ipLast6) patch.ipLast6 = ipLast6;
+    if (admissionType !== snap.admissionType) patch.admissionType = admissionType;
+    if (consultantName !== snap.consultantName) patch.consultantName = consultantName;
+    if (departmentName !== snap.departmentName) patch.departmentName = departmentName;
+    if (selectedDoctorId !== snap.doctorId) patch.doctorId = selectedDoctorId;
+    if (selectedDeptId !== snap.departmentId) patch.departmentId = selectedDeptId;
+    if ((editPayer || null) !== (snap.payer || null)) patch.payerType = editPayer || null;
+
+    if (Object.keys(patch).length === 0) {
+      setEditingPatientInfo(false);
+      return;
+    }
+
+    setSavingPatientInfo(true);
+    try {
+      await cfg.updateAdmission(bed.id, patch);
+      setEditingPatientInfo(false);
+      onChanged?.();
+      onToast?.("Patient information updated ✓");
+    } catch (e) {
+      onToast?.(e?.message || "Could not update patient information");
+    } finally {
+      setSavingPatientInfo(false);
+    }
+  }
+
+  // Shared by the fresh-admission form (needsIp) and the Patient Information edit
+  // form — same state (departments/doctors/selectedDeptId/etc.), same UI, kept in
+  // one place so a change here doesn't need to be made twice.
+  function renderDeptDoctorPicker() {
+    return (
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {/* Department dropdown */}
+        <div ref={deptRef} style={{ flex: "1 1 160px", position: "relative" }}>
+          <input className="field" style={{ width: "100%", borderColor: !selectedDeptId ? "var(--red)" : undefined }}
+            placeholder="Select department"
+            value={deptOpen ? deptSearch : (departments.find(d => d.id === selectedDeptId)?.name || "")}
+            onFocus={() => { setDeptOpen(true); setDeptSearch(""); }}
+            onChange={(e) => setDeptSearch(e.target.value)} />
+          {selectedDeptId && !deptOpen && (
+            <span onClick={() => { setSelectedDeptId(null); setDeptSearch(""); setDepartmentName(""); }}
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "var(--ink-3)", fontSize: 16, lineHeight: 1 }}>&times;</span>
+          )}
+          {deptOpen && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
+              {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).map(d => (
+                <div key={d.id} onClick={() => { setSelectedDeptId(d.id); setDepartmentName(d.name); setDeptOpen(false); setDeptSearch(""); }}
+                  style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  {d.name}
+                </div>
+              ))}
+              {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).length === 0 && (
+                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No departments found</div>
+              )}
+            </div>
+          )}
+        </div>
+        {/* Doctor dropdown — filtered by selected department */}
+        <div ref={doctorRef} style={{ flex: "1 1 160px", position: "relative" }}>
+          <input className="field" style={{ width: "100%", opacity: selectedDeptId ? 1 : 0.5, borderColor: selectedDeptId && !selectedDoctorId ? "var(--red)" : undefined }}
+            placeholder={selectedDeptId ? "Select consultant" : "Select dept first"}
+            disabled={!selectedDeptId}
+            value={doctorOpen ? doctorSearch : (doctors.find(d => d.id === selectedDoctorId)?.name || "")}
+            onFocus={() => { setDoctorOpen(true); setDoctorSearch(""); }}
+            onChange={(e) => setDoctorSearch(e.target.value)} />
+          {selectedDoctorId && !doctorOpen && (
+            <span onClick={() => { setSelectedDoctorId(null); setDoctorSearch(""); setConsultantName(""); }}
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "var(--ink-3)", fontSize: 16, lineHeight: 1 }}>&times;</span>
+          )}
+          {doctorOpen && selectedDeptId && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
+              {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).map(d => (
+                <div key={d.id} onClick={() => { setSelectedDoctorId(d.id); setConsultantName(d.name); setDoctorOpen(false); setDoctorSearch(""); }}
+                  style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  {d.name}
+                </div>
+              ))}
+              {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).length === 0 && (
+                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No doctors in this department</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const deptRef = useRef(null);
   const doctorRef = useRef(null);
@@ -888,12 +1030,11 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
     if (val === "OCCUPIED") setReservation("NONE");
   };
 
-  const needsPayer = physical === "OCCUPIED";
-  const payerLocked = physical === "OCCUPIED" && reservation === "RESERVED" && bed.physical_status === "OCCUPIED";
-
   // Fresh admission — bed is currently Vacant and about to become Occupied.
   // Required per the discharge module's Patient Section (V1: manual entry, HIS integration later).
   const needsIp = bed.physical_status === "VACANT" && physical === "OCCUPIED";
+  const needsPayer = needsIp;  // payer only required on fresh admission; for occupied beds, edit via Patient Information
+  const payerLocked = false;  // removed: payer is no longer in the status-change form for already-occupied beds
   const ipValid = /^\d{6}$/.test(ipLast6);
 
   // OCC+RES = patient temporarily away at a destination (OT, Scanning) — bed
@@ -915,7 +1056,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
   const showReservationInline = physical === "VACANT";
 
   async function handleSave() {
-    if (needsPayer && !payer && !payerLocked) return;
+    if (needsPayer && !payer) return;
     if (!showActionsRow && needsDestination && !destination) return;
     if (!showActionsRow && needsResNote && !resNote.trim()) return;
     if (needsIp && !ipValid) return;
@@ -923,7 +1064,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
     if (needsIp && !selectedDeptId) return;
     if (needsIp && !selectedDoctorId) return;
     setSaving(true);
-    const payerArg = physical === "VACANT" ? null : (payerLocked && payer === (bed.payer_type || "") ? undefined : payer || null);
+    const payerArg = physical === "VACANT" ? null : needsIp ? (payer || null) : undefined;
     const destinationArg = (!showActionsRow && needsDestination) ? destination : undefined;
     const resNoteArg = (!showActionsRow && showResNote) ? resNote : undefined;
     const ipArg = needsIp ? ipLast6 : undefined;
@@ -932,9 +1073,14 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
     const departmentArg = needsIp ? (departmentName.trim() || null) : undefined;
     const doctorIdArg = needsIp ? (selectedDoctorId || null) : undefined;
     const departmentIdArg = needsIp ? (selectedDeptId || null) : undefined;
-    await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg, ipArg, admissionTypeArg, consultantArg, departmentArg, doctorIdArg, departmentIdArg);
-    setSaving(false);
-    onToast?.("Status updated ✓");
+    try {
+      await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg, ipArg, admissionTypeArg, consultantArg, departmentArg, doctorIdArg, departmentIdArg);
+      onToast?.("Status updated ✓");
+    } catch {
+      // error already shown as a toast by changeStatus in WardPage
+    } finally {
+      setSaving(false);
+    }
   }
 
   const savedSk = STATE_KEY(bed.physical_status, bed.reservation_status);
@@ -995,32 +1141,101 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
 
       {/* Bed information card */}
       <div className="card" style={{ padding: "16px 18px", marginBottom: 20 }}>
-        <div className="row" style={{ gap: 8, marginBottom: 4 }}>
-          <span style={{ color: "var(--ink-3)", display: "flex" }}><Ic d={icons.info} s={15} /></span>
-          <span className="pdlg-sect" style={{ marginBottom: 0 }}>Bed Information</span>
+        <div className="row" style={{ gap: 8, marginBottom: 4, justifyContent: "space-between" }}>
+          <div className="row" style={{ gap: 8 }}>
+            <span style={{ color: "var(--ink-3)", display: "flex" }}><Ic d={icons.info} s={15} /></span>
+            <span className="pdlg-sect" style={{ marginBottom: 0 }}>Patient Information</span>
+          </div>
+          {cfg.updateAdmission && bed.physical_status === "OCCUPIED" && !editingPatientInfo && (
+            <button onClick={openEditPatientInfo} title="Edit patient information" style={{
+              display: "flex", alignItems: "center", gap: 5, padding: "5px 10px", borderRadius: 8,
+              border: "1px solid var(--line)", background: "transparent", color: "var(--primary)",
+              fontSize: 12, fontWeight: 700, cursor: "pointer",
+            }}><Ic d={icons.pencil} s={13} /> Edit</button>
+          )}
         </div>
 
         <div className="pdlg-row" style={{ padding: "10px 0" }}>
           <span className="k row" style={{ gap: 10 }}><Ic d={icons.target} s={16} /> Current Status</span>
           <span className="v">{bedCurrentStatus(bed)}</span>
         </div>
-        {bed.physical_status === "OCCUPIED" && bed.admission_type && (
-          <div className="pdlg-row" style={{ padding: "10px 0" }}>
-            <span className="k row" style={{ gap: 10 }}><Ic d={icons.stethoscope} s={16} /> Admission Type</span>
-            <span className="v">{bed.admission_type === "DAYCARE" ? "Daycare" : bed.admission_type === "OPD" ? "OPD" : "IP"}</span>
+        {bed.physical_status === "OCCUPIED" && editingPatientInfo ? (
+          <div style={{ padding: "10px 0" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
+              Admission Type <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              {[["IP", "IP"], ["DAYCARE", "Daycare"], ["OPD", "OPD"]].map(([val, lbl]) => (
+                <button key={val} onClick={() => setAdmissionType(val)} style={{
+                  flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  border: `2px solid ${admissionType === val ? "var(--primary)" : "var(--line)"}`,
+                  background: admissionType === val ? "var(--primary)" : "var(--panel)",
+                  color: admissionType === val ? "#fff" : "var(--ink-2)", cursor: "pointer",
+                }}>{lbl}</button>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
+              Last 6 Digits of IP Number <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            <input className="field" inputMode="numeric" maxLength={6} value={ipLast6}
+              placeholder="e.g. 123456" style={{ marginBottom: 14, borderColor: !/^\d{6}$/.test(ipLast6) ? "var(--red)" : undefined }}
+              onChange={(e) => setIpLast6(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
+              Department &amp; Consultant <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            {renderDeptDoctorPicker()}
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 14, marginBottom: 8 }}>
+              Payer Type
+            </div>
+            <div style={{ position: "relative" }}>
+              <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", pointerEvents: "none" }}>
+                <Ic d={icons.wallet} s={16} />
+              </span>
+              <select className="field" value={editPayer} style={{ paddingLeft: 40 }}
+                onChange={(e) => setEditPayer(e.target.value)}>
+                <option value="">— No change —</option>
+                {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="btn btn-ghost" style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13 }}
+                disabled={savingPatientInfo} onClick={() => setEditingPatientInfo(false)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13 }}
+                disabled={savingPatientInfo || !/^\d{6}$/.test(ipLast6) || !admissionType || !selectedDeptId || !selectedDoctorId}
+                onClick={savePatientInfo}>{savingPatientInfo ? "Saving…" : "Save"}</button>
+            </div>
           </div>
-        )}
-        {bed.physical_status === "OCCUPIED" && (
-          <div className="pdlg-row" style={{ padding: "10px 0" }}>
-            <span className="k row" style={{ gap: 10 }}><Ic d={icons.user} s={16} /> IP ID</span>
-            <span className="v">{fmtIpLast6(bed.ip_last6)}</span>
-          </div>
-        )}
-        {bed.physical_status === "OCCUPIED" && (bed.consultant_name || bed.department_name) && (
-          <div className="pdlg-row" style={{ padding: "10px 0" }}>
-            <span className="k row" style={{ gap: 10 }}><Ic d={icons.building} s={16} /> Consultant / Dept</span>
-            <span className="v">{[bed.consultant_name, bed.department_name].filter(Boolean).join(" / ")}</span>
-          </div>
+        ) : (
+          <>
+            {bed.physical_status === "OCCUPIED" && bed.admission_type && (
+              <div className="pdlg-row" style={{ padding: "10px 0" }}>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.stethoscope} s={16} /> Admission Type</span>
+                <span className="v">{bed.admission_type === "DAYCARE" ? "Daycare" : bed.admission_type === "OPD" ? "OPD" : "IP"}</span>
+              </div>
+            )}
+            {bed.physical_status === "OCCUPIED" && (
+              <div className="pdlg-row" style={{ padding: "10px 0" }}>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.user} s={16} /> IP ID</span>
+                <span className="v">{bed.ip_last6 || "Not recorded"}</span>
+              </div>
+            )}
+            {bed.physical_status === "OCCUPIED" && bed.payer_type && (
+              <div className="pdlg-row" style={{ padding: "10px 0" }}>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.wallet} s={16} /> Payer</span>
+                <span className="v">{bed.payer_type}</span>
+              </div>
+            )}
+            {bed.physical_status === "OCCUPIED" && (bed.consultant_name || bed.department_name) && (
+              <div className="pdlg-row" style={{ padding: "10px 0" }}>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.building} s={16} /> Consultant / Dept</span>
+                <span className="v">{[bed.consultant_name, bed.department_name].filter(Boolean).join(" / ")}</span>
+              </div>
+            )}
+          </>
         )}
         {bed.physical_status === "OCCUPIED" && dischargeBadge(bed.discharge_tracking) && (
           <div className="pdlg-row" style={{ padding: "10px 0" }}>
@@ -1064,18 +1279,33 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
               Physical Status
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              {[["VACANT","var(--st-v)","Vacant"],["OCCUPIED","var(--st-o)","Occupied"]].map(([val, c, lbl]) => (
-                <button key={val} onClick={() => handleSetPhysical(val)} style={{
-                  flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
-                  border: `2px solid ${physical === val ? c : "var(--line)"}`,
-                  background: physical === val ? c : "var(--panel)",
-                  color: physical === val ? "#fff" : "var(--ink-2)",
-                  cursor: "pointer", transition: "all 0.15s",
-                }}><Ic d={icons.bed} s={16} /> {lbl}</button>
-              ))}
-            </div>
+            {cfg.readOnly ? (
+              <div style={{ display: "flex", gap: 10 }}>
+                {[["VACANT","var(--st-v)","Vacant"],["OCCUPIED","var(--st-o)","Occupied"]].map(([val, c, lbl]) => (
+                  <div key={val} style={{
+                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                    border: `2px solid ${physical === val ? c : "var(--line)"}`,
+                    background: physical === val ? c : "var(--panel)",
+                    color: physical === val ? "#fff" : "var(--ink-2)",
+                    opacity: physical === val ? 1 : 0.4,
+                  }}><Ic d={icons.bed} s={16} /> {lbl}</div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 10 }}>
+                {[["VACANT","var(--st-v)","Vacant"],["OCCUPIED","var(--st-o)","Occupied"]].map(([val, c, lbl]) => (
+                  <button key={val} onClick={() => handleSetPhysical(val)} style={{
+                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                    border: `2px solid ${physical === val ? c : "var(--line)"}`,
+                    background: physical === val ? c : "var(--panel)",
+                    color: physical === val ? "#fff" : "var(--ink-2)",
+                    cursor: "pointer", transition: "all 0.15s",
+                  }}><Ic d={icons.bed} s={16} /> {lbl}</button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Patient Section — required when a Vacant bed is about to become Occupied.
@@ -1115,63 +1345,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 16, marginBottom: 10 }}>
                 Department &amp; Consultant <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {/* Department dropdown */}
-                <div ref={deptRef} style={{ flex: "1 1 160px", position: "relative" }}>
-                  <input className="field" style={{ width: "100%", borderColor: !selectedDeptId ? "var(--red)" : undefined }}
-                    placeholder="Select department"
-                    value={deptOpen ? deptSearch : (departments.find(d => d.id === selectedDeptId)?.name || "")}
-                    onFocus={() => { setDeptOpen(true); setDeptSearch(""); }}
-                    onChange={(e) => setDeptSearch(e.target.value)} />
-                  {selectedDeptId && !deptOpen && (
-                    <span onClick={() => { setSelectedDeptId(null); setDeptSearch(""); setDepartmentName(""); }}
-                      style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "var(--ink-3)", fontSize: 16, lineHeight: 1 }}>&times;</span>
-                  )}
-                  {deptOpen && (
-                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
-                      {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).map(d => (
-                        <div key={d.id} onClick={() => { setSelectedDeptId(d.id); setDepartmentName(d.name); setDeptOpen(false); setDeptSearch(""); }}
-                          style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
-                          onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
-                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                          {d.name}
-                        </div>
-                      ))}
-                      {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).length === 0 && (
-                        <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No departments found</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {/* Doctor dropdown — filtered by selected department */}
-                <div ref={doctorRef} style={{ flex: "1 1 160px", position: "relative" }}>
-                  <input className="field" style={{ width: "100%", opacity: selectedDeptId ? 1 : 0.5, borderColor: selectedDeptId && !selectedDoctorId ? "var(--red)" : undefined }}
-                    placeholder={selectedDeptId ? "Select consultant" : "Select dept first"}
-                    disabled={!selectedDeptId}
-                    value={doctorOpen ? doctorSearch : (doctors.find(d => d.id === selectedDoctorId)?.name || "")}
-                    onFocus={() => { setDoctorOpen(true); setDoctorSearch(""); }}
-                    onChange={(e) => setDoctorSearch(e.target.value)} />
-                  {selectedDoctorId && !doctorOpen && (
-                    <span onClick={() => { setSelectedDoctorId(null); setDoctorSearch(""); setConsultantName(""); }}
-                      style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "var(--ink-3)", fontSize: 16, lineHeight: 1 }}>&times;</span>
-                  )}
-                  {doctorOpen && selectedDeptId && (
-                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
-                      {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).map(d => (
-                        <div key={d.id} onClick={() => { setSelectedDoctorId(d.id); setConsultantName(d.name); setDoctorOpen(false); setDoctorSearch(""); }}
-                          style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
-                          onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
-                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                          {d.name}
-                        </div>
-                      ))}
-                      {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).length === 0 && (
-                        <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No doctors in this department</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+              {renderDeptDoctorPicker()}
               {!selectedDeptId && (
                 <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a department.</div>
               )}
@@ -1181,37 +1355,25 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
             </div>
           )}
 
-          {/* Payer type — shown only when OCCUPIED */}
-          {physical === "OCCUPIED" && (
+          {/* Payer type — only needed for fresh admission (VACANT → OCCUPIED); for occupied beds edit via Patient Information */}
+          {needsIp && (
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Payer Type {!payerLocked && <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>}
+                Payer Type <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
               </div>
-              {payerLocked ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: "var(--primary)" }}>{payer || "—"}</span>
-                  <span className="dim" style={{ fontSize: 11 }}>(same patient — change if needed)</span>
-                  <select className="field" value={payer} style={{ flex: 1, minWidth: 160, fontSize: 13 }}
-                    onChange={(e) => setPayer(e.target.value)}>
-                    <option value="">— Keep current —</option>
-                    {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
-                  </select>
-                </div>
-              ) : (
-                <div style={{ position: "relative" }}>
-                  <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", pointerEvents: "none" }}>
-                    <Ic d={icons.wallet} s={16} />
-                  </span>
-                  <select className="field" value={payer}
-                    onChange={(e) => setPayer(e.target.value)}
-                    style={{ paddingLeft: 40, borderColor: needsPayer && !payer ? "var(--red)" : undefined }}>
-                    <option value="">— Select payer type —</option>
-                    {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
-                  </select>
-                </div>
-              )}
-              {needsPayer && !payer && !payerLocked && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Payer type is required for occupied beds.</div>
+              <div style={{ position: "relative" }}>
+                <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", pointerEvents: "none" }}>
+                  <Ic d={icons.wallet} s={16} />
+                </span>
+                <select className="field" value={payer}
+                  onChange={(e) => setPayer(e.target.value)}
+                  style={{ paddingLeft: 40, borderColor: !payer ? "var(--red)" : undefined }}>
+                  <option value="">— Select payer type —</option>
+                  {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
+                </select>
+              </div>
+              {!payer && (
+                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Payer type is required for new admissions.</div>
               )}
             </div>
           )}
@@ -1224,6 +1386,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
                 Status
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                {!cfg.readOnly && (
                 <button onClick={() => setReservationOpen(true)} style={{
                   display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
                   background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
@@ -1233,6 +1396,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
                   Reservation
                   <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{bed.reservation_status === "RESERVED" ? "Reserved" : "None"}</span>
                 </button>
+                )}
                 {cfg.role === "PRE" && (
                   <button onClick={() => setTransferOpen(true)} style={{
                     display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
@@ -1248,7 +1412,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
                   // Now vs Schedule first, instead of dropping into an empty form.
                   // Otherwise (already planned/running, or a role that can't plan
                   // e.g. Nurse) go straight to the full Discharge Details page.
-                  const canPlanRole = cfg.role === "PRE" || cfg.role === "DOCTOR";
+                  const canPlanRole = cfg.role === "PRE" || cfg.role === "DOCTOR" || cfg.role === "CONSULTANT";
                   if (!bed.discharge_tracking && canPlanRole) setDischargePlanOpen(true);
                   else setDischargeOpen(true);
                 }} style={{
@@ -1309,25 +1473,42 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
       )}
       {transferOpen && createPortal(
         <TransferPopup bed={bed} wards={wards} onClose={() => setTransferOpen(false)}
-          onSaved={(r) => { setTransferOpen(false); onChanged?.(); if (onTransferred) onTransferred(r); else onClose(); }} />,
+          onSaved={(r) => {
+            setTransferOpen(false);
+            // Pass the current bed's already-loaded patient data (payer, department,
+            // doctor, discharge tracking, etc.) along with the transfer result — a
+            // transfer carries all of that over unchanged, so onTransferred can jump
+            // straight to the destination bed fully populated, with no refetch (and
+            // no intermediate ward-list page) needed first.
+            if (onTransferred) onTransferred(r, bed);
+            else { onChanged?.(); onClose(); }
+          }} />,
         document.body
       )}
       {dischargePlanOpen && createPortal(
-        <DischargePlanPopup bed={bed} canInitiate={cfg.role === "PRE"} onClose={() => setDischargePlanOpen(false)}
+        <DischargePlanPopup bed={bed} canInitiate={cfg.role === "PRE" || cfg.role === "CONSULTANT"} onClose={() => setDischargePlanOpen(false)}
           onDone={() => { setDischargePlanOpen(false); onChanged?.(); setDischargeOpen(true); }} />,
         document.body
       )}
 
       {/* Footer actions */}
       <div style={{ display: "flex", gap: 10, marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
-        <button className="btn btn-ghost" style={{ flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }} onClick={onClose}>
-          Cancel
-        </button>
-        <button className="btn btn-primary" style={{ flex: 1.6, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }}
-          disabled={saving || (needsPayer && !payer && !payerLocked) || (!showActionsRow && needsDestination && !destination) || (!showActionsRow && needsResNote && !resNote.trim()) || (needsIp && !ipValid) || (needsIp && !admissionType)}
-          onClick={handleSave}>
-          <Ic d={icons.save} s={16} /> {saving ? "Saving…" : "Update Status"}
-        </button>
+        {cfg.readOnly ? (
+          <button className="btn btn-ghost" style={{ flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }} onClick={onClose}>
+            Close
+          </button>
+        ) : (
+          <>
+            <button className="btn btn-ghost" style={{ flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }} onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" style={{ flex: 1.6, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }}
+              disabled={saving || (needsPayer && !payer) || (!showActionsRow && needsDestination && !destination) || (!showActionsRow && needsResNote && !resNote.trim()) || (needsIp && !ipValid) || (needsIp && !admissionType)}
+              onClick={handleSave}>
+              <Ic d={icons.save} s={16} /> {saving ? "Saving…" : "Update Status"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1345,10 +1526,50 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
   const [loading,    setLoading]    = useState(false);
   const [loadedAt,   setLoadedAt]   = useState(null);  // Date | null — freshness dot in the header
   const [toast,      setToast]      = useState("");
+  const [reviewing,  setReviewing]  = useState(false);
+  const [reviewedAt, setReviewedAt] = useState(ward.reviewedAt ?? null);
+  // Reference/lookup data (payer types, destinations, departments) — not tied to any
+  // one bed, so it's fetched once per ward visit here and passed down, instead of
+  // BedDetailSheet re-fetching it on every mount (e.g. every time key={liveBed.id}
+  // forces a remount, such as right after a transfer).
+  const [payerTypes,   setPayerTypes]   = useState([]);
+  const [destinations, setDestinations] = useState([]);
+  const [departments,  setDepartments]  = useState([]);
+  // Optional-chained: read-only cfgs (e.g. CONSULTANT) omit the endpoints they
+  // can't use, so a missing fetcher must be a no-op rather than a crash.
+  useEffect(() => {
+    cfg.payerTypes?.().then(r => setPayerTypes(r.payerTypes || [])).catch(() => {});
+    cfg.destinations?.().then(r => setDestinations(r.destinations || [])).catch(() => {});
+    api.departments().then(r => setDepartments(r.departments || [])).catch(() => {});
+  }, [cfg]);
 
   const showToast = useCallback((m) => {
     setToast(m); setTimeout(() => setToast(""), 2000);
   }, []);
+
+  // Mirrors the backend's 5-minute cooldown (pre.ts) so the button visibly
+  // disables/counts down instead of just failing silently on the next tap.
+  const REVIEW_COOLDOWN_MS = 5 * 60 * 1000;
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    if (!reviewedAt || Date.now() - reviewedAt >= REVIEW_COOLDOWN_MS) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [reviewedAt]);
+  const cooldownMsLeft = reviewedAt ? Math.max(0, REVIEW_COOLDOWN_MS - (nowTick - reviewedAt)) : 0;
+  const inCooldown = cooldownMsLeft > 0;
+
+  const reviewWard = async () => {
+    if (!cfg.reviewWard || reviewing || inCooldown) return;
+    setReviewing(true);
+    try {
+      const r = await cfg.reviewWard(ward.id);
+      setReviewedAt(r.reviewedAt);
+      setNowTick(Date.now());
+      showToast("Ward marked reviewed ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setReviewing(false); }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1410,6 +1631,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
 
   // Optimistic update — snapshot restored on failure; unit_type preserved via spread
   const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) => {
+    if (!cfg.updateBedStatus) return;  // read-only cfg (CONSULTANT) — nothing to save
     let snapshot;
     const stillOccRes = physicalStatus === "OCCUPIED" && reservationStatus === "RESERVED";
     const stillVacRes = physicalStatus === "VACANT" && reservationStatus === "RESERVED";
@@ -1429,6 +1651,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
     } catch (e) {
       setBeds(snapshot);
       showToast(toastErr(e));
+      throw e;  // re-throw so handleSave knows the save failed and skips the success toast
     }
   }, [showToast]);
 
@@ -1585,7 +1808,18 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
     return (
       <div>
         <BedDetailSheet
+          // Keyed by bed id so a transfer (or any other path that swaps which bed
+          // is being edited) fully remounts the sheet instead of reusing the same
+          // instance — otherwise its local form state (physical, reservation,
+          // payer, etc.), all seeded once via useState(bed.xxx), keeps stale
+          // values from the previous bed and can briefly render a mismatched,
+          // confusing form (e.g. the fresh-admission form flashing over a bed
+          // that was never actually vacated for a new patient).
+          key={liveBed.id}
           bed={liveBed}
+          payerTypes={payerTypes}
+          destinations={destinations}
+          departments={departments}
           wards={(allWards || []).map(w => ({ id: w.id, name: w.ward }))}
           onSave={async (bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) => {
             const stillOccRes = physical === "OCCUPIED" && reservation === "RESERVED";
@@ -1602,15 +1836,39 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
           onChanged={load}
           onToast={showToast}
           cfg={cfg}
-          onTransferred={(r) => {
-            load().then(() => {
-              if (r.toWardId === ward.id) {
-                setEditingBed({ id: r.toBedId, bed_name: r.toBedName, ward_id: r.toWardId, physical_status: "OCCUPIED", reservation_status: "NONE" });
-              } else {
-                setEditingBed(null);
+          onTransferred={(r, fromBed) => {
+            // A transfer carries the admission's patient data over unchanged — we
+            // already have it (fromBed, the bed we were just on) and the transfer
+            // result (r) tells us where it landed. No need to wait on a refetch (or
+            // pass through the ward-list page) before showing the destination bed:
+            // patch beds optimistically so the lookup below resolves to fresh data
+            // immediately, then jump straight there. No extra load() here — the
+            // backend's discharge:update socket event (sent to both wards) already
+            // reconciles this ward's beds shortly after, same as every other
+            // mutation in this app; calling load() again here would just be a
+            // second, unneeded fetch racing that self-echo.
+            setBeds(prev => prev.map(b => {
+              if (b.id === r.fromBedId) {
+                return {
+                  ...b, physical_status: "VACANT", reservation_status: "NONE",
+                  ip_last6: null, admission_type: null, consultant_name: null, department_name: null,
+                  doctor_id: null, department_id: null, payer_type: null,
+                  destination: null, reservation_note: null, discharge_tracking: null,
+                };
               }
-              showToast(`Transferred to ${r.toBedName}${r.toWardName ? " · " + r.toWardName : ""} ✓`);
-            });
+              if (b.id === r.toBedId && r.toWardId === ward.id) {
+                return {
+                  ...b, physical_status: "OCCUPIED", reservation_status: "NONE",
+                  ip_last6: fromBed.ip_last6, admission_type: fromBed.admission_type,
+                  consultant_name: fromBed.consultant_name, department_name: fromBed.department_name,
+                  doctor_id: fromBed.doctor_id, department_id: fromBed.department_id,
+                  payer_type: fromBed.payer_type, discharge_tracking: fromBed.discharge_tracking,
+                };
+              }
+              return b;
+            }));
+            setEditingBed(r.toWardId === ward.id ? { id: r.toBedId } : null);
+            showToast(`Transferred to ${r.toBedName}${r.toWardName ? " · " + r.toWardName : ""} ✓`);
           }}
         />
         {toast && <div className="toast">{toast}</div>}
@@ -1628,10 +1886,20 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
             <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ward.ward}</div>
             <div className="dim" style={{ fontSize: 11.5 }}>
               {beds.length} bed{beds.length !== 1 ? "s" : ""}
+              {reviewedAt
+                ? <> · <Ic d={icons.check} s={11} /> Reviewed {fmtRelative(reviewedAt)}</>
+                : cfg.reviewWard ? " · Not reviewed yet" : ""}
             </div>
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0 }}>
+          {cfg.reviewWard && (
+            <button className="btn btn-ghost" style={{ padding: "8px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+              disabled={reviewing || inCooldown} onClick={reviewWard}
+              title={inCooldown ? `Available again in ${Math.ceil(cooldownMsLeft / 60000)}m` : "No changes needed — mark this ward reviewed"}>
+              <Ic d={icons.check} s={14} /> {reviewing ? "…" : inCooldown ? `${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}
+            </button>
+          )}
           <button className="appbar-btn" onClick={load} title="Refresh" aria-label="Refresh beds">
             <Ic d={icons.refresh} s={15} />
           </button>

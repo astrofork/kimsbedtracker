@@ -2824,9 +2824,6 @@ export function PreManager({ showToast }) {
               </div>
             </div>
             <div className="row" style={{ gap: 8 }}>
-              <span className={"tag " + (u.shift === "night" ? "b" : "v")}>
-                {u.shift === "night" ? "Night" : "Morning"}
-              </span>
               <button className="chip" onClick={() => setEditing(u)}>Edit</button>
               <button className="chip" style={{ color: "var(--red)" }}
                 onClick={async () => {
@@ -2873,7 +2870,6 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
   const [name,        setName]        = useState(user?.name     || "");
   const [password,    setPassword]    = useState("");
   const [showPwd,     setShowPwd]     = useState(false);
-  const [shift,       setShift]       = useState(user?.shift    || "morning");
   const [preBlockIds, setPreBlockIds] = useState(
     (user?.pre_block_ids || []).map(Number)
   );
@@ -2902,11 +2898,11 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
     try {
       if (isNew) {
         await api.mgrCreatePre({
-          username: username.trim().toLowerCase(), password, name, shift,
+          username: username.trim().toLowerCase(), password, name,
           preBlockIds,
         });
       } else {
-        const data = { name, shift, preBlockIds };
+        const data = { name, preBlockIds };
         if (password) data.password = password;
         await api.mgrEditPre(user.id, data);
       }
@@ -2996,14 +2992,6 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
               })}
             </div>
           )}
-          <div style={{ height: 12 }} />
-
-          <label className="label">Shift</label>
-          <div className="seg">
-            <button className={shift === "morning" ? "on" : ""} onClick={() => setShift("morning")}>Morning · 9–6:30</button>
-            <button className={shift === "night"   ? "on" : ""} onClick={() => setShift("night")}>Night · 8pm–8am</button>
-          </div>
-
           <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
             {busy ? "Saving…" : isNew ? "Create PRE user" : "Save changes"}
           </button>
@@ -4498,6 +4486,151 @@ function NurseAccessManager({ showToast, stationId }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  DISCHARGE PHASE SLA MANAGER
+// ══════════════════════════════════════════════════════════════════════════════
+// The COO sets how long each discharge phase is expected to take. These are the
+// hospital's SLAs: the backend measures every phase against them to flag delays
+// and to compute the estimated discharge time shown to staff and to patients.
+//
+// Phases themselves are fixed (each maps to a discharge_tracking column), so
+// there's no add/delete here — only duration, display label and department.
+export function DischargePhaseManager({ showToast }) {
+  const [phases,  setPhases]  = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy,    setBusy]    = useState(false);
+  const [editId,  setEditId]  = useState(null);
+  const [draft,   setDraft]   = useState({ label: "", department: "", expected_minutes: 0 });
+
+  const load = async () => {
+    setLoading(true);
+    try { setPhases((await api.mgrDischargePhases()).phases || []); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const openEdit = (p) => {
+    setEditId(p.id);
+    setDraft({ label: p.label, department: p.department || "", expected_minutes: p.expected_minutes });
+  };
+
+  const save = async () => {
+    const mins = Number(draft.expected_minutes);
+    if (!draft.label.trim()) { showToast("Phase name cannot be empty"); return; }
+    if (!Number.isFinite(mins) || mins < 0 || mins > 1440) {
+      showToast("Expected duration must be between 0 and 1440 minutes"); return;
+    }
+    setBusy(true);
+    try {
+      await api.mgrUpdateDischargePhase(editId, {
+        label: draft.label.trim(),
+        department: draft.department.trim() || null,
+        expected_minutes: mins,
+      });
+      setEditId(null);
+      await load();
+      showToast("Phase SLA updated ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const reorder = async (p, dir) => {
+    setBusy(true);
+    try { await api.mgrReorderDischargePhase(p.id, dir); await load(); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const totalMins = phases.reduce((s, p) => s + (p.expected_minutes || 0), 0);
+  const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--line)" };
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div className="h2" style={{ marginBottom: 4 }}>Discharge Phase SLAs</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 18 }}>
+        Expected duration per phase. The system starts a clock when a phase begins,
+        marks it <strong>Delayed</strong> once it runs past this time, and adds the
+        remaining phases up to estimate each patient's discharge time. Changes apply
+        to phases that start from now on — discharges already running keep their
+        existing deadlines.
+      </div>
+
+      <div className="card" style={{ padding: "12px 16px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+        <span className="ic" style={{ background: "var(--blue-bg)", color: "var(--blue)" }}><Ic d={icons.clock} s={16} /></span>
+        <div>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>
+            {Math.floor(totalMins / 60)}h {totalMins % 60}m
+          </div>
+          <div className="dim" style={{ fontSize: 11.5 }}>
+            Total if every phase ran back-to-back. Real discharges are faster —
+            phases 1–3 run in parallel.
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+        {loading ? (
+          <div className="dim" style={{ padding: 20, textAlign: "center", fontSize: 13 }}>Loading…</div>
+        ) : phases.length === 0 ? (
+          <div className="dim" style={{ padding: 20, textAlign: "center", fontSize: 13 }}>No phases configured.</div>
+        ) : phases.map((p, i) => (
+          <div key={p.id} style={rowStyle}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
+              <button disabled={busy || i === 0} onClick={() => reorder(p, "up")}
+                style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▲</button>
+              <button disabled={busy || i === phases.length - 1} onClick={() => reorder(p, "down")}
+                style={{ background: "none", border: "none", cursor: i === phases.length - 1 ? "default" : "pointer", color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▼</button>
+            </div>
+
+            {editId === p.id ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                <input className="field" autoFocus maxLength={100} value={draft.label}
+                  placeholder="Phase name" style={{ padding: "6px 10px", fontSize: 13 }}
+                  onChange={(e) => setDraft(d => ({ ...d, label: e.target.value }))} />
+                <div className="row" style={{ gap: 8 }}>
+                  <input className="field" maxLength={100} value={draft.department}
+                    placeholder="Department (e.g. Pharmacy)" style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
+                    onChange={(e) => setDraft(d => ({ ...d, department: e.target.value }))} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                    <input className="field" type="number" min={0} max={1440} value={draft.expected_minutes}
+                      style={{ width: 78, padding: "6px 10px", fontSize: 13 }}
+                      onChange={(e) => setDraft(d => ({ ...d, expected_minutes: e.target.value }))} />
+                    <span className="dim" style={{ fontSize: 12, fontWeight: 600 }}>min</span>
+                  </div>
+                </div>
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 12 }}
+                    disabled={busy} onClick={save}>Save</button>
+                  <button className="btn btn-ghost" style={{ padding: "6px 14px", fontSize: 12 }}
+                    disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>{p.label}</div>
+                  <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                    {p.department || "No department set"}
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 99,
+                  background: "var(--blue-bg)", color: "var(--blue)", flexShrink: 0, whiteSpace: "nowrap",
+                }}>{p.expected_minutes} min</span>
+                <button title="Edit SLA" onClick={() => openEdit(p)} disabled={busy}
+                  style={{ background: "none", border: "none", cursor: busy ? "default" : "pointer", color: "var(--primary)", padding: 4, borderRadius: 6, display: "flex", flexShrink: 0 }}>
+                  <Ic d={icons.pencil} s={16} />
+                </button>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  PAYER TYPE MANAGER
 // ══════════════════════════════════════════════════════════════════════════════
 export function PayerTypeManager({ showToast }) {
@@ -5012,16 +5145,68 @@ function DoctorMasterSection({ showToast }) {
   const [editName, setEditName] = useState("");
   const [editDeptIds, setEditDeptIds] = useState([]);
 
+  // Login credential management — loginFormId: doctor id | null
+  const [loginFormId, setLoginFormId] = useState(null); // open form for this doctor
+  const [loginAction, setLoginAction] = useState("set"); // "set" | "edit" | "reset"
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginErr, setLoginErr] = useState("");
+
   const load = async () => {
     setLoading(true);
     try {
-      const [d, dept] = await Promise.all([api.mgrDoctorsMaster(), api.mgrDepartments()]);
-      setDoctors(d.doctors || []);
+      const [d, dept, logins] = await Promise.all([api.mgrDoctorsMaster(), api.mgrDepartments(), api.mgrConsultantLogins().catch(() => ({ logins: [] }))]);
+      const loginMap = Object.fromEntries((logins.logins || []).map((l) => [l.doctor_master_id, l]));
+      setDoctors((d.doctors || []).map((doc) => ({ ...doc, login: loginMap[doc.id] || null })));
       setDepts(dept.departments || []);
     } catch (e) { showToast(toastErr(e)); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const openLoginForm = (doc, action) => {
+    setLoginFormId(doc.id);
+    setLoginAction(action);
+    setLoginUsername(action === "set" ? "" : (doc.login?.username || ""));
+    setLoginPassword("");
+    setLoginErr("");
+  };
+
+  const saveLogin = async (doc) => {
+    const u = loginUsername.trim();
+    if (!u) { setLoginErr("Username is required."); return; }
+    if (loginAction === "set" && !loginPassword) { setLoginErr("Password is required."); return; }
+    setLoginBusy(true); setLoginErr("");
+    try {
+      if (loginAction === "set") {
+        await api.mgrSetConsultantLogin(doc.id, u, loginPassword);
+        showToast(`Login created for ${doc.name} ✓`);
+      } else if (loginAction === "edit") {
+        await api.mgrUpdateConsultantLogin(doc.login.id, { username: u, ...(loginPassword ? { password: loginPassword } : {}) });
+        showToast("Credentials updated ✓");
+      }
+      setLoginFormId(null);
+      await load();
+    } catch (e) { setLoginErr(toastErr(e)); }
+    finally { setLoginBusy(false); }
+  };
+
+  const removeLogin = async (doc) => {
+    const ok = await confirm({
+      title: `Remove login for "${doc.name}"?`,
+      message: "This will disable their consultant portal access. Bed entry history is not affected.",
+      confirmLabel: "Remove", danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.mgrDeleteConsultantLogin(doc.login.id);
+      await load();
+      showToast(`Login removed for ${doc.name}`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
 
   const toggleDeptId = (list, setList, id) => {
     setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
@@ -5128,9 +5313,10 @@ function DoctorMasterSection({ showToast }) {
           <div className="empty">No doctors yet.</div>
         ) : (
           doctors.map((doc) => (
-            <div key={doc.id} style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: doc.active ? "transparent" : "var(--panel-2)", opacity: doc.active ? 1 : 0.65 }}>
+            <div key={doc.id} style={{ borderBottom: "1px solid var(--line)", background: doc.active ? "transparent" : "var(--panel-2)", opacity: doc.active ? 1 : 0.65 }}>
+              {/* Doctor info row */}
               {editId === doc.id ? (
-                <div>
+                <div style={{ padding: "12px 16px" }}>
                   <input className="field" autoFocus maxLength={150} value={editName}
                     style={{ padding: "6px 10px", fontSize: 13, marginBottom: 8 }}
                     onChange={(e) => setEditName(e.target.value)} />
@@ -5141,26 +5327,82 @@ function DoctorMasterSection({ showToast }) {
                   </div>
                 </div>
               ) : (
-                <div className="row between" style={{ gap: 10 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{doc.name}</span>
-                      <span style={{
-                        fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
-                        background: doc.active ? "var(--green-bg)" : "var(--panel-2)",
-                        color: doc.active ? "var(--green)" : "var(--ink-3)",
-                        border: `1px solid ${doc.active ? "var(--green)" : "var(--line)"}`,
-                      }}>{doc.active ? "Active" : "Inactive"}</span>
+                <div style={{ padding: "12px 16px" }}>
+                  <div className="row between" style={{ gap: 10 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{doc.name}</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
+                          background: doc.active ? "var(--green-bg)" : "var(--panel-2)",
+                          color: doc.active ? "var(--green)" : "var(--ink-3)",
+                          border: `1px solid ${doc.active ? "var(--green)" : "var(--line)"}`,
+                        }}>{doc.active ? "Active" : "Inactive"}</span>
+                        {doc.login && (
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "var(--primary-bg, rgba(59,130,246,.12))", color: "var(--primary)", border: "1px solid var(--primary)" }}>
+                            <Ic d={icons.user} s={10} /> @{doc.login.username}
+                          </span>
+                        )}
+                      </div>
+                      <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }}>
+                        {doc.departments.length ? doc.departments.map((d) => d.name).join(", ") : "No departments"}
+                      </div>
                     </div>
-                    <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }}>
-                      {doc.departments.length ? doc.departments.map((d) => d.name).join(", ") : "No departments"}
+                    <div className="row" style={{ gap: 0, flexShrink: 0 }}>
+                      {iconBtn(() => startEdit(doc), "var(--primary)", "Edit name/departments", icons.pencil)}
+                      {iconBtn(() => toggleActive(doc), doc.active ? "var(--amber)" : "var(--green)", doc.active ? "Deactivate" : "Activate", doc.active ? icons.eyeOff : icons.eye)}
+                      {iconBtn(() => remove(doc), "var(--red)", "Delete", icons.trash)}
                     </div>
                   </div>
-                  <div className="row" style={{ gap: 0, flexShrink: 0 }}>
-                    {iconBtn(() => startEdit(doc), "var(--primary)", "Edit", icons.pencil)}
-                    {iconBtn(() => toggleActive(doc), doc.active ? "var(--amber)" : "var(--green)", doc.active ? "Deactivate" : "Activate", doc.active ? icons.eyeOff : icons.eye)}
-                    {iconBtn(() => remove(doc), "var(--red)", "Delete", icons.trash)}
-                  </div>
+
+                  {/* Consultant login section */}
+                  {loginFormId === doc.id ? (
+                    <div style={{ marginTop: 12, padding: 12, background: "var(--panel-2)", borderRadius: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: "var(--ink-2)" }}>
+                        {loginAction === "set" ? "Set consultant login credentials" : "Edit consultant credentials"}
+                      </div>
+                      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                        <div style={{ flex: "1 1 160px" }}>
+                          <label className="label" style={{ fontSize: 11 }}>Username</label>
+                          <input className="field" autoFocus maxLength={60} value={loginUsername}
+                            placeholder="e.g. dr.ahmed" autoCapitalize="none" autoCorrect="off"
+                            onChange={(e) => setLoginUsername(e.target.value)} />
+                        </div>
+                        <div style={{ flex: "1 1 160px" }}>
+                          <label className="label" style={{ fontSize: 11 }}>
+                            {loginAction === "edit" ? "New password (leave blank to keep)" : "Password"}
+                          </label>
+                          <input className="field" type="password" maxLength={72} value={loginPassword}
+                            placeholder={loginAction === "edit" ? "•••••• (unchanged)" : "••••••"}
+                            onChange={(e) => setLoginPassword(e.target.value)} />
+                        </div>
+                      </div>
+                      {loginErr && <div style={{ fontSize: 12, color: "var(--red)", marginTop: 6 }}>{loginErr}</div>}
+                      <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                        <button className="btn btn-primary" style={{ fontSize: 12, padding: "7px 14px" }} disabled={loginBusy} onClick={() => saveLogin(doc)}>
+                          {loginBusy ? "Saving…" : "Save"}
+                        </button>
+                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: "7px 14px" }} disabled={loginBusy} onClick={() => setLoginFormId(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                      {doc.login ? (
+                        <>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px" }} onClick={() => openLoginForm(doc, "edit")}>
+                            <Ic d={icons.pencil} s={12} /> Edit Login
+                          </button>
+                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px", color: "var(--red)" }} onClick={() => removeLogin(doc)}>
+                            <Ic d={icons.trash} s={12} /> Remove Login
+                          </button>
+                        </>
+                      ) : (
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px", color: "var(--primary)" }} onClick={() => openLoginForm(doc, "set")}>
+                          <Ic d={icons.plus} s={12} /> Set Consultant Login
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -5660,7 +5902,6 @@ function BlockRoundsCard({ group }) {
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
           <span className="chip mono" style={{ fontWeight: 700 }}>{occPct}% occ</span>
-          <span className={"tag " + (r.shift === "night" ? "b" : "v")}>{r.shift === "night" ? "Night" : "Morning"}</span>
         </div>
       </div>
 
@@ -5689,7 +5930,7 @@ function BlockRoundsCard({ group }) {
               const active = i === idx;
               return (
                 <button key={i} onClick={() => { setSel(i); setOpen(false); }}
-                  title={`submitted ${fmtTime(rd.submittedAt)} · ${rd.shift === "night" ? "Night" : "Morning"}`}
+                  title={`submitted ${fmtTime(rd.submittedAt)}`}
                   className="chip" style={{
                     cursor: "pointer", fontSize: 11, padding: "5px 10px", fontWeight: 600,
                     background: active ? "var(--primary)" : "var(--panel)",

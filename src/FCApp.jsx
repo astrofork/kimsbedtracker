@@ -109,25 +109,25 @@ export default function FCApp({ user, onLogout }) {
         </div>
       </div>
 
-      <div className="floor-head">Bill Ready — pending</div>
+      <div className="floor-head">Bill Finalized — pending</div>
       {billReady.length === 0 ? (
         <div className="card empty" style={{ marginTop: 8, marginBottom: 18 }}>
           <Ic d={icons.fileText} s={28} />
-          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">Nothing waiting on Bill Ready.</div>
+          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">Nothing waiting on Bill Finalized.</div>
         </div>
       ) : (
         <div style={{ marginBottom: 18 }}>
           {billReady.map((row) => (
-            <PendingRow key={row.admission_id} row={row} actionLabel="Mark Bill Ready" onComplete={completeBillReady} busy={busyId === row.admission_id} />
+            <PendingRow key={row.admission_id} row={row} actionLabel="Mark Bill Finalized" onComplete={completeBillReady} busy={busyId === row.admission_id} />
           ))}
         </div>
       )}
 
-      <div className="floor-head">Payment — pending</div>
+      <div className="floor-head">Payment Status — pending</div>
       {paymentPending.length === 0 ? (
         <div className="card empty" style={{ marginTop: 8 }}>
           <Ic d={icons.banknote} s={28} />
-          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">Nothing waiting on Payment.</div>
+          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">Nothing waiting on Payment Status.</div>
         </div>
       ) : (
         paymentPending.map((row) => (

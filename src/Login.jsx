@@ -4,7 +4,6 @@ import { Ic, icons, ThemeToggle } from "./ui.jsx";
 import { InstallBanner } from "./pwa.jsx";
 
 export default function Login({ onLogin, sessionMsg }) {
-  const [role, setRole] = useState("PRE");
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,7 +21,6 @@ export default function Login({ onLogin, sessionMsg }) {
     return () => clearInterval(t);
   }, []);
 
-  // Show session-expired / forced-logout messages as a toast
   useEffect(() => {
     if (sessionMsg) showToast(sessionMsg);
   }, [sessionMsg, showToast]);
@@ -32,7 +30,7 @@ export default function Login({ onLogin, sessionMsg }) {
     if (!p)        { showToast("Please enter your password."); return; }
     setBusy(true);
     try {
-      const { token, user } = await api.login(u.trim(), p, role);
+      const { token, user } = await api.login(u.trim(), p);
       setSession(token, user);
       onLogin(user);
     } catch (e) { showToast(friendlyError(e).message); }
@@ -69,23 +67,17 @@ export default function Login({ onLogin, sessionMsg }) {
         </div>
 
         <div className="card slide-up" style={{ padding: 18, marginTop: 28, animationDelay: ".05s" }}>
-          <div className="seg seg-roles" style={{ marginBottom: 18 }}>
-            <button className={role === "PRE" ? "on" : ""} onClick={() => setRole("PRE")}>PRE</button>
-            <button className={role === "NURSE" ? "on" : ""} onClick={() => setRole("NURSE")}>Nurse</button>
-            <button className={role === "DOCTOR" ? "on" : ""} onClick={() => setRole("DOCTOR")}>Doctor</button>
-            <button className={role === "COO" ? "on" : ""} onClick={() => setRole("COO")}>Admin</button>
-          </div>
-
           <label className="label">Username</label>
           <input className="field" maxLength={60}
-            placeholder={role === "PRE" ? "e.g. pre1" : role === "NURSE" ? "e.g. nurse_gm" : role === "DOCTOR" ? "e.g. dr_kumar" : "e.g. admin1"}
+            placeholder="Enter your username"
             value={u}
             autoCapitalize="none" autoCorrect="off"
-            onChange={(e) => setU(e.target.value)} />
+            onChange={(e) => setU(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && document.getElementById("pwd")?.focus()} />
           <div style={{ height: 14 }} />
           <label className="label">Password</label>
           <div style={{ position: "relative" }}>
-            <input className="field" type={showPwd ? "text" : "password"} placeholder="••••••" maxLength={72} value={p}
+            <input id="pwd" className="field" type={showPwd ? "text" : "password"} placeholder="••••••" maxLength={72} value={p}
               style={{ paddingRight: 42 }}
               onChange={(e) => setP(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()} />
@@ -104,7 +96,7 @@ export default function Login({ onLogin, sessionMsg }) {
           </div>
 
           <button className="btn btn-primary btn-block" style={{ marginTop: 20 }} disabled={busy} onClick={submit}>
-            {busy ? "Signing in…" : `Sign in as ${role === "COO" ? "ADMIN" : role}`}
+            {busy ? "Signing in…" : "Sign In"}
           </button>
         </div>
       </div>

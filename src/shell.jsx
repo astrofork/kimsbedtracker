@@ -16,6 +16,11 @@ export function useProfileMenuSlot() { return useContext(ProfileMenuSlotContext)
 const TopBarSlotContext = createContext(null);
 export function useTopBarSlot() { return useContext(TopBarSlotContext); }
 
+// Exposes the sidebar toggle + collapsed state so children (e.g. the floating
+// filter bar) can embed their own hamburger button without prop-drilling.
+const SidebarStateContext = createContext({ toggle: () => {}, collapsed: false });
+export function useSidebarState() { return useContext(SidebarStateContext); }
+
 /**
  * AppShell — shared sidebar + topbar layout for all role apps.
  *
@@ -27,7 +32,6 @@ export function useTopBarSlot() { return useContext(TopBarSlotContext); }
  *     user={{ name:"pre1", role:"PRE" }}
  *     onLogout={fn}
  *     topExtra={<node/>}           // optional, rendered left of the user chip
- *     alarm={bool}                 // flashes the content background
  *   >{children}</AppShell>
  *
  * Behavior:
@@ -37,7 +41,7 @@ export function useTopBarSlot() { return useContext(TopBarSlotContext); }
  *    down the tree can inject content into it via useProfileMenuSlot() +
  *    createPortal — used by the admin dashboard for its layout controls.
  */
-export function AppShell({ menu, active, onSelect, title, user, onLogout, topExtra, alarm, children }) {
+export function AppShell({ menu, active, onSelect, title, user, onLogout, topExtra, children }) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("sb_collapsed") === "1"
   );
@@ -211,12 +215,14 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
             )}
           </div>
         </header>
-        <main className={"content" + (alarm ? " alarm-flash" : "")}>
-          <ProfileMenuSlotContext.Provider value={profileOpen ? profileSlot : null}>
-            <TopBarSlotContext.Provider value={topBarSlot}>
-              {children}
-            </TopBarSlotContext.Provider>
-          </ProfileMenuSlotContext.Provider>
+        <main className="content">
+          <SidebarStateContext.Provider value={{ toggle, collapsed }}>
+            <ProfileMenuSlotContext.Provider value={profileOpen ? profileSlot : null}>
+              <TopBarSlotContext.Provider value={topBarSlot}>
+                {children}
+              </TopBarSlotContext.Provider>
+            </ProfileMenuSlotContext.Provider>
+          </SidebarStateContext.Provider>
         </main>
       </div>
     </div>

@@ -13,6 +13,7 @@ const DOCTOR_CFG = {
   updateBedStatus: (...a) => api.doctorUpdateBedStatus(...a),
   payerTypes: () => api.doctorPayerTypes(),
   destinations: () => api.doctorDestinations(),
+  reviewWard: (wardId) => api.doctorReviewWard(wardId),
 };
 import DischargeMiniWidget from "./DischargeMiniWidget.jsx";
 
@@ -50,7 +51,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
   }, [blockId]);
   useEffect(() => { load(); }, [load, reloadKey]);
 
-  const [reviewingWard, setReviewingWard] = useState(null);
   const [docsOpen, setDocsOpen] = useState(false); // doctors-list dropdown
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
 
@@ -70,16 +70,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
       showToast("All wards marked reviewed ✓");
     } catch (e) { showToast(toastErr(e)); }
     finally { setReviewing(false); }
-  };
-
-  const reviewWard = async (wardId) => {
-    setReviewingWard(wardId);
-    try {
-      const r = await api.doctorReviewWard(wardId);
-      setData((d) => d ? { ...d, wards: d.wards.map((w) => w.id === wardId ? { ...w, reviewedAt: r.reviewedAt } : w) } : d);
-      showToast("Ward marked reviewed ✓");
-    } catch (e) { showToast(toastErr(e)); }
-    finally { setReviewingWard(null); }
   };
 
   if (error) return (
@@ -190,11 +180,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
                     <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", fontSize: 13 }} disabled={w.operational === false}
                       onClick={(e) => { e.stopPropagation(); onOpenWard(w); }}>
                       <Ic d={icons.bed} s={14} /> {w.operational === false ? "Non-operational" : "View / Update Beds"}
-                    </button>
-                    <button className="btn btn-ghost" style={{ padding: "10px 12px", fontSize: 13, whiteSpace: "nowrap" }}
-                      disabled={reviewingWard === w.id}
-                      onClick={(e) => { e.stopPropagation(); reviewWard(w.id); }} title="Mark this ward reviewed">
-                      <Ic d={icons.check} s={14} /> {reviewingWard === w.id ? "…" : "Review"}
                     </button>
                   </div>
                 </div>

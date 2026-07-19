@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api, toastErr, createSocket, fmtRelative } from "./lib.js";
 import { Ic, icons } from "./ui.jsx";
-import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6 } from "./bedUtils.js";
+import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 import DischargeTab from "./DischargeTab.jsx";
 import { BackBtn } from "./PREApp.jsx";
 
@@ -74,11 +74,16 @@ function DischargeCard({ row, onOpen }) {
   const prog = dischargeProgress(row);
   // Current stage name: first pending applicable step (or the plan date when not started)
   const cur = DISCHARGE_STEP_LABELS.find(([col]) => row[col] !== "NOT_APPLICABLE" && row[col] === "PENDING");
+  const wf = row.workflow;
+  const tone = workflowTone(wf);
+  const isDelayed = wf?.state === "DELAYED";
 
   return (
     <button className="card" style={{
       display: "block", width: "100%", textAlign: "left", padding: "14px 16px", cursor: "pointer",
-      borderLeft: `4px solid ${planned ? "var(--st-vr)" : "var(--primary)"}`,
+      // A delayed discharge earns the red edge — it's the one thing on this list
+      // that needs picking up before the others.
+      borderLeft: `4px solid ${planned ? "var(--st-vr)" : isDelayed ? "var(--red)" : "var(--primary)"}`,
     }} onClick={onOpen}>
       <div className="row between" style={{ gap: 10, flexWrap: "wrap" }}>
         <div className="row" style={{ gap: 9, flexWrap: "wrap", minWidth: 0 }}>
@@ -105,6 +110,24 @@ function DischargeCard({ row, onOpen }) {
             </span>
             {prog && <span className="dim" style={{ fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>{prog.done}/{prog.total} · {prog.pct}%</span>}
           </div>
+          {/* SLA line — backend-computed ETA plus which phases have slipped. */}
+          {wf && (
+            <div className="row between" style={{ gap: 8, marginTop: 5, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <Ic d={icons.clock} s={11} style={{ color: "var(--ink-3)" }} />
+                {wf.eta ? `Est. ${fmtClock(wf.eta)}` : "—"}
+                {wf.etaMinutes != null && (
+                  <span className="dim" style={{ fontWeight: 600 }}>· {fmtMins(wf.etaMinutes)} left</span>
+                )}
+              </span>
+              {tone && (
+                <span style={{
+                  fontSize: 9.5, fontWeight: 800, padding: "2px 7px", borderRadius: 99,
+                  background: tone.bg, color: tone.color, flexShrink: 0, letterSpacing: ".03em",
+                }}>{tone.label.toUpperCase()}</span>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -163,7 +186,11 @@ export default function DischargesPage({ role, wards, wardId }) {
 
   const planned = (rows || []).filter((r) => r.status === "PLANNED");
   const running = (rows || []).filter((r) => r.status !== "PLANNED");
-  const shown = filter === "PLANNED" ? planned : filter === "RUNNING" ? running : (rows || []);
+  const delayed = (rows || []).filter((r) => r.workflow?.state === "DELAYED");
+  const shown = filter === "PLANNED" ? planned
+    : filter === "RUNNING" ? running
+    : filter === "DELAYED" ? delayed
+    : (rows || []);
 
   return (
     <div className="slide-up">
@@ -190,11 +217,24 @@ export default function DischargesPage({ role, wards, wardId }) {
           </div>
           <div className="l">IN PROGRESS</div>
         </div>
+        <div className="stat">
+          <div className="row" style={{ gap: 10 }}>
+            <span className="ic" style={{
+              background: delayed.length ? "var(--red-bg)" : "var(--panel-2)",
+              color: delayed.length ? "var(--red)" : "var(--ink-3)",
+            }}><Ic d={icons.alert} s={16} /></span>
+            <div className="n" style={{ fontSize: 18, color: delayed.length ? "var(--red)" : undefined }}>
+              {rows ? delayed.length : "—"}
+            </div>
+          </div>
+          <div className="l">DELAYED</div>
+        </div>
         <div className="stat" style={{ justifyContent: "center" }}>
           <select className="field" aria-label="Filter discharges" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ fontWeight: 600 }}>
             <option value="ALL">All</option>
             <option value="PLANNED">Planned only</option>
             <option value="RUNNING">In progress only</option>
+            <option value="DELAYED">Delayed only</option>
           </select>
         </div>
       </div>

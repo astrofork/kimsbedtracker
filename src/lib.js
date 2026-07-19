@@ -50,16 +50,16 @@ export const api = {
   meta: () => req("/meta"),
   departments: () => req("/departments"),
   doctors: (departmentId) => req("/doctors" + (departmentId ? `?department_id=${departmentId}` : "")),
-  login: (username, password, role) =>
-    req("/auth/login", { method: "POST", body: JSON.stringify({ username, password, role }) }),
+  login: (username, password) =>
+    req("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   preMe: () => req("/pre/me"),
-  setShift: (shift) => req("/pre/shift", { method: "POST", body: JSON.stringify({ shift }) }),
   setWard: (wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved = 0) =>
     req("/pre/ward", { method: "POST", body: JSON.stringify({ wardId, vacant_none, vacant_reserved, occupied_none, occupied_reserved }) }),
   submitRound: () => req("/pre/submit", { method: "POST" }),
   cooOverview: () => req("/coo/overview"),
   cooLiveWards: () => req("/coo/live-wards"),
   cooBedDetails: () => req("/coo/bed-details"),
+  cooConsultants: () => req("/coo/consultants"),
   cooPreActivity: () => req("/coo/pre-activity"),
   cooNurseActivity: () => req("/coo/nurse-activity"),
   cooAudit: () => req("/coo/audit"),
@@ -193,8 +193,20 @@ export const api = {
   },
   prePayerTypes: () => req("/pre/payer-types"),
   preDestinations: () => req("/pre/destinations"),
+  preReviewWard: (wardId) => req(`/pre/wards/${wardId}/review`, { method: "POST" }),
+  // Admin-style dashboard, scoped server-side to this PRE user's own wards.
+  preLiveWards: () => req("/pre/live-wards"),
+  preBedDetails: () => req("/pre/bed-details"),
+  preAdminDashboard: (unit) => req(`/pre/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  preAdminDashboardHistory: (unit) => req(`/pre/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  preConsultants: () => req("/pre/consultants"),
+  preSnapshots: () => req("/pre/snapshots"),
   preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
     req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
+  // Corrects a data-entry mistake on an already-active admission (IP/type/consultant/dept)
+  // — never changes physical/reservation status.
+  preUpdateAdmission: (bedId, { ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, payerType }) =>
+    req(`/pre/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, payer_type: payerType }) }),
   // ── Nurse — bed management ───────────────────────────────────────────────────
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
@@ -206,6 +218,11 @@ export const api = {
   },
   nursePayerTypes: () => req("/nurse/payer-types"),
   nurseDestinations: () => req("/nurse/destinations"),
+  nurseReviewWard: (wardId) => req(`/nurse/wards/${wardId}/review`, { method: "POST" }),
+  // Admin-style dashboard, scoped server-side to this nurse's own wards.
+  nurseLiveWards: () => req("/nurse/live-wards"),
+  nurseBedDetails: () => req("/nurse/bed-details"),
+  nurseAdminDashboard: (unit) => req(`/nurse/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
     req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
   pushSubscribe: (subscription) =>
@@ -256,10 +273,43 @@ export const api = {
   dischargesForWard: (wardId) => req(`/discharge/ward/${wardId}`),
   dischargesActive: (wardId) => req("/discharge/active" + (wardId ? `?wardId=${wardId}` : "")),
   dischargesPendingStep: (step) => req(`/discharge/pending?step=${step}`),
+  dischargesAdmittedToday: () => req("/discharge/admitted-today"),
+  dischargesCancelledToday: () => req("/discharge/cancelled-today"),
+  dischargesCompletedToday: () => req("/discharge/completed-today"),
+  dischargesPatientLeft: () => req("/discharge/patient-left"),
   transferCandidates: (wardId) => req(`/discharge/transfer/candidates?wardId=${wardId}`),
   transferBed: (fromBedId, toWardId, toBedId, reason) =>
     req("/discharge/transfer", { method: "POST", body: JSON.stringify({ fromBedId, toWardId, toBedId, reason }) }),
   dischargeMoveToLounge: (admissionId) => req(`/discharge/${admissionId}/move-to-lounge`, { method: "POST", body: JSON.stringify({}) }),
+  // ── Consultant login management (COO creates/manages) ───────────────────────
+  mgrConsultantLogins: () => req("/manager/consultant-logins"),
+  mgrSetConsultantLogin: (doctorMasterId, username, password) =>
+    req("/manager/consultant-logins", { method: "POST", body: JSON.stringify({ doctor_master_id: doctorMasterId, username, password }) }),
+  mgrUpdateConsultantLogin: (id, data) =>
+    req(`/manager/consultant-logins/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteConsultantLogin: (id) =>
+    req(`/manager/consultant-logins/${id}`, { method: "DELETE" }),
+  // ── Consultant portal (CONSULTANT role) ─────────────────────────────────────
+  consultantLiveWards: () => req("/consultant/live-wards"),
+  consultantBedDetails: () => req("/consultant/bed-details"),
+  consultantAdminDashboard: (unit) => req(`/consultant/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  consultantPayerTypes: () => req("/consultant/payer-types"),
+  // ── Discharge phase SLAs ────────────────────────────────────────────────────
+  dischargePhaseConfig: () => req("/discharge/phase-config"),
+  mgrDischargePhases: () => req("/manager/discharge-phases"),
+  mgrUpdateDischargePhase: (id, data) =>
+    req(`/manager/discharge-phases/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrReorderDischargePhase: (id, direction) =>
+    req(`/manager/discharge-phases/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
+  consultantMyWards: () => req("/consultant/my-wards"),
+  consultantBeds: (wardId) => req(`/consultant/beds/${wardId}`),
+  consultantMyPatients: () => req("/consultant/my-patients"),
+  consultantMyDischarges: (params = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) { if (v) qs.set(k, v); }
+    const s = qs.toString();
+    return req(`/consultant/my-discharges${s ? "?" + s : ""}`);
+  },
 };
 
 // ---- WebSocket ----

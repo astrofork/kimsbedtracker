@@ -1,42 +1,42 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { api, toastErr, fmtDateTime, createSocket } from "./lib.js";
 import { Ic, icons } from "./ui.jsx";
-import { fmtIpLast6 } from "./bedUtils.js";
+import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 
 // Steps are organized into 5 groups. Groups run in parallel — none of them wait
 // on another group. Within a group, steps unlock in order: a step can't be
 // marked complete until the step before it in the same group is Completed (or
 // N/A) — see the "locked" computation where GROUPS is built below.
-const GROUP_LABELS = {
-  1: "Doctor Summary",
-  2: "Drug & Clinical Clearance",
-  3: "Billing & Payment",
-  4: "System Checkout",
-  5: "Physical Checkout",
-};
+//
+// The groups are, in order: Doctor Summary · Drug & Clinical Clearance ·
+// Billing & Payment · System Checkout · Physical Checkout. Those names are
+// documentation only — the UI renders each group as its own card with no
+// heading, so the labels aren't carried in the data.
 const STEPS = [
-  { key: "DISCHARGE_SUMMARY", label: "Discharge Summary", roles: ["DOCTOR"], group: 1 },
+  { key: "DISCHARGE_SUMMARY", label: "Discharge Summary", roles: ["DOCTOR", "CONSULTANT"], group: 1 },
   { key: "DRUG_RETURN", label: "Drug Return", roles: ["PRE", "NURSE"], group: 2 },
   { key: "PHARMACY_CLEARANCE", label: "Pharmacy Clearance", roles: ["PRE", "NURSE"], group: 2 },
   { key: "PROCEDURE_RECONCILIATION", label: "Procedure Reconciliation (OT / Cath Lab)", roles: ["PRE"], allowNA: true, group: 2 },
-  { key: "BILLING_STARTED", label: "Billing Started", roles: ["PRE"], group: 3 },
+  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE"], group: 3 },
   { key: "AUDIT", label: "Audit", roles: ["PRE"], group: 3 },
-  { key: "BILL_READY", label: "Bill Ready", roles: ["FC"], group: 3 },
-  { key: "PAYMENT", label: "Payment", roles: ["FC"], group: 3 },
+  { key: "BILL_READY", label: "Bill Finalized", roles: ["FC"], group: 3 },
+  { key: "PAYMENT", label: "Payment Status", roles: ["FC"], group: 3 },
   { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE"], group: 4 },
   { key: "PHYSICAL_CHECKOUT", label: "Physical Checkout", roles: ["PRE", "NURSE"], needsPatientLeft: true, group: 5 },
 ];
-const GROUPS = Object.keys(GROUP_LABELS).map((id) => ({
-  id: Number(id), label: GROUP_LABELS[id], steps: STEPS.filter((s) => s.group === Number(id)),
+const GROUPS = [...new Set(STEPS.map((s) => s.group))].map((id) => ({
+  id, steps: STEPS.filter((s) => s.group === id),
 }));
 // Every step System Checkout must wait on — everything except itself and Physical
 // Checkout (which runs after/parallel to it, not before). Mirrors the backend gate
 // in dischargeService.updateStep so the button reflects what the API will actually allow.
 const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !["SYSTEM_CHECKOUT", "PHYSICAL_CHECKOUT"].includes(s.key));
-const PLAN_ROLES = ["PRE", "DOCTOR"];
+const PLAN_ROLES = ["PRE", "DOCTOR", "CONSULTANT"];
 
+// --ink-2 rather than --ink-3 for the neutral states: --ink-3 (#9CA3AF light) is
+// only ~2.5:1 on the group-box surface, under the 4.5:1 AA floor.
 const STATUS_COLOR = {
-  PENDING: "var(--ink-3)", COMPLETED: "var(--st-v)", NOT_APPLICABLE: "var(--ink-3)",
+  PENDING: "var(--ink-2)", COMPLETED: "var(--st-v)", NOT_APPLICABLE: "var(--ink-2)",
   PLANNED: "var(--st-vr)", DISCHARGE_INITIATED: "var(--primary)", IN_PROGRESS: "var(--primary)",
   CANCELLED: "var(--st-or)",
 };
@@ -45,16 +45,62 @@ function todayStr(offsetDays = 0) {
   return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
-function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lockedTitle, patientLeft }) {
+function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast }) {
   const [pickingLeft, setPickingLeft] = useState(false);
   const canAct = step.roles.includes(role);
   const showPatientLeft = step.needsPatientLeft && status === "COMPLETED";
 
+  // SLA line — all values come from the backend's `workflow.phases`; this only
+  // formats them. Delayed steps get a red overdue counter, running steps show
+  // the deadline they're working against, finished steps show how long they took.
+  const delayed = phase?.state === "DELAYED";
+  const tat = phase ? `TAT ${fmtMins(phase.expectedMinutes)}` : null;
+  const slaLine = (() => {
+    if (!phase) return null;
+    if (phase.state === "COMPLETED" && phase.completedAt) {
+      const took = phase.actualMinutes != null ? ` · took ${fmtMins(phase.actualMinutes)}` : "";
+      const late = phase.actualMinutes != null && phase.actualMinutes > phase.expectedMinutes;
+      return (
+        <span style={{ color: late ? "var(--amber)" : "var(--ink-2)" }}>
+          Done {fmtClock(phase.completedAt)}{took} · {tat}
+        </span>
+      );
+    }
+    if (phase.startedAt) {
+      return (
+        <span style={{ color: delayed ? "var(--red)" : "var(--ink-2)" }}>
+          Started {fmtClock(phase.startedAt)}
+          {delayed
+            ? ` · ${fmtMins(phase.overdueMinutes)} overdue`
+            : phase.deadline ? ` · due ${fmtClock(phase.deadline)}` : ""}
+          {" · "}{tat}
+        </span>
+      );
+    }
+    return <span style={{ color: "var(--ink-2)" }}>Not started · {tat}</span>;
+  })();
+
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid var(--line)", gap: 10, opacity: locked ? 0.55 : 1 }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>{step.label}</div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLOR[status] || "var(--ink-3)", marginTop: 2 }}>{status.replace("_", " ")}</div>
+    // Rows divide themselves inside a group card, so the last one has no rule —
+    // the card edge already closes the list.
+    //
+    // Locked rows mute via an explicit --ink-2 label, not a blanket opacity:
+    // opacity multiplied against text that was already --ink-3 dropped it to
+    // roughly 1.5:1 against the box, i.e. unreadable. The lock chip on the right
+    // already signals the state, so the text itself doesn't need to fade.
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: isLast ? "none" : "1px solid var(--line)", gap: 10, flexWrap: "wrap" }}>
+      <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: locked ? "var(--ink-2)" : "var(--ink)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          {step.label}
+          {delayed && (
+            <span style={{
+              fontSize: 9.5, fontWeight: 800, padding: "1px 6px", borderRadius: 99,
+              background: "var(--red-bg)", color: "var(--red)", letterSpacing: ".03em",
+            }}>DELAYED</span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: STATUS_COLOR[status] || "var(--ink-2)", marginTop: 2 }}>{status.replace("_", " ")}</div>
+        {slaLine && <div style={{ fontSize: 10.5, fontWeight: 600, marginTop: 2 }}>{slaLine}</div>}
         {showPatientLeft && (
           <div style={{ fontSize: 11, fontWeight: 700, marginTop: 2, color: patientLeft ? "var(--st-v)" : "var(--st-or)" }}>
             <Ic d={patientLeft ? icons.check : icons.alert} s={11} /> {patientLeft ? "Patient has left" : "Patient has NOT left"}
@@ -62,7 +108,7 @@ function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lock
         )}
       </div>
       {locked ? (
-        <span className="dim" title={lockedTitle} style={{ fontSize: 11, flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
+        <span title={lockedTitle} style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
           <Ic d={icons.ban} s={12} /> After {lockedOn}
         </span>
       ) : !canAct ? (
@@ -250,6 +296,8 @@ function HistorySection({ admissionId }) {
 export default function DischargeTab({ bed, role, onChanged }) {
   const [admission, setAdmission] = useState(undefined);
   const [tracking, setTracking] = useState(null);
+  // Backend-computed SLA view: per-phase deadlines/state plus the overall ETA.
+  const [workflow, setWorkflow] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [section, setSection] = useState(null); // "plan" | "transfer" | "history" | null
@@ -264,6 +312,7 @@ export default function DischargeTab({ bed, role, onChanged }) {
       const r = await api.dischargeForBed(bed.id);
       setAdmission(r.admission);
       setTracking(r.tracking);
+      setWorkflow(r.workflow ?? null);
     } catch (e) { setError(toastErr(e)); }
   }, [bed.id]);
 
@@ -346,6 +395,8 @@ export default function DischargeTab({ bed, role, onChanged }) {
 
   const canPlan = PLAN_ROLES.includes(role);
   const running = tracking && ["DISCHARGE_INITIATED", "IN_PROGRESS"].includes(tracking.status);
+  const phaseByKey = new Map((workflow?.phases ?? []).map(p => [p.key, p]));
+  const tone = workflowTone(workflow);
 
   if (admission === undefined) return <div className="dim" style={{ fontSize: 13, padding: "16px 0", textAlign: "center" }}>Loading…</div>;
   if (admission === null) return (
@@ -395,7 +446,38 @@ export default function DischargeTab({ bed, role, onChanged }) {
                 {tracking.planned_date}{tracking.planned_time ? ` · ${tracking.planned_time}` : ""}
               </div>
             )}
+            {/* Once running, the planned date stops being useful — what everyone
+                needs is the live estimate and whether the flow is slipping. */}
+            {workflow?.eta != null && (
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
+                  Est. discharge
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.15 }}>{fmtClock(workflow.eta)}</div>
+                {tone && (
+                  <span style={{
+                    display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
+                    padding: "2px 7px", borderRadius: 99, background: tone.bg, color: tone.color,
+                  }}>{tone.label}</span>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* Delay detail — named phases, so it's actionable rather than just a flag. */}
+          {workflow?.delayed?.length > 0 && (
+            <div style={{
+              display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 12,
+              background: "var(--red-bg)", borderRadius: 10, padding: "9px 12px",
+            }}>
+              <Ic d={icons.alert} s={14} style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} />
+              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--red)" }}>
+                {workflow.delayed.length === 1 ? "1 phase is" : `${workflow.delayed.length} phases are`} past the expected time:{" "}
+                {workflow.phases.filter(p => p.state === "DELAYED")
+                  .map(p => `${p.label} (${fmtMins(p.overdueMinutes)} over)`).join(", ")}
+              </div>
+            </div>
+          )}
 
           {tracking.status === "PLANNED" && section === "plan" && (
             <PlanSection bed={bed} existing={tracking} onClose={() => setSection(null)} onSaved={refresh} />
@@ -410,12 +492,24 @@ export default function DischargeTab({ bed, role, onChanged }) {
 
           {running && (
             <>
-              <div style={{ marginBottom: 8 }}>
+              {/* One card per group, no group heading — the grouping itself is the
+                  only cue needed, and dropping five headings buys back the vertical
+                  space that made this list long on phones.
+
+                  Both mounts wrap this component in a plain `.card`, so these boxes
+                  sit on --panel. They deliberately use --panel-2 instead: a white
+                  box on a white parent reads as one continuous list no matter how
+                  strong the border is. Separation has to come from the surface
+                  colour because --shadow is `none` in the dark theme, so elevation
+                  alone would look right in light mode and vanish in dark. */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 8 }}>
                 {GROUPS.map((g) => (
-                  <div key={g.id} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 800, color: "var(--ink-3)", letterSpacing: 0.6, textTransform: "uppercase", margin: "10px 0 2px" }}>
-                      {g.label}
-                    </div>
+                  <div key={g.id} style={{
+                    background: "var(--panel-2)",
+                    border: "1px solid var(--line)",
+                    borderRadius: "var(--radius)",
+                    padding: "2px 12px",
+                  }}>
                     {g.steps.map((step, i) => {
                       const status = tracking[step.key.toLowerCase() + "_status"];
                       const prev = i > 0 ? g.steps[i - 1] : null;
@@ -440,7 +534,8 @@ export default function DischargeTab({ bed, role, onChanged }) {
                       return (
                         <StepRow key={step.key} step={step} role={role} busy={busy} status={status}
                           locked={locked} lockedOn={locked ? lockedOn : null} lockedTitle={lockedTitle}
-                          onSetStatus={onStepAction} patientLeft={tracking.patient_left} />
+                          onSetStatus={onStepAction} patientLeft={tracking.patient_left}
+                          phase={phaseByKey.get(step.key)} isLast={i === g.steps.length - 1} />
                       );
                     })}
                   </div>

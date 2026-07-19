@@ -1,5 +1,6 @@
 {
   "rewrites": [
-    { "source": "/loginfc", "destination": "/index.html" }
+    { "source": "/loginfc", "destination": "/index.html" },
+    { "source": "/doctor/login", "destination": "/index.html" }
   ]
 }

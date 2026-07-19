@@ -2,16 +2,16 @@ import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from
 import { createPortal } from "react-dom";
 import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
 import {
-  Ic, icons, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
+  Ic, icons, ThemeToggle, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
 } from "./ui.jsx";
-import { AppShell, useProfileMenuSlot, useTopBarSlot } from "./shell.jsx";
+import { AppShell, useProfileMenuSlot, useTopBarSlot, useSidebarState } from "./shell.jsx";
 import {
   HistoryViewer, actionLabel,
   HierarchyManager, PreBlockManager, PreManager,
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
   DoctorBlockManager, DoctorManager,
-  DepartmentDoctorManager, DischargeLoungeManager,
+  DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager,
 } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
@@ -59,6 +59,7 @@ const ADMIN_TITLES = {
   payers: "Payer Types",
   deptdoctors: "Departments & Doctors",
   lounge: "Discharge Lounge",
+  dischargephases: "Discharge Phase SLAs",
   settings: "Settings",
 };
 
@@ -186,6 +187,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "destinations", icon: icons.list, label: "Destinations" },
         { key: "deptdoctors", icon: icons.stethoscope, label: "Departments & Doctors" },
         { key: "lounge", icon: icons.bed, label: "Discharge Lounge" },
+      { key: "dischargephases", icon: icons.clock, label: "Discharge Phase SLAs" },
       ]
     },
     {
@@ -281,6 +283,7 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "destinations" && <DestinationManager showToast={showToast} />}
       {tab === "deptdoctors" && <DepartmentDoctorManager showToast={showToast} />}
       {tab === "lounge" && <DischargeLoungeManager showToast={showToast} />}
+      {tab === "dischargephases" && <DischargePhaseManager showToast={showToast} />}
 
       {tab === "settings" && <SettingsPage user={user} />}
 
@@ -555,20 +558,76 @@ function DischargeListModal({ entry, onClose }) {
     let cancelled = false;
     setRows(null); setError("");
     let req;
-    if (entry.step === "PLANNED" || entry.step === "INITIATED") {
-      // "Initiated" is dashboardCounts()'s status='DISCHARGE_INITIATED' count
-      // specifically — freshly initiated, no steps touched yet. Once the first
-      // step is marked, status moves to IN_PROGRESS and it drops out of this
-      // card into "Pending" instead.
+    if (entry.step === "ADMITTED_TODAY") {
+      req = api.dischargesAdmittedToday().then((r) => r.admissions || []);
+    } else if (entry.step === "PLANNED") {
+      const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
       req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
-        entry.step === "PLANNED" ? d.status === "PLANNED" : d.status === "DISCHARGE_INITIATED"));
+        d.status === "PLANNED" && d.planned_date === todayStr));
+    } else if (entry.step === "INITIATED") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.status === "DISCHARGE_INITIATED"));
     } else if (entry.step === "PENDING_INPROGRESS") {
-      // Initiated AND at least one checklist step has been touched.
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.status === "IN_PROGRESS"));
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        d.status === "DISCHARGE_INITIATED" || d.status === "IN_PROGRESS"));
+    } else if (entry.step === "OVERDUE_PLANNED") {
+      const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        d.status === "PLANNED" && d.planned_date < today));
+    } else if (entry.step === "INITIATED_TODAY") {
+      const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+      const todayStartMs = new Date(todayStr + "T00:00:00+05:30").getTime();
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        ["DISCHARGE_INITIATED", "IN_PROGRESS"].includes(d.status) && d.initiated_at >= todayStartMs));
+    } else if (entry.step === "UNPLANNED_TODAY") {
+      const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+      const todayStartMs = new Date(todayStr + "T00:00:00+05:30").getTime();
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        ["DISCHARGE_INITIATED", "IN_PROGRESS"].includes(d.status) &&
+        d.initiated_at >= todayStartMs && (!d.planned_date || d.planned_date !== todayStr)));
+    } else if (entry.step === "AWAITING_PATIENT_LEAVE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        d.system_checkout_status === "COMPLETED" && d.physical_checkout_status !== "COMPLETED"));
+    } else if (entry.step === "COMPLETED_TODAY") {
+      req = api.dischargesCompletedToday().then((r) => r.discharges || []);
+    } else if (entry.step === "IN_DISCHARGE_LOUNGE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        d.physical_checkout_status === "COMPLETED" && d.system_checkout_status !== "COMPLETED"));
+    } else if (entry.step === "ALL_PENDING") {
+      const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        (d.status === "DISCHARGE_INITIATED" || d.status === "IN_PROGRESS") ||
+        (d.status === "PLANNED" && d.planned_date === todayStr)));
+    } else if (entry.step === "SCHEDULED_TODAY") {
+      const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+        d.planned_date === todayStr && (
+          d.status === "PLANNED" ||
+          d.status === "DISCHARGE_INITIATED" ||
+          d.status === "IN_PROGRESS"
+        )));
+    } else if (entry.step === "CANCELLED_TODAY") {
+      req = api.dischargesCancelledToday().then((r) => r.discharges || []);
+    } else if (entry.step === "PATIENT_LEFT") {
+      req = api.dischargesPatientLeft().then((r) => r.discharges || []);
+    } else if (entry.step === "DRUG_RETURN_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.drug_return_status === "COMPLETED"));
+    } else if (entry.step === "PHARMACY_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.pharmacy_clearance_status === "COMPLETED"));
+    } else if (entry.step === "PROCEDURE_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.procedure_reconciliation_status === "COMPLETED"));
+    } else if (entry.step === "BILLING_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.billing_started_status === "COMPLETED"));
+    } else if (entry.step === "AUDIT_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.audit_status === "COMPLETED"));
+    } else if (entry.step === "BILL_READY_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.bill_ready_status === "COMPLETED"));
+    } else if (entry.step === "PAYMENT_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.payment_status === "COMPLETED"));
+    } else if (entry.step === "SC_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.system_checkout_status === "COMPLETED"));
+    } else if (entry.step === "PC_DONE") {
+      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.physical_checkout_status === "COMPLETED"));
     } else {
-      // Every step card (including Bill Initiated Pending / Bill Ready Pending,
-      // now plain per-step pending counts like all the others) reuses the same
-      // endpoint FC's dashboard already uses for the same data.
       req = api.dischargesPendingStep(entry.step).then((r) => r.discharges || []);
     }
     req.then((data) => { if (!cancelled) setRows(data); })
@@ -629,7 +688,298 @@ function DischargeListModal({ entry, onClose }) {
   );
 }
 
-function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
+const CONSULT_ACCENT = "#0d9488"; // teal — distinct from ward table blues/oranges
+
+function ConsultantsTable({ data }) {
+  const { payerTypes, consultants } = data;
+  const grandTotal = consultants.reduce((s, c) => s + c.total, 0);
+
+  // One stable color per payer type (same hash palette as payer cards)
+  const pColors = {};
+  payerTypes.forEach(p => { pColors[p] = payerColor(p); });
+
+  const thBase = {
+    fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: ".06em",
+    color: "var(--ink-2)", whiteSpace: "nowrap", padding: "8px 12px",
+    borderBottom: "2px solid var(--line)", background: "var(--panel-2)",
+  };
+  const tdC = { textAlign: "center", padding: "7px 12px", minWidth: 72 };
+
+  return (
+    <div className="card" style={{ marginBottom: 16, overflow: "hidden" }}>
+      {/* Header bar */}
+      <div className="row between" style={{ padding: "13px 16px", borderBottom: "1px solid var(--line)", flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 26, height: 26, borderRadius: 7, background: `${CONSULT_ACCENT}18`, display: "flex", alignItems: "center", justifyContent: "center", color: CONSULT_ACCENT }}>
+            <Ic d={icons.user} s={15} />
+          </span>
+          <span style={{ fontWeight: 700, fontSize: 14, color: CONSULT_ACCENT }}>Consultants</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span className="chip" style={{ color: CONSULT_ACCENT }}>{consultants.length} consultants</span>
+          <span className="chip" style={{ color: CONSULT_ACCENT }}>{grandTotal} active patients</span>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="tbl-wrap" style={{ border: "none", borderRadius: 0 }}>
+        <table className="tbl tbl-pin1">
+          <thead>
+            <tr>
+              <th style={{ ...thBase, textAlign: "left", minWidth: 160 }}>Consultant</th>
+              <th style={{ ...thBase, ...wstC, color: CONSULT_ACCENT }}>Total</th>
+              {payerTypes.map(p => (
+                <th key={p} style={{ ...thBase, ...wstC, color: pColors[p] }}>{p}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {/* Grand total row */}
+            <tr className="tbl-total-row" style={{ background: `${CONSULT_ACCENT}0d`, "--tbl-total-accent": CONSULT_ACCENT }}>
+              <td style={{ fontWeight: 800, fontSize: 13, color: CONSULT_ACCENT, background: `${CONSULT_ACCENT}0d` }}>
+                TOTAL
+              </td>
+              <td style={{ ...tdC, fontWeight: 800, color: CONSULT_ACCENT }}>{grandTotal}</td>
+              {payerTypes.map(p => (
+                <td key={p} style={{ ...tdC, fontWeight: 800, color: pColors[p] }}>
+                  {consultants.reduce((s, c) => s + (c.payers[p] ?? 0), 0)}
+                </td>
+              ))}
+            </tr>
+
+            {/* One row per consultant, sorted by most patients first */}
+            {consultants.map(c => {
+              const pct = grandTotal > 0 ? Math.round((c.total / grandTotal) * 100) : 0;
+              return (
+                <tr key={c.name}>
+                  <td style={{ fontWeight: 600, padding: "7px 12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      <span style={{
+                        width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+                        background: `${CONSULT_ACCENT}18`, color: CONSULT_ACCENT,
+                        fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        {c.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                      <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.name}>
+                        {c.name}
+                      </span>
+                    </div>
+                  </td>
+                  <td style={{ ...tdC, fontWeight: 700, color: CONSULT_ACCENT }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                      <span>{c.total}</span>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: "var(--ink-3)" }}>{pct}%</span>
+                    </div>
+                  </td>
+                  {payerTypes.map(p => {
+                    const n = c.payers[p] ?? 0;
+                    return (
+                      <td key={p} style={{ ...tdC, fontWeight: n > 0 ? 700 : 400, color: n > 0 ? pColors[p] : "var(--ink-3)" }}>
+                        {n > 0 ? n : <span style={{ opacity: 0.35 }}>—</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Section Navigator ──────────────────────────────────────────────────────────
+const NAV_SECTIONS_DEF = [
+  { id: "nav-filters",     label: "Search & Filters",  icon: "filter"  },
+  { id: "nav-snapshot",    label: "Hospital Snapshot", icon: "home"    },
+  { id: "nav-occupancy",   label: "Occupancy Board",   icon: "chart"   },
+  { id: "nav-txn",         label: "Transactions",      icon: "refresh" },
+  { id: "nav-wards",       label: "Bed Matrix",        icon: "grid"    },
+  { id: "nav-consultants", label: "Consultants",       icon: "user"    },
+];
+
+function SectionNavigator({ scanKey }) {
+  const [activeId, setActiveId]     = useState(null);
+  const [sections, setSections]     = useState([]);
+  const [hovered, setHovered]       = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const ratiosRef   = useRef({});
+  const leaveTimer  = useRef(null);
+  const obsRef      = useRef(null);
+
+  // (Re-)discover sections whenever scanKey changes
+  useEffect(() => {
+    const found = NAV_SECTIONS_DEF.filter(s => document.getElementById(s.id));
+    setSections(found);
+  }, [scanKey]);
+
+  // Set up IntersectionObserver whenever discovered sections change
+  useEffect(() => {
+    if (obsRef.current) { obsRef.current.disconnect(); obsRef.current = null; }
+    if (sections.length === 0) return;
+
+    const obs = new IntersectionObserver((entries) => {
+      for (const e of entries) ratiosRef.current[e.target.id] = e.intersectionRatio;
+      let bestId = null, bestRatio = 0.03;
+      for (const [id, r] of Object.entries(ratiosRef.current)) {
+        if (r > bestRatio) { bestRatio = r; bestId = id; }
+      }
+      if (bestId) setActiveId(bestId);
+    }, {
+      threshold: [0, .05, .1, .2, .3, .4, .5, .6, .7, .8, .9, 1],
+      rootMargin: "-60px 0px -15% 0px",
+    });
+
+    for (const s of sections) {
+      const el = document.getElementById(s.id);
+      if (el) obs.observe(el);
+    }
+    obsRef.current = obs;
+    return () => obs.disconnect();
+  }, [sections]);
+
+  const scrollTo = useCallback((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setHovered(false);
+    setMobileOpen(false);
+    // Brief highlight pulse
+    el.setAttribute("data-nav-hl", "1");
+    setTimeout(() => el.removeAttribute("data-nav-hl"), 800);
+  }, []);
+
+  const onEnter = () => { clearTimeout(leaveTimer.current); setHovered(true); };
+  const onLeave = () => { leaveTimer.current = setTimeout(() => setHovered(false), 280); };
+
+  if (sections.length === 0) return null;
+
+  return (
+    <>
+      {/* ── Desktop floating pill ─────────────────────────────────────────── */}
+      <nav
+        className={"snav" + (hovered ? " snav-open" : "")}
+        aria-label="Section navigator"
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        onKeyDown={(e) => { if (e.key === "Escape") setHovered(false); }}
+      >
+        {hovered
+          ? <div className="snav-header" aria-hidden="true">Navigation</div>
+          : <div className="snav-bed-handle" aria-hidden="true"><Ic d={icons.bed} s={16} /></div>
+        }
+        <div className="snav-list" role="list">
+          {sections.map(s => {
+            const active = s.id === activeId;
+            return (
+              <button
+                key={s.id}
+                role="listitem"
+                className={"snav-item" + (active ? " snav-active" : "")}
+                onClick={() => scrollTo(s.id)}
+                title={!hovered ? s.label : undefined}
+                aria-label={`${s.label}${active ? " — current section" : ""}`}
+              >
+                <span className="snav-icon" aria-hidden="true">
+                  <Ic d={icons[s.icon]} s={hovered ? 15 : 14} />
+                </span>
+                {hovered && <span className="snav-label">{s.label}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* ── Mobile FAB ────────────────────────────────────────────────────── */}
+      <button
+        className="snav-fab"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Navigate to section"
+        aria-expanded={mobileOpen}
+      >
+        <Ic d={icons.bed} s={20} />
+      </button>
+
+      {/* ── Mobile bottom sheet ───────────────────────────────────────────── */}
+      {mobileOpen && (
+        <div
+          className="snav-overlay"
+          role="presentation"
+          onClick={() => setMobileOpen(false)}
+        >
+          <div
+            className="snav-sheet"
+            role="dialog"
+            aria-label="Navigate to section"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="snav-sheet-head">
+              <span className="snav-sheet-title">Navigate to</span>
+              <button className="snav-sheet-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation">
+                <Ic d={icons.x} s={16} />
+              </button>
+            </div>
+            {sections.map(s => {
+              const active = s.id === activeId;
+              return (
+                <button
+                  key={s.id}
+                  className={"snav-sheet-item" + (active ? " snav-active" : "")}
+                  onClick={() => scrollTo(s.id)}
+                  aria-label={`${s.label}${active ? " — current section" : ""}`}
+                >
+                  <span className="snav-sheet-icon" aria-hidden="true">
+                    <Ic d={icons[s.icon]} s={18} />
+                  </span>
+                  <span className="snav-sheet-label">{s.label}</span>
+                  {active && (
+                    <span className="snav-sheet-check" aria-hidden="true">
+                      <Ic d={icons.check} s={14} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// scope: "admin" (COO, default) | "pre" | "nurse" | "consultant".
+//
+// A scope entry only decides WHICH URLs this dashboard calls — it never widens
+// or narrows what comes back. Breadth is decided server-side by the endpoint
+// behind each role: /coo/* and /pre/* both return hospital-wide rows, while
+// /nurse/* and /consultant/* filter to that user's own wards (see nurse.ts).
+//
+// So a nurse mount simply never receives hospital-wide rows, and PRE — which
+// mirrors the Admin dashboard — never receives anything less than the Admin does.
+const SCOPED_FETCHERS = {
+  // PRE is a special case: it still calls PRE-authenticated URLs (so the server
+  // authorises it as PRE, not COO), but every one of those endpoints returns
+  // hospital-wide rows — see the "Admin dashboard" block in routes/pre.ts. That
+  // makes it hospitalWide, so it renders the full admin dashboard, history
+  // sparklines and consultants table included. Nurse/Consultant stay ward-scoped.
+  pre: {
+    hospitalWide: true,
+    liveWards: () => api.preLiveWards(), bedDetails: api.preBedDetails,
+    adminDashboard: (u) => api.preAdminDashboard(u), payerTypes: () => api.prePayerTypes(),
+    adminDashboardHistory: (u) => api.preAdminDashboardHistory(u),
+    consultants: () => api.preConsultants(), snapshots: () => api.preSnapshots(),
+  },
+  nurse: { liveWards: () => api.nurseLiveWards(), bedDetails: api.nurseBedDetails, adminDashboard: (u) => api.nurseAdminDashboard(u), payerTypes: () => api.nursePayerTypes() },
+  consultant: { liveWards: () => api.consultantLiveWards(), bedDetails: api.consultantBedDetails, adminDashboard: (u) => api.consultantAdminDashboard(u), payerTypes: () => api.consultantPayerTypes() },
+};
+export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "admin", hideUnitFilter = false }) {
+  const scoped = SCOPED_FETCHERS[scope] ?? null; // null = admin/hospital-wide
+  // Whether this mount shows the whole hospital. Admin (no scoped entry) and PRE
+  // both do; Nurse/Consultant don't. Sections that would leak hospital totals to
+  // a ward-scoped user gate on this rather than on `scoped`.
+  const hospitalWide = !scoped || scoped.hospitalWide === true;
   const profileMenuSlot = useProfileMenuSlot();
   const topBarSlot = useTopBarSlot();
   const [liveData, setLiveData] = useState(null);
@@ -644,7 +994,32 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
   const [adminCards, setAdminCards] = useState(null); // Hospital Snapshot / Occupancy / Transaction boards
   const [adminHistory, setAdminHistory] = useState(null); // hourly history for the flat-line cards' sparklines
+  const [consultantData, setConsultantData] = useState(null); // { payerTypes, consultants }
   const snapshotRef = useRef(null);
+
+  // ── Adaptive header: sidebar state + greeting visibility observer
+  const sidebarState = useSidebarState();
+  const [heroGone, setHeroGone] = useState(false);
+  const heroObsRef = useRef(null);
+  const greetCallbackRef = useCallback((el) => {
+    if (heroObsRef.current) { heroObsRef.current.disconnect(); heroObsRef.current = null; }
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => {
+      const gone = !entry.isIntersecting;
+      setHeroGone(gone);
+      document.body.classList.toggle("hero-gone", gone);
+    }, { threshold: 0, rootMargin: "-60px 0px 0px 0px" });
+    obs.observe(el);
+    heroObsRef.current = obs;
+  }, []);
+  // Clean up body class if this component unmounts
+  useEffect(() => () => { document.body.classList.remove("hero-gone"); heroObsRef.current?.disconnect(); }, []);
+
+  // ── Sticky filter bar: only tracks whether the card is currently "stuck"
+  // at the top so we can apply the glass visual. Movement is handled entirely
+  // by CSS position:sticky — no JS animation needed.
+  const [filterStuck, setFilterStuck] = useState(false);
+  const filterSentinelRef = useRef(null);
 
   // ── "Tap a card → open the Bed Explorer" — BedExplorerModal does its own
   // fetching/filtering, so this just records which card was clicked.
@@ -663,7 +1038,7 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   // ── KPI card layout customization — frontend/localStorage only, never touches
   // the backend. Locked by default on every load; an admin can unlock, drag
   // cards into a preferred order, then Save (persists) or Reset (clears it).
-  const KPI_LAYOUT_KEY = "dashboard_layout_admin";
+  const KPI_LAYOUT_KEY = scoped ? `dashboard_layout_${scope}` : "dashboard_layout_admin";
   const [layoutLocked, setLayoutLocked] = useState(true);
   const [kpiOrder, setKpiOrder] = useState(null); // string[] of labels, or null = default order
   const [dragKey, setDragKey] = useState(null);
@@ -671,6 +1046,22 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   const kpiGridRef = useRef(null);
   const prevRectsRef = useRef(new Map());
   const draggingRef = useRef(false);
+
+  // Sentinel callback: fires when the 1px div above the filter card enters/leaves
+  // the viewport. Only used to toggle the glass visual — position:sticky in CSS
+  // handles all the actual movement natively without any JS.
+  const filterSentinelObsRef = useRef(null);
+  const sentinelCallbackRef = useCallback((el) => {
+    if (filterSentinelObsRef.current) { filterSentinelObsRef.current.disconnect(); filterSentinelObsRef.current = null; }
+    filterSentinelRef.current = el;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setFilterStuck(!entry.isIntersecting),
+      { threshold: 0, rootMargin: "-60px 0px 0px 0px" }
+    );
+    obs.observe(el);
+    filterSentinelObsRef.current = obs;
+  }, []);
 
   useEffect(() => {
     try {
@@ -964,14 +1355,22 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   }, [orderKey]);
 
   const load = useCallback(async () => {
-    try { setLiveData(await api.cooLiveWards()); setLastSync(new Date()); } catch { /* keep stale */ }
-  }, []);
+    try { setLiveData(await (scoped ? scoped.liveWards() : api.cooLiveWards())); setLastSync(new Date()); } catch { /* keep stale */ }
+  }, [scoped]);
   useEffect(() => { load(); }, [load, refreshKey]);
-  useEffect(() => { api.cooSnapshots().then((r) => setSnaps(r.snapshots || [])).catch(() => setSnaps([])); }, [refreshKey]);
   useEffect(() => {
-    api.mgrPayerTypes().then((r) => setPayerTypes((r.payerTypes || []).filter((p) => p.active)))
+    // Hospital-wide payer/occupancy trend history has no per-block/per-station
+    // equivalent captured anywhere — showing it would leak hospital totals, so
+    // ward-scoped dashboards just get flat (non-animated) cards instead of
+    // skipping the feature outright. Hospital-wide mounts get the real series.
+    if (!hospitalWide) { setSnaps([]); return; }
+    (scoped ? scoped.snapshots() : api.cooSnapshots())
+      .then((r) => setSnaps(r.snapshots || [])).catch(() => setSnaps([]));
+  }, [refreshKey, scoped, hospitalWide]);
+  useEffect(() => {
+    (scoped ? scoped.payerTypes() : api.mgrPayerTypes()).then((r) => setPayerTypes((r.payerTypes || []).filter((p) => p.active)))
       .catch(() => setPayerTypes([]));
-  }, [refreshKey]);
+  }, [refreshKey, scoped]);
 
   const showSnapToast = useCallback((m) => { setSnapToast(m); setTimeout(() => setSnapToast(""), 2400); }, []);
   const runSnap = useCallback(async (kind, fn, okMsg) => {
@@ -1006,10 +1405,22 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   // Re-fetches whenever the Unit toolbar filter changes — Hospital Snapshot /
   // Occupancy Board / Transaction Board now scope to the same wards as the
   // ward tables and By Payer cards below (see adminDashboard()'s unitType param).
-  useEffect(() => { api.cooAdminDashboard(earlyActiveUnit).then(setAdminCards).catch(() => { }); }, [refreshKey, earlyActiveUnit]);
+  useEffect(() => {
+    (scoped ? scoped.adminDashboard(earlyActiveUnit) : api.cooAdminDashboard(earlyActiveUnit)).then(setAdminCards).catch(() => { });
+  }, [refreshKey, earlyActiveUnit, scoped]);
   // Sparkline history is now captured per-unit too (see snapshotAdminDashboard()),
   // so it moves with the same filter instead of always showing the hospital-wide trend.
-  useEffect(() => { api.cooAdminDashboardHistory(earlyActiveUnit).then((r) => setAdminHistory(r.snapshots || [])).catch(() => setAdminHistory([])); }, [refreshKey, earlyActiveUnit]);
+  // No per-block/per-station history exists (see the snaps effect above) — scoped cards render flat.
+  useEffect(() => {
+    if (!hospitalWide) { setAdminHistory([]); return; }
+    (scoped ? scoped.adminDashboardHistory(earlyActiveUnit) : api.cooAdminDashboardHistory(earlyActiveUnit))
+      .then((r) => setAdminHistory(r.snapshots || [])).catch(() => setAdminHistory([]));
+  }, [refreshKey, earlyActiveUnit, scoped, hospitalWide]);
+
+  useEffect(() => {
+    if (!hospitalWide) return;
+    (scoped ? scoped.consultants() : api.cooConsultants()).then(setConsultantData).catch(() => { });
+  }, [refreshKey, scoped, hospitalWide]);
 
   if (!liveData) return (
     <div className="empty" style={{ paddingTop: 80 }}>
@@ -1026,7 +1437,11 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
     bed_type: w.bed_type || "Census", room_type: w.room_type || null,
     block_name: w.block_name || null, floor_name: w.floor_name || null,
     updatedAt: w.updatedAt || null, reviewedAt: w.reviewedAt || null,
+    updated_by_role: w.updated_by_role || null,
     payersLive: w.payersLive || {},
+    admissionTypes: w.admissionTypes || {},
+    overstayCount: w.overstayCount || 0,
+    loungeCount: w.loungeCount || 0,
     is_discharge_lounge: !!w.is_discharge_lounge,
   }));
 
@@ -1047,6 +1462,10 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   const censusRows = rows.filter((r) => r.bed_type !== "Non-Census" && !r.is_discharge_lounge);
   const nonCensusRows = rows.filter((r) => r.bed_type === "Non-Census" && !r.is_discharge_lounge);
   const wardTableRows = rows.filter((r) => !r.is_discharge_lounge);
+  // Physical capacity of the Discharge Lounge ward (virtual holding beds, not
+  // real hospital capacity) — summed from the same live ward data as everything
+  // else on this dashboard, no extra fetch.
+  const loungeTotalBeds = rows.filter((r) => r.is_discharge_lounge).reduce((s, r) => s + (r.total || 0), 0);
 
   // KPI cards mirror exactly what the tables show: Unit + Search/Room-type filter.
   // With no search and Unit = TOTAL, that's every operational ward — the whole hospital.
@@ -1127,18 +1546,34 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   // Types changes). Value = live occupied count for that payer over the
   // current Unit + Search filter; sparkline = that payer's real hourly trend
   // from occupancy_snapshots.payer_snapshot (sparse until enough points accrue).
+  // Deliberately NOT excluding the Discharge Lounge here (unlike the bed-
+  // capacity cards, e.g. Vacant/Census Occupancy) — a patient sitting in the
+  // lounge is still a real patient under a real payer type, same reasoning as
+  // "Total Patients" (onbed + overstay + loungePatients) intentionally
+  // including lounge patients. Capacity cards exclude Lounge because it isn't
+  // real ward capacity; census/payer cards count real people, lounge or not.
   const payerOccBase = totalOcc || 1;
-  const payerCards = (payerTypes || []).map((pt, i) => {
+  const payerTypeCards = (payerTypes || []).map((pt, i) => {
     const val = shownRows.reduce((a, r) => a + ((r.payersLive || {})[pt.name] || 0), 0);
     return {
       label: pt.name,
       val,
-      sub: `${Math.round((val / payerOccBase) * 100)}% of occupied`,
+      sub: null /* `${Math.round((val / payerOccBase) * 100)}% of occupied` */,
       color: PAYER_PALETTE[i % PAYER_PALETTE.length],
       icon: payerIcon(pt.name),
       series: (snaps || []).map((s) => (s.payers || {})[pt.name] || 0),
+      explorerKey: pt.name,
+      payerFilter: pt.name,
     };
   });
+  // Total = sum of the payer cards actually shown below it, not an
+  // independently-scoped occupancy figure — guarantees it can never disagree
+  // with its own sub-breakdown (some occupied beds have no payer_type set
+  // yet, so this can legitimately be less than total occupied).
+  const payerCards = payerTypeCards.length === 0 ? [] : [
+    { label: "Total", val: payerTypeCards.reduce((a, c) => a + c.val, 0), sub: null, color: "#8b5cf6", icon: icons.chart, series: [], explorerKey: "admin:By Payer Total" },
+    ...payerTypeCards,
+  ];
 
   const canShare = snapshotCanShare();
 
@@ -1203,6 +1638,7 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
     { label: "Operational Beds", val: snap.operationalBeds, sub: null, color: "#1d4ed8", icon: icons.refresh, series: S.total, explorerKey: "admin:Operational Beds" },
     { label: "Census Beds", val: snap.censusBeds, sub: null, color: "#1e3a8a", icon: icons.users, series: S.total, explorerKey: "admin:Census Beds" },
     { label: "Non-Census Beds", val: snap.nonCensusBeds, sub: null, color: "#0c2a6b", icon: icons.user, series: S.reserved, explorerKey: "admin:Non-Census Beds" },
+    { label: "Discharge Lounge", val: loungeTotalBeds, sub: null /* "Virtual Beds" */, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" }
   ];
 
   // Occupancy Board — laid out exactly as the CEO's wireframe: one standalone
@@ -1225,12 +1661,11 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
   ];
   const loungeCards = !occ ? [] : [
     { label: "Total", val: occ.lounge.total, sub: null, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" },
-    // "Census"/"Non Census" here = the bed type each lounge patient came FROM
-    // (lounge beds have no Census/Non-Census identity of their own) — not
-    // filterable in the Bed Explorer (their current bed is a Lounge bed), so
-    // these two are informational only, no explorerKey.
-    { label: "Census", val: occ.lounge.census, sub: null, color: "#0ea5b7", icon: icons.stethoscope, series: [] },
-    { label: "Non Census", val: occ.lounge.nonCensus, sub: null, color: "#0d9488", icon: icons.stethoscope, series: [] },
+    // "Census"/"Non Census" = origin bed type (where the patient came FROM).
+    // Lounge beds have no Census/Non-Census identity of their own, so the
+    // explorer can't filter by origin — clicking opens the full lounge list.
+    { label: "Census", val: occ.lounge.census, sub: null, color: "#0ea5b7", icon: icons.stethoscope, series: [], explorerKey: "admin:In Discharge Lounge" },
+    { label: "Non Census", val: occ.lounge.nonCensus, sub: null, color: "#0d9488", icon: icons.stethoscope, series: [], explorerKey: "admin:In Discharge Lounge" },
   ];
   const vacantBedsCards = !occ ? [] : [
     { label: "Total", val: occ.vacant.total, sub: null, color: "#16a34a", icon: icons.bed, series: S.vacant, explorerKey: "admin:Vacant" },
@@ -1239,46 +1674,105 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
     { label: "Non Census", val: occ.vacant.nonCensus, sub: null, color: "#0d9488", icon: icons.bed, series: [], explorerKey: "admin:Vacant Non-Census" },
     { label: "Non Census [Res]", val: occ.vacant.ncRes, sub: null, color: "#0891b2", icon: icons.bookmark, series: [], explorerKey: "admin:Vacant Non-Census Res" },
   ];
+  // Total = sum of its own IPD/Day Care/OPD sub-items, same reasoning as the
+  // Discharge Lounge and By Payer totals — never an independently-scoped figure.
   const patientTypeCards = !occ ? [] : [
+    { label: "Total", val: occ.patientType.ipd + occ.patientType.dayCare + occ.patientType.opd, sub: null, color: "#1e40af", icon: icons.chart, series: [], explorerKey: "admin:Patient Type Total" },
     { label: "IPD", val: occ.patientType.ipd, sub: null, color: "#2563eb", icon: icons.user, series: H.censusDaycare, explorerKey: "admin:Patient Type IPD" },
     { label: "Day Care", val: occ.patientType.dayCare, sub: null, color: "#0ea5b7", icon: icons.stethoscope, series: H.nonCensusDaycare, explorerKey: "admin:Patient Type Daycare" },
     { label: "OPD", val: occ.patientType.opd, sub: null, color: "#8b5cf6", icon: icons.users, series: [], explorerKey: "admin:Patient Type OPD" },
   ];
 
   // step = key passed to openDischargeList — cards without one (New Admissions
-  // Today, Discharged Today) aren't clickable yet; no admission-level list
-  // endpoint exists for "today's new admissions" / "today's completions" today.
-  // "Discharge Cancelled" has no step/list endpoint yet (listActiveDischarges
-  // only ever returns PLANNED/DISCHARGE_INITIATED/IN_PROGRESS) — not clickable,
-  // same pattern as New Admissions / Total Discharged below.
   const transactionCards = !txn ? [] : [
-    { label: "New Admissions Today", val: txn.newAdmissionsToday, color: "#16a34a", icon: icons.plus, series: H.newAdmissionsToday },
-    { label: "Total Discharged", val: txn.completedToday, color: "#15803d", icon: icons.check, series: H.completedToday },
-    { label: "Total Plan Discharge", val: txn.plannedTotal, color: "#3b82f6", icon: icons.clock, series: H.plannedTotal, step: "PLANNED" },
-    { label: "Initiated", val: txn.initiated, color: "#2563eb", icon: icons.fileText, series: H.initiated, step: "INITIATED" },
-    { label: "Pending", val: txn.pending, color: "#0891b2", icon: icons.refresh, series: H.pending, step: "PENDING_INPROGRESS" },
-    { label: "Discharge Cancelled", val: txn.cancelled, color: "#71717a", icon: icons.ban, series: H.cancelled },
-    { label: "Drug Return Pending", val: txn.drugReturnPending, color: "#f97316", icon: icons.pill, series: H.drugReturnPending, step: "DRUG_RETURN" },
-    { label: "Pharmacy Pending", val: txn.pharmacyPending, color: "#f59e0b", icon: icons.pill, series: H.pharmacyPending, step: "PHARMACY_CLEARANCE" },
-    { label: "OT/Cath Lab Clearance Pending", val: txn.procedurePending, color: "#ec4899", icon: icons.clipboard, series: H.procedurePending, step: "PROCEDURE_RECONCILIATION" },
-    { label: "Bill Initiated Pending", val: txn.billingStarted, color: "#8b5cf6", icon: icons.banknote, series: H.billingStarted, step: "BILLING_STARTED" },
-    { label: "Audit Pending", val: txn.auditPending, color: "#6366f1", icon: icons.shield, series: H.auditPending, step: "AUDIT" },
-    { label: "Bill Ready Pending", val: txn.billReady, color: "#14b8a6", icon: icons.banknote, series: H.billReady, step: "BILL_READY" },
-    { label: "Bill Finalization", val: txn.paymentPending, color: "#dc2626", icon: icons.wallet, series: H.paymentPending, step: "PAYMENT" },
-    { label: "System Checkout Pending", val: txn.systemCheckoutPending, color: "#0ea5b7", icon: icons.settings, series: H.systemCheckoutPending, step: "SYSTEM_CHECKOUT" },
-    { label: "Physical Checkout Pending", val: txn.physicalCheckoutPending, color: "#be123c", icon: icons.user, series: H.physicalCheckoutPending, step: "PHYSICAL_CHECKOUT" },
+    { label: "Total Admissions", val: txn.newAdmissionsToday, color: "#16a34a", icon: icons.A, series: H.newAdmissionsToday, step: "ADMITTED_TODAY" },
+    { label: "Total Discharged", val: txn.completedToday, color: "#15803d", icon: icons.B, series: H.completedToday, step: "COMPLETED_TODAY" },
+    { label: "Current Overstay", val: txn.awaitingPatientLeave, color: "#0891b2", icon: icons.C, series: [], step: "AWAITING_PATIENT_LEAVE" },
+
+    { label: "Current Discharge Lounge", val: txn.inDischargeLounge, color: "#d97706", icon: icons.D, series: [], step: "IN_DISCHARGE_LOUNGE" },
+
+    { label: "Total Discharges Pending", val: txn.initiated + txn.pending + txn.plannedTotal, color: "#6366f1", icon: icons.E, step: "ALL_PENDING" },
+
+    // ── Planned — sub-count shows how many are still pending initiation ─────
+    {
+      label: "Total Planned Discharges", val: txn.plannedTotal, color: "#3b82f6", icon: icons.F, series: H.plannedTotal,
+      step: "PLANNED", subVal: null, subLabel: null
+    },
+    { label: "Total Unplanned Discharges", val: txn.unplannedToday, color: "#f59e0b", icon: icons.G, series: [], step: "UNPLANNED_TODAY" },
+
+    //{ label: "Total Discharges Initiated", val: txn.pending, color: "#0891b2", icon: icons.refresh, series: H.pending, step: "PENDING_INPROGRESS" },
+    // ── Active today — sub-count shows unplanned portion ────────────────────
+    {
+      label: "Total Discharges Initiated", val: txn.initiatedToday, color: "#2563eb", icon: icons.H, series: H.initiated,
+      step: "INITIATED_TODAY", subVal: null, subLabel: null
+    },
+
+
+    // ── Steps ───────────────────────────────────────────────────────────────
+    { label: "Total DR Completed", val: txn.drugReturnCompleted, color: "#f97316", icon: icons.I, series: H.drugReturnPending, step: "DRUG_RETURN_DONE" },
+    { label: "Total PhC Completed", val: txn.pharmacyCompleted, color: "#f59e0b", icon: icons.J, series: H.pharmacyPending, step: "PHARMACY_DONE" },
+    { label: "Total PRC Completed", val: txn.procedureCompleted, color: "#ec4899", icon: icons.K, series: H.procedurePending, step: "PROCEDURE_DONE" },
+    { label: "Total Bill Initiated", val: txn.billingStartedCompleted, color: "#8b5cf6", icon: icons.L, series: H.billingStarted, step: "BILLING_DONE" },
+    { label: "Total BA Completed", val: txn.auditCompleted, color: "#6366f1", icon: icons.M, series: H.auditPending, step: "AUDIT_DONE" },
+    { label: "Total Bills Finalized", val: txn.billReadyCompleted, color: "#14b8a6", icon: icons.N, series: H.billReady, step: "BILL_READY_DONE" },
+    { label: "Total Payments Completed", val: txn.paymentCompleted, color: "#dc2626", icon: icons.O, series: H.paymentPending, step: "PAYMENT_DONE" },
+    { label: "Total SC Done", val: txn.systemCheckoutCompleted, color: "#0ea5b7", icon: icons.P, series: H.systemCheckoutPending, step: "SC_DONE" },
+    { label: "Total PC Done", val: txn.physicalCheckoutCompleted, color: "#be123c", icon: icons.Q, series: H.physicalCheckoutPending, step: "PC_DONE" },
+    //{ label: "Patient Left", val: txn.patientLeft, color: "#6b7280", icon: icons.user, series: [], step: "PATIENT_LEFT" },
+    // ── Exceptions ──────────────────────────────────────────────────────────
+    { label: "Total Cancelled Discharges", val: txn.cancelledToday, color: "#71717a", icon: icons.R, series: H.cancelled, step: "CANCELLED_TODAY" },
+
+    { divider: true, heading: "Ongoing Transactions" },
+
+
+    // total transactions ongoing
+
+
+    { label: "Discharges Pending", val: txn.initiated + txn.pending + txn.plannedTotal, color: "#6366f1", icon: icons.A, step: "ALL_PENDING" },
+
+    // ── Planned — sub-count shows how many are still pending initiation ─────
+    {
+      label: "Pending Planned Discharges", val: txn.scheduledOngoingToday + txn.plannedTotal, color: "#3b82f6", icon: icons.B, series: H.plannedTotal,
+      step: "SCHEDULED_TODAY", subVal: null, subLabel: null
+    },
+    { label: "Pending Unplanned Discharges", val: txn.unplannedToday, color: "#f59e0b", icon: icons.C, series: [], step: "UNPLANNED_TODAY" },
+
+    { label: "Pending Discharge Initiation", val: txn.plannedTotal, color: "#0891b2", icon: icons.D, series: H.plannedTotal, step: "PLANNED" },
+    // ── Active today — sub-count shows unplanned portion ────────────────────
+    {
+      label: "Ongoing Discharges [Initiated]", val: txn.initiated + txn.pending, color: "#2563eb", icon: icons.E, series: H.initiated,
+      step: "PENDING_INPROGRESS", subVal: null, subLabel: null
+    },
+
+
+    // ── Steps ───────────────────────────────────────────────────────────────
+    { label: "Drug Return Pending", val: txn.drugReturnPending, color: "#f97316", icon: icons.F, series: H.drugReturnPending, step: "DRUG_RETURN" },
+    { label: "Pharmacy Clearance Pending", val: txn.pharmacyPending, color: "#f59e0b", icon: icons.G, series: H.pharmacyPending, step: "PHARMACY_CLEARANCE" },
+    { label: "OT/Cath Lab Clearance Pending", val: txn.procedurePending, color: "#ec4899", icon: icons.H, series: H.procedurePending, step: "PROCEDURE_RECONCILIATION" },
+    { label: "Bill Initiation Pending", val: txn.billingStarted, color: "#8b5cf6", icon: icons.I, series: H.billingStarted, step: "BILLING_STARTED" },
+    { label: "Bill Audit Pending", val: txn.auditPending, color: "#6366f1", icon: icons.J, series: H.auditPending, step: "AUDIT" },
+    { label: "Bill Finalization Pending", val: txn.billReady, color: "#14b8a6", icon: icons.K, series: H.billReady, step: "BILL_READY" },
+    { label: "Bill Payment Pending", val: txn.paymentPending, color: "#dc2626", icon: icons.L, series: H.paymentPending, step: "PAYMENT" },
+    { label: "System Checkout Pending", val: txn.systemCheckoutPending, color: "#0ea5b7", icon: icons.M, series: H.systemCheckoutPending, step: "SYSTEM_CHECKOUT" },
+    { label: "Physical Checkout Pending", val: txn.physicalCheckoutPending, color: "#be123c", icon: icons.N, series: H.physicalCheckoutPending, step: "PHYSICAL_CHECKOUT" },
+    //{ label: "Patient Left", val: txn.patientLeft, color: "#6b7280", icon: icons.user, series: [], step: "PATIENT_LEFT" },
+    // ── Exceptions ──────────────────────────────────────────────────────────
+
+
   ];
 
   return (
     <div className="cc-wrap">
-      <div className="dash-greet-row">
+      <div className="dash-greet-row" ref={greetCallbackRef}>
         <div className="dash-greet">{greetOf()}, {userName} <span style={{ fontWeight: 400 }}>👋</span></div>
-        <div className="dash-greet-sub">Here's your real-time overview of bed status across all units.</div>
+        <div className="dash-greet-sub">Here's your real-time overview of bed status {hospitalWide ? "across all units" : "across your wards"}.</div>
       </div>
 
-      {/* "Live · HH:MM" now lives in the top nav bar next to the profile chip —
-          portaled into the slot AppShell always exposes while this tab is open. */}
-      {topBarSlot && createPortal(
+      {/* "Live · HH:MM" lives in the top nav bar next to the profile chip —
+          portaled into the slot AppShell always exposes while this tab is open.
+          Ward-scoped (Nurse/Consultant) dashboards omit it; the rest of that slot
+          (profile chip etc.) is untouched since this only ever portals this one span into it. */}
+      {hospitalWide && topBarSlot && createPortal(
         <span className="cc-live"><i /> Live · {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>,
         topBarSlot
       )}
@@ -1329,25 +1823,42 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
       {/* Toolbar — Unit filter + View-by + Search + Group-by + Snapshot. Sits at
           the top so its filter applies to everything below: KPI cards, By Payer
           cards and the ward tables all already derive from this same filter. */}
-      <div className="card" style={{ padding: "8px 10px", marginBottom: 10 }}>
+      {/* Sentinel: sits at the top of the filter card; when it leaves the viewport
+          the card goes sticky-fixed above */}
+      <div ref={sentinelCallbackRef} style={{ height: 1, marginBottom: -1 }} aria-hidden="true" />
+      <div
+        id="nav-filters"
+        className={`card filter-bar-sticky${heroGone || filterStuck ? " filter-bar--stuck" : ""}`}
+        style={{ padding: "8px 10px", marginBottom: 10, scrollMarginTop: 72 }}
+      >
         <div className="dash-toolbar">
-          <div className="dtg">
-            <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
-            {unitOptions.length <= 4 ? (
-              <div className="seg-pill">
-                {unitOptions.map((k) => (
-                  <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
-                ))}
-              </div>
-            ) : (
-              <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
-                style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 140 }}>
-                {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
-              </select>
-            )}
-          </div>
+          {/* Injected when lifted: hamburger on left, theme+avatar on right */}
+          {heroGone && (
+            <button className="appbar-btn" style={{ flexShrink: 0 }} onClick={sidebarState?.toggle} aria-label="Toggle navigation">
+              <Ic d={icons.menu} s={20} />
+            </button>
+          )}
 
-          <div className="dt-divider" />
+          {!hideUnitFilter && (
+            <>
+              <div className="dtg">
+                <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
+                {unitOptions.length <= 4 ? (
+                  <div className="seg-pill">
+                    {unitOptions.map((k) => (
+                      <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
+                    ))}
+                  </div>
+                ) : (
+                  <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
+                    style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 140 }}>
+                    {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
+                  </select>
+                )}
+              </div>
+              <div className="dt-divider" />
+            </>
+          )}
 
           <div className="dtg">
             <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
@@ -1375,6 +1886,14 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
               {GROUP_BY_OPTIONS.map((o2) => <option key={o2.value} value={o2.value}>{o2.label}</option>)}
             </select>
           </div>
+
+          {heroGone && (
+            <>
+              <div style={{ flex: 1 }} />
+              <ThemeToggle />
+              <div className="filter-lift-avatar">{(userName || "A").charAt(0).toUpperCase()}</div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1448,7 +1967,7 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
       )}
 
       {/* ── Canvas Dashboard: Hospital Snapshot / Occupancy / Transaction / Payer ── */}
-      <div className="cv-panel" style={{ marginTop: showingAll ? 0 : 4 }}>
+      <div id="nav-snapshot" className="cv-panel" style={{ marginTop: showingAll ? 0 : 4, scrollMarginTop: 72 }}>
         <div className="cv-panel-head">
           <div className="cv-panel-title">Hospital Snapshot</div>
         </div>
@@ -1473,7 +1992,7 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
 
       <div className="cv-join" />
 
-      <div className="cv-panel">
+      <div id="nav-occupancy" className="cv-panel" style={{ scrollMarginTop: 72 }}>
         <div className="cv-panel-head">
           <div className="cv-panel-title">Occupancy Board</div>
         </div>
@@ -1501,19 +2020,20 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
             { title: "Discharge Lounge", cards: loungeCards, accent: "#f59e0b" },
             { title: "Vacant Beds", cards: vacantBedsCards, accent: "#16a34a" },
             { title: "Patient Type", cards: patientTypeCards, accent: "#2563eb" },
+            { title: "By Payer", cards: payerCards, accent: "#8b5cf6" },
           ].map((g) => g.cards.length > 0 && (
             <div key={g.title} className="cv-group">
               <div className="cv-group-head">
                 {g.title}
               </div>
-              {g.cards.map((k) => (
+              {g.cards.map((k, i) => (
                 <div key={k.label}
-                  className={"cv-metric" + (k.explorerKey ? " cv-metric-click" : "")}
+                  className={"cv-metric" + (i > 0 ? " cv-metric-sub-item" : "") + (k.explorerKey ? " cv-metric-click" : "")}
                   role={k.explorerKey ? "button" : undefined}
                   tabIndex={k.explorerKey ? 0 : undefined}
                   aria-label={k.explorerKey ? `${k.label} — ${k.val}. Press Enter to see these beds.` : undefined}
-                  onClick={k.explorerKey ? () => openBedExplorer(k.explorerKey, k.color) : undefined}
-                  onKeyDown={k.explorerKey ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.explorerKey, k.color); } } : undefined}>
+                  onClick={k.explorerKey ? () => openBedExplorer(k.explorerKey, k.color, k.payerFilter) : undefined}
+                  onKeyDown={k.explorerKey ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.explorerKey, k.color, k.payerFilter); } } : undefined}>
                   <span className="cv-metric-dot" style={{ background: k.color }} />
                   <span className="cv-metric-label">{k.label}{k.sub ? <span className="cv-metric-sub"> · {k.sub}</span> : null}</span>
                   <span className="cv-metric-val">{k.val}</span>
@@ -1526,61 +2046,53 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
 
       <div className="cv-join" />
 
-      <div className="cv-panel">
-        <div className="cv-panel-head">
-          <div className="cv-panel-title">Transaction Board</div>
-        </div>
-        <div className="cv-txn-cards">
-          {transactionCards.map((k) => (
-            <div key={k.label} className="cv-txn-card"
-              role={k.step ? "button" : undefined}
-              tabIndex={k.step ? 0 : undefined}
-              aria-label={k.step ? `${k.label} — ${k.val}. Press Enter to see these admissions.` : undefined}
-              onClick={k.step ? () => openDischargeList(k.step, k.label) : undefined}
-              onKeyDown={k.step ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDischargeList(k.step, k.label); } } : undefined}>
-              <div className="cv-txn-card-head">
-                <span className="cv-txn-card-icon" style={{ color: k.color, background: `${k.color}1a` }}>
-                  <Ic d={k.icon} s={14} />
-                </span>
-                <span className="cv-txn-card-label">{k.label}</span>
-              </div>
-              <div className="cv-txn-card-val">{k.val}</div>
-              <Sparkline values={sparkSeries(k.series, k.val)} color={k.color} id={"cvTxn" + k.label.replace(/[^a-z0-9]/gi, "")} h={24} />
+      {transactionCards.length > 0 && (() => {
+        const divIdx = transactionCards.findIndex((k) => k.divider);
+        const sets = divIdx === -1
+          ? [{ heading: null, cards: transactionCards }]
+          : [
+              { heading: null, cards: transactionCards.slice(0, divIdx) },
+              { heading: transactionCards[divIdx].heading, cards: transactionCards.slice(divIdx + 1) },
+            ];
+        const renderCard = (k) => (
+          <div key={k.label} className="cv-txn-card"
+            role={k.step ? "button" : undefined}
+            tabIndex={k.step ? 0 : undefined}
+            aria-label={k.step ? `${k.label} — ${k.val}. Press Enter to see these admissions.` : undefined}
+            onClick={k.step ? () => openDischargeList(k.step, k.label) : undefined}
+            onKeyDown={k.step ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDischargeList(k.step, k.label); } } : undefined}>
+            <div className="cv-txn-card-head">
+              <span className="cv-txn-card-icon" style={{ color: k.color, background: `${k.color}1a` }}>
+                <Ic d={k.icon} s={14} />
+              </span>
+              <span className="cv-txn-card-label">{k.label}</span>
             </div>
-          ))}
-        </div>
-      </div>
-
-      {payerCards.length > 0 && (
-        <>
-          <div className="cv-join" />
-          <div className="cv-panel">
-            <div className="cv-panel-head">
-              <div className="cv-panel-title">By Payer</div>
+            <div className="cv-txn-card-val">
+              {k.val}
+              {k.subVal != null && (
+                <span className="cv-txn-sub-val">{k.subVal} {k.subLabel}</span>
+              )}
             </div>
-            <div className="cv-payer-grid">
-              {payerCards.map((k) => (
-                <div key={k.label} className="cv-payer-card" role="button" tabIndex={0}
-                  aria-label={`${k.label} — ${k.val}. Press Enter to see these beds.`}
-                  onClick={() => openBedExplorer(k.label, k.color, k.label)}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.label, k.color, k.label); } }}>
-                  <div className="cv-payer-head">
-                    <span className="cv-payer-icon" style={{ color: k.color, background: `${k.color}1a` }}>
-                      <Ic d={k.icon} s={16} />
-                    </span>
-                    <span className="cv-payer-label">{k.label}</span>
-                  </div>
-                  <div className="cv-payer-val">{k.val}</div>
-                  <Sparkline values={k.series} color={k.color} id={"cvPay" + k.label.replace(/[^a-z0-9]/gi, "")} h={28} />
-                </div>
-              ))}
-            </div>
+            <Sparkline values={sparkSeries(k.series, k.val)} color={k.color} id={"cvTxn" + k.label.replace(/[^a-z0-9]/gi, "")} h={24} />
           </div>
-        </>
-      )}
+        );
+        return (
+          <div id="nav-txn" className="cv-panel" style={{ scrollMarginTop: 72 }}>
+            <div className="cv-panel-head">
+              <div className="cv-panel-title">Transaction Board</div>
+            </div>
+            {sets.map((s, si) => (
+              <div key={si}>
+                {s.heading && <div className="cv-txn-section-head">{s.heading}</div>}
+                <div className="cv-txn-cards">{s.cards.map(renderCard)}</div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Ward tables — this is what gets captured by Snapshot/Copy/Share */}
-      <div ref={snapshotRef}>
+      <div id="nav-wards" ref={snapshotRef} style={{ scrollMarginTop: 72 }}>
         {groupBy === "none" ? (
           <>
             <WardStatusTable title="Census Beds" accent="var(--st-v)" accentBg="var(--st-v-bg)" rows={censusRows} totalLabel="TOTAL (CENSUS)" searchFilter={searchFilter} />
@@ -1591,14 +2103,24 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
         )}
       </div>
 
-      <div className="row between" style={{ marginTop: 4, flexWrap: "wrap", gap: 8 }}>
-        <span className="dim" style={{ fontSize: 11 }}>
-          Note: Occupancy % = (On Bed + Occ+Res) / Total Beds × 100 · "–" = not yet reported this round
-        </span>
-        <span className="dim" style={{ fontSize: 11 }}>
-          Last updated {lastSync.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-        </span>
-      </div>
+      {hospitalWide && consultantData && consultantData.consultants.length > 0 && (
+        <div id="nav-consultants" style={{ scrollMarginTop: 72 }}>
+          <ConsultantsTable data={consultantData} />
+        </div>
+      )}
+
+      {hospitalWide && (
+        <div className="row between" style={{ marginTop: 4, flexWrap: "wrap", gap: 8 }}>
+          <span className="dim" style={{ fontSize: 11 }}>
+            Note: Occupancy % = (On Bed + Occ+Res) / Total Beds × 100 · "–" = not yet reported this round
+          </span>
+          <span className="dim" style={{ fontSize: 11 }}>
+            Last updated {lastSync.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </span>
+        </div>
+      )}
+
+      {hospitalWide && <SectionNavigator scanKey={`${adminCards ? "a" : ""}${consultantData ? "c" : ""}`} />}
 
       {snapToast && <div className="toast">{snapToast}</div>}
       {confirmDialog}
@@ -1608,6 +2130,7 @@ function LiveBedDashboard({ refreshKey = 0, userName = "Admin" }) {
           wardIds={wardIdsInScope}
           wardMeta={wardMeta}
           onClose={() => setBedExplorer(null)}
+          fetchBeds={scoped ? scoped.bedDetails : api.cooBedDetails}
         />
       )}
       {dischargeList && (
@@ -1801,6 +2324,7 @@ function LastUpdatedCell({ ts, reviewedAt = null }) {
 
 const wstSum = (list, fn) => list.reduce((a, r) => a + (fn(r) || 0), 0);
 const wstC = { textAlign: "center" };
+const wstCW = { textAlign: "center", minWidth: 58, padding: "6px 10px" };
 
 // Normalize a verbose, inconsistently-cased room type into a compact label:
 //   "SINGLE ROOM - AC"         → "Single Room · AC"
@@ -1831,10 +2355,14 @@ function renderWardRow(r, showBadge) {
   const or_ = r.occupied_reserved || 0;
   const v = r.vacant || 0;
   const vr = r.reserved || 0;
-  const { totalOccupied: occ, totalVacant: vac } = calculateWardTotals(r);
-  const p = reported && r.total > 0 ? (occ / r.total) * 100 : 0;
+  const { totalOccupied: occ, totalVacant: vac, totalBeds: reportedBeds } = calculateWardTotals(r);
+  const p = reported && reportedBeds > 0 ? (occ / reportedBeds) * 100 : 0;
   const d = (n) => reported ? n : "–";
   const isCensus = r.bed_type !== "Non-Census";
+  const at = r.admissionTypes || {};
+  const roleLabel = r.updated_by_role
+    ? ({ PRE: "PRE", NURSE: "Nurse", DOCTOR: "Dr.", COO: "COO", FC: "FC" }[r.updated_by_role] ?? r.updated_by_role)
+    : null;
   return (
     <tr key={r.id}>
       <td style={{ fontWeight: 600 }}>
@@ -1861,11 +2389,23 @@ function renderWardRow(r, showBadge) {
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(occ)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(o)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-or)" }}>{d(or_)}</td>
+      <td style={{ ...wstC, fontWeight: 700, color: "#f59e0b" }}>{d(r.overstayCount || 0)}</td>
+      <td style={{ ...wstCW, fontWeight: 700, color: "#2563eb" }}>{d(at.IP || 0)}</td>
+      <td style={{ ...wstCW, fontWeight: 700, color: "#8b5cf6" }}>{d(at.OPD || 0)}</td>
+      <td style={{ ...wstCW, fontWeight: 700, color: "#0ea5b7" }}>{d(at.DAYCARE || 0)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(vac)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(v)}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>
+      <td style={{ ...wstC, fontWeight: 700, color: "#0d9488" }}>{r.loungeCount || 0}</td>
       <td style={wstC}>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>
-      <td><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
+      <td>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+          <LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} />
+          {roleLabel && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.3 }}>{roleLabel}</span>
+          )}
+        </div>
+      </td>
     </tr>
   );
 }
@@ -1876,10 +2416,15 @@ function groupAggregates(grpRows) {
   const gor = wstSum(grpRows, r => r.occupied_reserved || 0);
   const gv = wstSum(grpRows, r => r.vacant || 0);
   const gvr = wstSum(grpRows, r => r.reserved || 0);
-  const { totalOccupied: gocc, totalVacant: gvac } = calculateWardTotals(grpRows);
-  const gp = gb > 0 ? Math.round((gocc / gb) * 100) : 0;
+  const { totalOccupied: gocc, totalVacant: gvac, totalBeds: gReportedBeds } = calculateWardTotals(grpRows);
+  const gp = gReportedBeds > 0 ? Math.round((gocc / gReportedBeds) * 100) : 0;
   const gUpdatedAt = grpRows.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null);
-  return { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt };
+  const gOverstay = wstSum(grpRows, r => r.overstayCount || 0);
+  const gIp = wstSum(grpRows, r => (r.admissionTypes || {}).IP || 0);
+  const gOp = wstSum(grpRows, r => (r.admissionTypes || {}).OPD || 0);
+  const gDaycare = wstSum(grpRows, r => (r.admissionTypes || {}).DAYCARE || 0);
+  const gLounge = wstSum(grpRows, r => r.loungeCount || 0);
+  return { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt, gOverstay, gIp, gOp, gDaycare, gLounge };
 }
 
 // Flat table — shown when Group by = None
@@ -1891,8 +2436,14 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
   const totR = wstSum(filtered, r => r.reserved);
   const totO = wstSum(filtered, r => r.occupied || 0);
   const totOR = wstSum(filtered, r => r.occupied_reserved || 0);
-  const { totalOccupied: totOcc, totalVacant: totVac } = calculateWardTotals(filtered);
-  const totPct = totBeds > 0 ? Math.round((totOcc / totBeds) * 100) : 0;
+  const { totalOccupied: totOcc, totalVacant: totVac, totalBeds: totReportedBeds } = calculateWardTotals(filtered);
+  const totPct = totReportedBeds > 0 ? Math.round((totOcc / totReportedBeds) * 100) : 0;
+  const totOverstay = wstSum(filtered, r => r.overstayCount || 0);
+  const totIp = wstSum(filtered, r => (r.admissionTypes || {}).IP || 0);
+  const totOp = wstSum(filtered, r => (r.admissionTypes || {}).OPD || 0);
+  const totDaycare = wstSum(filtered, r => (r.admissionTypes || {}).DAYCARE || 0);
+  const totLounge = wstSum(filtered, r => r.loungeCount || 0);
+  const totUpdatedAt = filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null);
 
   return (
     <div className="card" style={{ marginBottom: 16, overflow: "hidden" }}>
@@ -1908,10 +2459,15 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
               <th style={wstC}>TOTAL BEDS</th>
               <th style={{ ...wstC, color: "var(--st-o)" }}>TOTAL OCC</th>
               <th style={{ ...wstC, color: "var(--st-o)" }}>ON BED</th>
-              <th style={{ ...wstC, color: "var(--st-or)" }}>OCC+RES</th>
+              <th style={{ ...wstC, color: "var(--st-or)" }}>OCC[RES]</th>
+              <th style={{ ...wstC, color: "#f59e0b" }}>OVERSTAY</th>
+              <th style={{ ...wstCW, color: "#2563eb" }}>IP</th>
+              <th style={{ ...wstCW, color: "#8b5cf6" }}>OP</th>
+              <th style={{ ...wstCW, color: "#0ea5b7" }}>DAY CARE</th>
               <th style={{ ...wstC, color: "var(--st-v)" }}>TOTAL VAC</th>
               <th style={{ ...wstC, color: "var(--st-v)" }}>VACANT</th>
-              <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC+RES</th>
+              <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC[RES]</th>
+              <th style={{ ...wstC, color: "#0d9488" }}>DIS. LOUNGE</th>
               <th style={wstC}>OCC %</th>
               <th style={wstC}>LAST UPDATED</th>
             </tr>
@@ -1925,14 +2481,19 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{totOverstay}</td>
+              <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{totIp}</td>
+              <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{totOp}</td>
+              <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{totDaycare}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totV}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{totLounge}</td>
               <td style={wstC}><OccBar p={totPct} /></td>
-              <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
+              <td><LastUpdatedCell ts={totUpdatedAt} /></td>
             </tr>
             {filtered.length === 0 ? (
-              <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
+              <tr><td colSpan={15} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
             ) : (
@@ -1961,8 +2522,13 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
   const totR = wstSum(filtered, r => r.reserved);
   const totO = wstSum(filtered, r => r.occupied || 0);
   const totOR = wstSum(filtered, r => r.occupied_reserved || 0);
-  const { totalOccupied: totOcc, totalVacant: totVac } = calculateWardTotals(filtered);
-  const totPct = totBeds > 0 ? Math.round((totOcc / totBeds) * 100) : 0;
+  const { totalOccupied: totOcc, totalVacant: totVac, totalBeds: totReportedBedsG } = calculateWardTotals(filtered);
+  const totPct = totReportedBedsG > 0 ? Math.round((totOcc / totReportedBedsG) * 100) : 0;
+  const totOverstayG = wstSum(filtered, r => r.overstayCount || 0);
+  const totIpG = wstSum(filtered, r => (r.admissionTypes || {}).IP || 0);
+  const totOpG = wstSum(filtered, r => (r.admissionTypes || {}).OPD || 0);
+  const totDaycareG = wstSum(filtered, r => (r.admissionTypes || {}).DAYCARE || 0);
+  const totLoungeG = wstSum(filtered, r => r.loungeCount || 0);
 
   const groups = (() => {
     const map = new Map();
@@ -1997,10 +2563,15 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
               <th style={wstC}>TOTAL BEDS</th>
               <th style={{ ...wstC, color: "var(--st-o)" }}>TOTAL OCC</th>
               <th style={{ ...wstC, color: "var(--st-o)" }}>ON BED</th>
-              <th style={{ ...wstC, color: "var(--st-or)" }}>OCC+RES</th>
+              <th style={{ ...wstC, color: "var(--st-or)" }}>OCC[RES]</th>
+              <th style={{ ...wstC, color: "#f59e0b" }}>OVERSTAY</th>
+              <th style={{ ...wstCW, color: "#2563eb" }}>IP</th>
+              <th style={{ ...wstCW, color: "#8b5cf6" }}>OP</th>
+              <th style={{ ...wstCW, color: "#0ea5b7" }}>DAY CARE</th>
               <th style={{ ...wstC, color: "var(--st-v)" }}>TOTAL VAC</th>
               <th style={{ ...wstC, color: "var(--st-v)" }}>VACANT</th>
-              <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC+RES</th>
+              <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC[RES]</th>
+              <th style={{ ...wstC, color: "#0d9488" }}>DIS. LOUNGE</th>
               <th style={wstC}>OCC %</th>
               <th style={wstC}>LAST UPDATED</th>
             </tr>
@@ -2014,20 +2585,25 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{totOverstayG}</td>
+              <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{totIpG}</td>
+              <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{totOpG}</td>
+              <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{totDaycareG}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totV}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
+              <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{totLoungeG}</td>
               <td style={wstC}><OccBar p={totPct} /></td>
               <td><LastUpdatedCell ts={filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null)} /></td>
             </tr>
             {filtered.length === 0 ? (
-              <tr><td colSpan={10} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
+              <tr><td colSpan={15} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
             ) : (
               groups.map(({ key, grpRows }) => {
                 const isOpen = expanded.has(key);
-                const { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt } = groupAggregates(grpRows);
+                const { gb, go, gor, gv, gvr, gocc, gvac, gp, gUpdatedAt, gOverstay, gIp, gOp, gDaycare, gLounge } = groupAggregates(grpRows);
                 return (
                   <React.Fragment key={key}>
                     <tr onClick={() => toggleSection(key)}
@@ -2043,9 +2619,14 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy }) {
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{go}</td>
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{gor}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{gOverstay}</td>
+                      <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{gIp}</td>
+                      <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{gOp}</td>
+                      <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{gDaycare}</td>
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{gvac}</td>
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{gv}</td>
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{gvr}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{gLounge}</td>
                       <td style={wstC}><OccBar p={gp} /></td>
                       <td><LastUpdatedCell ts={gUpdatedAt} /></td>
                     </tr>
@@ -2264,7 +2845,7 @@ function PreActivityTab({ data }) {
                 <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
                   {noUser
                     ? <span style={{ color: "var(--amber)" }}>⚠ No PRE assigned</span>
-                    : <>{b.assignedUser.name} · {b.assignedUser.shift}</>}
+                    : <>{b.assignedUser.name}</>}
                   {" · "}{doneW}/{totalW} wards · {b.roundsToday} round{b.roundsToday !== 1 ? "s" : ""}
                 </div>
               </div>
@@ -2419,10 +3000,10 @@ function WardTableActivity({ wards, showUpdatedBy = false }) {
             <th style={{ ...hdr, background: "var(--panel-2)", borderRight: div }}>TOTAL</th>
             <th style={{ ...hdr, color: "var(--st-o)", background: "var(--st-o-bg)", borderRight: div }}>TOTAL OCC</th>
             <th style={{ ...hdr, color: "var(--st-o)", background: "var(--st-o-bg)" }}>ON BED</th>
-            <th style={{ ...hdr, color: "var(--st-or)", background: "var(--st-or-bg)", borderRight: div }}>OCC+RES</th>
+            <th style={{ ...hdr, color: "var(--st-or)", background: "var(--st-or-bg)", borderRight: div }}>OCC[RES]</th>
             <th style={{ ...hdr, color: "var(--st-v)", background: "var(--st-v-bg)", borderRight: div }}>TOTAL VAC</th>
             <th style={{ ...hdr, color: "var(--st-v)", background: "var(--st-v-bg)" }}>VACANT</th>
-            <th style={{ ...hdr, color: "var(--st-vr)", background: "var(--st-vr-bg)", borderRight: div }}>VAC+RES</th>
+            <th style={{ ...hdr, color: "var(--st-vr)", background: "var(--st-vr-bg)", borderRight: div }}>VAC[RES]</th>
             <th style={{ ...hdr, background: "var(--panel-2)", borderRight: showUpdatedBy ? div : "none" }}>LAST UPDATE</th>
             {showUpdatedBy && <th style={{ ...hdr, background: "var(--panel-2)" }}>UPDATED BY</th>}
           </tr>
@@ -3427,11 +4008,11 @@ function Matrix({ data, selDate, history, userId }) {
               {/* Occupied group */}
               <th style={{ ...thStyle("var(--st-o)"), background: "var(--st-o-bg)" }}>Total Occ</th>
               <th style={{ ...thStyle("var(--st-o)"), background: "var(--st-o-bg)" }}>On Bed</th>
-              <th style={{ ...thStyle("var(--st-or)"), background: "var(--st-or-bg)" }}>Occ+Res</th>
+              <th style={{ ...thStyle("var(--st-or)"), background: "var(--st-or-bg)" }}>Occ[Res]</th>
               {/* Vacant group */}
               <th style={{ ...thStyle("var(--st-v)"), background: "var(--st-v-bg)" }}>Total Vac</th>
               <th style={{ ...thStyle("var(--st-v)"), background: "var(--st-v-bg)" }}>Vacant</th>
-              <th style={{ ...thStyle("var(--st-vr)"), background: "var(--st-vr-bg)" }}>Vac+Res</th>
+              <th style={{ ...thStyle("var(--st-vr)"), background: "var(--st-vr-bg)" }}>Vac[Res]</th>
             </tr>
           </thead>
           <tbody>
@@ -3845,10 +4426,10 @@ function MidnightCensusMatrix({ userId }) {
               <th style={{ textAlign: "left", padding: "11px 16px", fontWeight: 700, fontSize: 13, color: "var(--ink-2)", background: "var(--panel-2)", minWidth: 140 }}>Ward</th>
               <th style={{ ...thStyle("var(--st-o)"), background: "var(--st-o-bg)" }}>Total Occ</th>
               <th style={{ ...thStyle("var(--st-o)"), background: "var(--st-o-bg)" }}>On Bed</th>
-              <th style={{ ...thStyle("var(--st-or)"), background: "var(--st-or-bg)" }}>Occ+Res</th>
+              <th style={{ ...thStyle("var(--st-or)"), background: "var(--st-or-bg)" }}>Occ[Res]</th>
               <th style={{ ...thStyle("var(--st-v)"), background: "var(--st-v-bg)" }}>Total Vac</th>
               <th style={{ ...thStyle("var(--st-v)"), background: "var(--st-v-bg)" }}>Vacant</th>
-              <th style={{ ...thStyle("var(--st-vr)"), background: "var(--st-vr-bg)" }}>Vac+Res</th>
+              <th style={{ ...thStyle("var(--st-vr)"), background: "var(--st-vr-bg)" }}>Vac[Res]</th>
             </tr>
           </thead>
           <tbody>
@@ -4190,10 +4771,10 @@ function SnapshotReport({ viewLabel, isLive, selDate, rows, grandV, grandR, gran
               <th style={{ textAlign: "left", padding: "10px 14px", fontWeight: 700, fontSize: 11, color: C.ink2, textTransform: "uppercase", letterSpacing: ".04em", background: C.panel2 }}>Ward</th>
               <th style={th(C.orange, "#fff7ed")}>Total Occ</th>
               <th style={th(C.orange, "#fff7ed")}>On Bed</th>
-              <th style={th(C.purple, "#f5f3ff")}>Occ+Res</th>
+              <th style={th(C.purple, "#f5f3ff")}>Occ[Res]</th>
               <th style={th(C.green, "#f0fdf4")}>Total Vac</th>
               <th style={th(C.green, "#f0fdf4")}>Vacant</th>
-              <th style={th(C.blue, "#eff6ff")}>Vac+Res</th>
+              <th style={th(C.blue, "#eff6ff")}>Vac[Res]</th>
             </tr>
           </thead>
           <tbody>
@@ -4412,9 +4993,9 @@ function WardSheet({ pre, onClose }) {
                     <StatusBar v={w.vacant} r={w.reserved} o={w.occupied} or={w.occupied_reserved || 0} total={w.total} />
                     <div className="row" style={{ gap: 8, marginTop: 10 }}>
                       <span className="tag v">{w.vacant} vacant</span>
-                      <span className="tag r">{w.reserved} vac+res</span>
+                      <span className="tag r">{w.reserved} vac[res]</span>
                       <span className="tag o">{w.occupied} occupied</span>
-                      {(w.occupied_reserved || 0) > 0 && <span className="tag or">{w.occupied_reserved} occ+res</span>}
+                      {(w.occupied_reserved || 0) > 0 && <span className="tag or">{w.occupied_reserved} occ[res]</span>}
                     </div>
                   </>
                 ) : <span className="tag b">not entered yet</span>}

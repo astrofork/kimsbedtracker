@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api, toastErr, createSocket } from "./lib.js";
 import { Ic, icons } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { calculateWardTotals } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
+import { LiveBedDashboard } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 
 // Nurse endpoints for the shared ward/bed pages (same UI as PRE, nurse APIs + role).
@@ -13,6 +13,7 @@ const NURSE_CFG = {
   updateBedStatus: (...a) => api.nurseUpdateBedStatus(...a),
   payerTypes: () => api.nursePayerTypes(),
   destinations: () => api.nurseDestinations(),
+  reviewWard: (wardId) => api.nurseReviewWard(wardId),
 };
 
 // ── Ward summary card ──────────────────────────────────────────────────────────
@@ -170,6 +171,11 @@ export default function NurseApp({ user, onLogout }) {
   const [stations,    setStations]    = useState([]); // [{id, name}] — every station this nurse covers
   const [toast,       setToast]       = useState("");
   const [lastSync,    setLastSync]    = useState(null);
+  const [liveKey,     setLiveKey]     = useState(0); // bumped on every live event — feeds the Dashboard tab
+  // Home's summary numbers — computed server-side (DB aggregate, excludes
+  // non-operational wards + Discharge Lounge) instead of reducing `wards` in
+  // the browser. null until first load.
+  const [totals, setTotals] = useState(null);
   // Ref so the socket event handler always calls the latest load without recreating the socket
   const loadRef = useRef(null);
 
@@ -187,6 +193,7 @@ export default function NurseApp({ user, onLogout }) {
       setWards(data.wards || []);
       setStationName(data.nursing_station || "");
       setStations(data.stations || []);
+      setTotals(data.totals || null);
       setLastSync(new Date());
     } catch (e) {
       const msg = e?.message ?? "";
@@ -218,12 +225,13 @@ export default function NurseApp({ user, onLogout }) {
       // Reload to get fresh aggregate counts (vacant/reserved/occupied) for the ward cards
       loadRef.current();
       setLastSync(new Date());
+      setLiveKey(k => k + 1);
     });
 
-    socket.on("discharge:update", () => { loadRef.current(); setLastSync(new Date()); });
+    socket.on("discharge:update", () => { loadRef.current(); setLastSync(new Date()); setLiveKey(k => k + 1); });
 
     // On reconnect, do a full reload to catch any updates missed while disconnected
-    socket.on("connect", () => { loadRef.current(); });
+    socket.on("connect", () => { loadRef.current(); setLiveKey(k => k + 1); });
 
     return () => { socket.disconnect(); };
   }, []); // socket created once per mount; loadRef keeps the callback fresh
@@ -250,20 +258,27 @@ export default function NurseApp({ user, onLogout }) {
     </div>
   );
 
-  const totalBeds   = wards.reduce((s, w) => s + (w.total_beds ?? 0), 0); // capacity (not categorized sum)
-  const { totalVacant, totalOccupied: totalOcc } = calculateWardTotals(wards);
+  // Home's headline numbers come straight from the server (data.totals) —
+  // already excludes non-operational wards and the Discharge Lounge, matching
+  // the Dashboard. Falls back to 0s only for the brief window before the
+  // first /nurse/me response lands.
+  const totalWards = totals?.wards ?? 0;
+  const totalBeds  = totals?.totalBeds ?? 0;
+  const totalVacant = totals?.totalVacant ?? 0;
+  const totalOcc     = totals?.totalOccupied ?? 0;
 
   return (
     <div className="preui">
     <AppShell
       menu={[
-        { key: "dash",       icon: icons.home,      label: "Dashboard" },
+        { key: "dash",       icon: icons.home,      label: "Home" },
+        { key: "dashboard",  icon: icons.chart,     label: "Dashboard" },
         { key: "beds",       icon: icons.bed,       label: "Manage Beds" },
         { key: "discharges", icon: icons.clipboard, label: "Discharges" },
       ]}
       active={navTab}
       onSelect={(k) => { setNavTab(k); setOpenWard(null); }}
-      title={{ dash: stations.length === 1 ? (stationName || "Dashboard") : "Dashboard", beds: "Manage Beds", discharges: "Discharges" }[navTab]}
+      title={{ dash: stations.length === 1 ? (stationName || "Home") : "Home", dashboard: "Dashboard", beds: "Manage Beds", discharges: "Discharges" }[navTab]}
       user={{ name: user.name || user.username || "Nurse", role: "NURSE" }}
       onLogout={onLogout}
       topExtra={
@@ -272,7 +287,9 @@ export default function NurseApp({ user, onLogout }) {
         </button>
       }
     >
-      {navTab === "discharges" ? (
+      {navTab === "dashboard" ? (
+        <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "Nurse"} scope="nurse" />
+      ) : navTab === "discharges" ? (
         <DischargesPage role="NURSE" />
       ) : openWard ? (
         <WardPage
@@ -351,7 +368,7 @@ export default function NurseApp({ user, onLogout }) {
         <div className="stat">
           <div className="row" style={{ gap: 10 }}>
             <span className="ic"><Ic d={icons.grid} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{wards.length}</div>
+            <div className="n" style={{ fontSize: 18 }}>{totalWards}</div>
           </div>
           <div className="l">TOTAL WARDS</div>
         </div>
@@ -388,9 +405,9 @@ export default function NurseApp({ user, onLogout }) {
           <div className="floor-head">Stations — tap to open its wards</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {stations.map((st) => {
-              const list = wards.filter((w) => w.station_id === st.id);
-              const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
-              const t = calculateWardTotals(list);
+              // Same server-computed, operational/lounge-excluded totals as the
+              // headline cards above — see data.totals.byStation (nurse.ts /me).
+              const t = totals?.byStation?.[st.id] ?? { wards: 0, totalBeds: 0, totalVacant: 0, totalOccupied: 0 };
               return (
                 <button key={st.id} className="card" style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
@@ -399,7 +416,7 @@ export default function NurseApp({ user, onLogout }) {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 13.5 }}>{st.name}</div>
                     <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-                      {list.length} ward{list.length !== 1 ? "s" : ""} · {beds} beds · {t.totalVacant} vacant · {t.totalOccupied} occupied
+                      {t.wards} ward{t.wards !== 1 ? "s" : ""} · {t.totalBeds} beds · {t.totalVacant} vacant · {t.totalOccupied} occupied
                     </div>
                   </div>
                   <Ic d={icons.chevron} s={15} style={{ color: "var(--ink-3)", flexShrink: 0 }} />

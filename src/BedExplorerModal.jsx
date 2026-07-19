@@ -85,6 +85,9 @@ const ENTRY_PRESETS = {
   "admin:Patient Type IPD":     { statuses: ["ON_BED", "OCC_RES"], admissionType: "IP" },
   "admin:Patient Type Daycare": { statuses: ["ON_BED", "OCC_RES"], admissionType: "DAYCARE" },
   "admin:Patient Type OPD":     { statuses: ["ON_BED", "OCC_RES"], admissionType: "OPD" },
+  // Total cards — sum of their own sub-items, so the filter shows all admitted beds
+  "admin:Patient Type Total":   { statuses: ["ON_BED", "OCC_RES"] },
+  "admin:By Payer Total":       { statuses: ["ON_BED", "OCC_RES"] },
 };
 
 function entryFilter(entry) {
@@ -100,7 +103,7 @@ function entryFilter(entry) {
   };
 }
 
-export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose }) {
+export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fetchBeds = api.cooBedDetails }) {
   useModal(onClose);
   const filter = useMemo(() => entryFilter(entry), [entry]);
 
@@ -109,10 +112,10 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose }) 
 
   useEffect(() => {
     let cancelled = false;
-    api.cooBedDetails().then((rows) => { if (!cancelled) setAllBeds(rows); })
+    fetchBeds().then((rows) => { if (!cancelled) setAllBeds(rows); })
       .catch((e) => { if (!cancelled) setError(friendlyError(e).message); });
     return () => { cancelled = true; };
-  }, []);
+  }, [fetchBeds]);
 
   const wardIdSet = useMemo(() => new Set(wardIds), [wardIds]);
 

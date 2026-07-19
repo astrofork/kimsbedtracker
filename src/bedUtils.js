@@ -57,10 +57,10 @@ export const DISCHARGE_STEP_LABELS = [
   ["drug_return_status", "Drug Return"],
   ["pharmacy_clearance_status", "Pharmacy Clearance"],
   ["procedure_reconciliation_status", "Procedure Reconciliation"],
-  ["billing_started_status", "Billing Started"],
+  ["billing_started_status", "Bill Prep"],
   ["audit_status", "Audit"],
-  ["bill_ready_status", "Bill Ready"],
-  ["payment_status", "Payment Pending"],
+  ["bill_ready_status", "Bill Finalized"],
+  ["payment_status", "Payment Status"],
   ["system_checkout_status", "System Checkout"],
   ["physical_checkout_status", "Physical Checkout"],
 ];
@@ -107,6 +107,58 @@ export function dischargeBadge(tracking) {
     if (tracking[col] === "PENDING") return label;
   }
   return "In Progress";
+}
+
+// ── Discharge SLA / ETA ──────────────────────────────────────────────────────
+// The backend computes phase state, deadlines and ETA (dischargeSlaService.ts)
+// and returns them as `workflow` on discharge rows. These helpers only format —
+// nothing here re-derives status, so every screen shows the same numbers.
+
+/** Clock time for an epoch-ms value: "3:53 PM". */
+export function fmtClock(ms) {
+  if (ms == null) return null;
+  const d = new Date(Number(ms));
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+/** Compact duration: 45 → "45m", 90 → "1h 30m". */
+export function fmtMins(mins) {
+  if (mins == null) return null;
+  const m = Math.max(0, Math.round(mins));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return r ? `${h}h ${r}m` : `${h}h`;
+}
+
+/** Colour + label for an overall workflow state. */
+export function workflowTone(workflow) {
+  if (!workflow) return null;
+  if (workflow.state === "COMPLETED") return { label: "Completed", color: "var(--st-v)", bg: "var(--st-v-bg)" };
+  if (workflow.state === "DELAYED") {
+    const worst = Math.max(0, ...(workflow.phases || []).map(p => p.overdueMinutes || 0));
+    return { label: worst ? `Delayed ${fmtMins(worst)}` : "Delayed", color: "var(--red)", bg: "var(--red-bg)" };
+  }
+  return { label: "On time", color: "var(--st-v)", bg: "var(--st-v-bg)" };
+}
+
+/** Colour for a single phase's state. */
+export function phaseTone(state) {
+  switch (state) {
+    case "COMPLETED":      return { color: "var(--st-v)",  label: "Completed" };
+    case "DELAYED":        return { color: "var(--red)",   label: "Delayed" };
+    case "IN_PROGRESS":    return { color: "var(--primary)", label: "In Progress" };
+    case "NOT_APPLICABLE": return { color: "var(--ink-3)", label: "Not Applicable" };
+    default:               return { color: "var(--ink-3)", label: "Not started" };
+  }
+}
+
+/** "ETA 3:53 PM" — null when there's no running workflow. */
+export function fmtEta(workflow) {
+  if (!workflow || workflow.eta == null) return null;
+  const t = fmtClock(workflow.eta);
+  return t ? `ETA ${t}` : null;
 }
 
 export function calculateWardTotals(input) {
