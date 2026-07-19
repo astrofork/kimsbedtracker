@@ -53,7 +53,8 @@ export function bedStateShort(physical, reservation) {
 // Order mirrors the backend's step sequence — the badge shows the first step
 // that's still PENDING, or a status-level label outside that sequence.
 export const DISCHARGE_STEP_LABELS = [
-  ["discharge_summary_status", "Discharge Summary"],
+  ["discharge_summary_status", "Discharge Initiate"],
+  ["discharge_doc_status", "Discharge Summary"],
   ["drug_return_status", "Drug Return"],
   ["pharmacy_clearance_status", "Pharmacy Clearance"],
   ["procedure_reconciliation_status", "Procedure Reconciliation"],

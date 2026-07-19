@@ -11,7 +11,7 @@ import {
   HierarchyManager, PreBlockManager, PreManager,
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
   DoctorBlockManager, DoctorManager,
-  DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager,
+  DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager, PayerTATManager,
 } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
@@ -43,12 +43,15 @@ function fmtReminderLabel(hhmm) {
 // Backend role stays COO — the UI presents it as the Admin module.
 const ADMIN_TITLES = {
   dashboard: "Live Bed Dashboard",
+  commandcenter: "Command Center",
   analytics: "Analytics",
   matrix: "Hospital Matrix",
   activity: "PRE & Nurse Activity",
   reports: "Reports",
   savedviews: "Saved Views",
   alerts: "Alerts",
+  tatboard: "Discharge TAT Leaderboard",
+  overstay: "Overstay Alerts",
   pres: "PRE Users",
   nurses: "Nurse Users",
   doctors: "Doctor Users",
@@ -60,6 +63,7 @@ const ADMIN_TITLES = {
   deptdoctors: "Departments & Doctors",
   lounge: "Discharge Lounge",
   dischargephases: "Discharge Phase SLAs",
+  payertat: "Payer TAT Config",
   settings: "Settings",
 };
 
@@ -158,6 +162,7 @@ export default function COOApp({ user, meta, onLogout }) {
     {
       section: "Dashboard", items: [
         { key: "dashboard", icon: icons.home, label: "Dashboard" },
+        { key: "commandcenter", icon: icons.layers, label: "Command Center" },
         { key: "analytics", icon: icons.chart, label: "Analytics" },
       ]
     },
@@ -168,6 +173,8 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "reports", icon: icons.clock, label: "Reports" },
         { key: "savedviews", icon: icons.layers, label: "Saved Views" },
         { key: "alerts", icon: icons.bell, label: "Alerts", dot: !!(due && !dismissed[due]) },
+        { key: "tatboard", icon: icons.chart, label: "TAT Leaderboard" },
+        { key: "overstay", icon: icons.alert, label: "Overstay Alerts" },
       ]
     },
     {
@@ -187,7 +194,8 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "destinations", icon: icons.list, label: "Destinations" },
         { key: "deptdoctors", icon: icons.stethoscope, label: "Departments & Doctors" },
         { key: "lounge", icon: icons.bed, label: "Discharge Lounge" },
-      { key: "dischargephases", icon: icons.clock, label: "Discharge Phase SLAs" },
+        { key: "dischargephases", icon: icons.clock, label: "Discharge Phase SLAs" },
+        { key: "payertat", icon: icons.list, label: "Payer TAT Config" },
       ]
     },
     {
@@ -268,6 +276,9 @@ export default function COOApp({ user, meta, onLogout }) {
       )}
       {tab === "savedviews" && <SavedViewsPage data={data} userId={user?.id} onOpenInMatrix={() => setTab("matrix")} />}
       {tab === "alerts" && <AlertsPage data={data} compliance={compliance} due={due} dismissed={dismissed} setDismissed={setDismissed} />}
+      {tab === "tatboard" && <TATLeaderboard />}
+      {tab === "overstay" && <OverstayPanel />}
+      {tab === "commandcenter" && <CommandCenter discharge={dischargeCounts} />}
 
       {/* Users */}
       {tab === "pres" && <PreManager showToast={showToast} />}
@@ -284,6 +295,7 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "deptdoctors" && <DepartmentDoctorManager showToast={showToast} />}
       {tab === "lounge" && <DischargeLoungeManager showToast={showToast} />}
       {tab === "dischargephases" && <DischargePhaseManager showToast={showToast} />}
+      {tab === "payertat" && <PayerTATManager showToast={showToast} />}
 
       {tab === "settings" && <SettingsPage user={user} />}
 
@@ -972,7 +984,21 @@ const SCOPED_FETCHERS = {
     consultants: () => api.preConsultants(), snapshots: () => api.preSnapshots(),
   },
   nurse: { liveWards: () => api.nurseLiveWards(), bedDetails: api.nurseBedDetails, adminDashboard: (u) => api.nurseAdminDashboard(u), payerTypes: () => api.nursePayerTypes() },
+  "nurse-full": {
+    hospitalWide: true,
+    liveWards: () => api.nurseHospitalLiveWards(), bedDetails: api.nurseHospitalBedDetails,
+    adminDashboard: (u) => api.nurseHospitalAdminDashboard(u), payerTypes: () => api.nursePayerTypes(),
+    adminDashboardHistory: (u) => api.nurseHospitalAdminDashboardHistory(u),
+    consultants: () => api.nurseHospitalConsultants(), snapshots: () => api.nurseHospitalSnapshots(),
+  },
   consultant: { liveWards: () => api.consultantLiveWards(), bedDetails: api.consultantBedDetails, adminDashboard: (u) => api.consultantAdminDashboard(u), payerTypes: () => api.consultantPayerTypes() },
+  doctor: {
+    hospitalWide: true,
+    liveWards: () => api.doctorLiveWards(), bedDetails: api.doctorBedDetails,
+    adminDashboard: (u) => api.doctorAdminDashboard(u), payerTypes: () => api.doctorPayerTypes(),
+    adminDashboardHistory: (u) => api.doctorAdminDashboardHistory(u),
+    consultants: () => api.doctorConsultants(), snapshots: () => api.doctorSnapshots(),
+  },
 };
 export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "admin", hideUnitFilter = false }) {
   const scoped = SCOPED_FETCHERS[scope] ?? null; // null = admin/hospital-wide
@@ -5006,4 +5032,657 @@ function WardSheet({ pre, onClose }) {
       </div>
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  DISCHARGE TAT LEADERBOARD — Feature 3
+// ══════════════════════════════════════════════════════════════════════════════
+
+function fmtTatMins(mins) {
+  if (mins == null) return "—";
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+function tatColor(mins) {
+  if (mins == null) return "var(--ink-3)";
+  if (mins <= 180) return "var(--green)";   // within Cash/General 3h
+  if (mins <= 210) return "var(--primary)"; // within Corporate/Arogya Sri 3.5h
+  if (mins <= 300) return "#d97706";        // within Insurance 5h
+  return "var(--red)";
+}
+
+function tatColorVsBenchmark(mins, benchmark) {
+  if (mins == null || benchmark == null) return "var(--ink-3)";
+  if (mins <= benchmark)        return "var(--green)";
+  if (mins <= benchmark * 1.2)  return "#d97706";
+  return "var(--red)";
+}
+
+const TAT_MEDALS = ["🥇", "🥈", "🥉"];
+
+function TATLeaderboard() {
+  const [range, setRange] = useState("7d");
+  const [tat, setTat] = useState(null);
+  const [err, setErr] = useState("");
+  const [view, setView] = useState("doctor");
+  const [payerDrill, setPayerDrill] = useState(null);
+
+  useEffect(() => {
+    setTat(null);
+    api.cooTat(range)
+      .then(d => { setTat(d); setErr(""); })
+      .catch(e => setErr(toastErr(e)));
+  }, [range]);
+
+  const rows = tat
+    ? (view === "doctor" ? tat.byDoctor : view === "ward" ? tat.byWard : tat.byPayer)
+    : null;
+  const targets = tat?.targets ?? {};
+
+  return (
+    <div className="slide-up">
+      <div className="tat-toolbar">
+        <div className="tat-view-chips">
+          {[["doctor", "By Doctor"], ["ward", "By Ward"], ["payer", "By Payer"]].map(([k, l]) => (
+            <button key={k} className={"fchip" + (view === k ? " on" : "")} onClick={() => setView(k)}
+              style={{ padding: "7px 16px", fontSize: 13 }}>
+              {l}
+            </button>
+          ))}
+        </div>
+        <select className="field" value={range} onChange={(e) => setRange(e.target.value)}
+          style={{ width: "auto", padding: "7px 12px", fontWeight: 600 }}>
+          <option value="today">Today</option>
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="90d">Last 90 days</option>
+        </select>
+      </div>
+
+      {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
+      {!tat && !err && (
+        <div className={view === "payer" ? "card-grid" : "card-grid"}>
+          {(view === "payer" ? [0,1,2,3,4] : [0,1,2,3]).map(i => (
+            <div key={i} className="preui-sk preui-sk-card" />
+          ))}
+        </div>
+      )}
+      {tat && view !== "payer" && rows && rows.length === 0 && (
+        <div className="card empty" style={{ padding: 32 }}>
+          <Ic d={icons.chart} s={28} />
+          <div style={{ fontWeight: 700, fontSize: 14, marginTop: 10 }}>No completed discharges yet</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            TAT data appears once discharges are fully completed in the selected period.
+          </div>
+        </div>
+      )}
+      {rows && rows.length > 0 && view !== "payer" && (
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: "1px solid var(--line)" }}>
+                  <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700, color: "var(--ink-2)", fontSize: 11, width: 40 }}>#</th>
+                  <th style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>
+                    {view === "doctor" ? "DOCTOR" : "WARD"}
+                  </th>
+                  <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>DISCHARGES</th>
+                  <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>AVG TAT</th>
+                  <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>BEST</th>
+                  <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>WORST</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={r.name} style={{
+                    borderBottom: "1px solid var(--line)",
+                    background: i % 2 === 0 ? "transparent" : "var(--panel-2)",
+                  }}>
+                    <td style={{ padding: "12px 16px", fontWeight: 800, fontSize: 14 }}>
+                      {i < 3 ? TAT_MEDALS[i] : <span className="dim">{i + 1}</span>}
+                    </td>
+                    <td style={{ padding: "12px 16px", fontWeight: 700 }}>{r.name}</td>
+                    <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700 }}>{r.total}</td>
+                    <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 800, color: tatColor(r.avg_min) }}>
+                      {fmtTatMins(r.avg_min)}
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "right", color: "var(--green)", fontWeight: 700 }}>
+                      {fmtTatMins(r.best_min)}
+                    </td>
+                    <td style={{ padding: "12px 16px", textAlign: "right", color: "var(--red)", fontWeight: 700 }}>
+                      {fmtTatMins(r.worst_min)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="tat-legend">
+            TAT = time from discharge initiation to full completion. Lower is better. &nbsp;
+            <span style={{ color: "var(--green)" }}>●</span> ≤3h (Cash/General) &nbsp;
+            <span style={{ color: "var(--primary)" }}>●</span> ≤3.5h (Corporate/Arogya Sri) &nbsp;
+            <span style={{ color: "#d97706" }}>●</span> ≤5h (Insurance) &nbsp;
+            <span style={{ color: "var(--red)" }}>●</span> &gt;5h
+          </div>
+        </div>
+      )}
+      {tat && view === "payer" && (() => {
+        // Fixed display order; fall back to whatever came from targets if new types added
+        const PAYER_ORDER = ["Cash", "General", "Insurance", "Corporate", "Arogya Sri"];
+        const allTypes = [
+          ...PAYER_ORDER.filter(p => p in targets),
+          ...Object.keys(targets).filter(p => !PAYER_ORDER.includes(p)),
+        ];
+        const byPayerMap = new Map((tat.byPayer || []).map(r => [r.payer_type, r]));
+
+        return (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
+              {allTypes.map(payerType => {
+                const r = byPayerMap.get(payerType);
+                const bench = targets[payerType] ?? null;
+                const hasData = !!r;
+                const ok = hasData && bench != null && r.avg_min <= bench;
+                const col = hasData ? tatColorVsBenchmark(r.avg_min, bench) : "var(--line)";
+                return (
+                  <button key={payerType} onClick={() => setPayerDrill(payerType)}
+                    className="card slide-up"
+                    style={{ padding: 16, textAlign: "left", cursor: "pointer", width: "100%",
+                      borderColor: col, display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div className="row between" style={{ alignItems: "flex-start" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{payerType}</div>
+                      {hasData && bench != null && (
+                        <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 99,
+                          background: ok ? "var(--st-v-bg)" : "var(--red-bg)",
+                          color: ok ? "var(--st-v)" : "var(--red)" }}>
+                          {ok ? "On target" : "Over"}
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 28, fontWeight: 900, lineHeight: 1, color: hasData ? col : "var(--ink-3)" }}>
+                        {hasData ? fmtTatMins(r.avg_min) : "—"}
+                      </div>
+                      <div className="dim" style={{ fontSize: 11, marginTop: 3 }}>avg TAT</div>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{hasData ? r.total : "—"}</div>
+                        <div className="dim" style={{ fontSize: 10 }}>cases</div>
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: hasData ? "var(--green)" : "var(--ink-3)" }}>
+                          {hasData ? fmtTatMins(r.best_min) : "—"}
+                        </div>
+                        <div className="dim" style={{ fontSize: 10 }}>best</div>
+                      </div>
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: hasData ? "var(--red)" : "var(--ink-3)" }}>
+                          {hasData ? fmtTatMins(r.worst_min) : "—"}
+                        </div>
+                        <div className="dim" style={{ fontSize: 10 }}>worst</div>
+                      </div>
+                      {bench != null && (
+                        <div style={{ textAlign: "center" }}>
+                          <div style={{ fontWeight: 700, fontSize: 13 }}>{fmtTatMins(bench)}</div>
+                          <div className="dim" style={{ fontSize: 10 }}>target</div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                      {hasData ? "Tap to see breakdown →" : "No discharges in this period"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {payerDrill && (
+              <PayerDrillModal payer={payerDrill} range={range} onClose={() => setPayerDrill(null)} />
+            )}
+          </>
+        );
+      })()}
+    </div>
+  );
+}
+
+function PayerDrillModal({ payer, range, onClose }) {
+  useModal(onClose);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [drillView, setDrillView] = useState("doctor");
+
+  useEffect(() => {
+    setData(null); setErr("");
+    api.cooTatByPayer(payer, range)
+      .then(d => setData(d))
+      .catch(e => setErr(toastErr(e)));
+  }, [payer, range]);
+
+  const rows = data ? (drillView === "doctor" ? data.byDoctor : data.byWard) : null;
+  const bench = data?.targetMinutes ?? null;
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}
+        style={{ maxHeight: "88vh", overflowY: "auto" }}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 4 }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{payer} — TAT Breakdown</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 16 }}>
+            Completed discharges · {range === "today" ? "Today" : range === "7d" ? "Last 7 days" : range === "30d" ? "Last 30 days" : "Last 90 days"}
+          </div>
+
+          {data?.summary && (
+            <div className="pdr-summary">
+              {[
+                { label: "Cases", val: data.summary.total, style: {} },
+                { label: "Avg TAT", val: fmtTatMins(data.summary.avg_min), style: { color: tatColorVsBenchmark(data.summary.avg_min, bench) } },
+                { label: "Best", val: fmtTatMins(data.summary.best_min), style: { color: "var(--green)" } },
+                { label: "Worst", val: fmtTatMins(data.summary.worst_min), style: { color: "var(--red)" } },
+              ].map(({ label, val, style }) => (
+                <div key={label} className="card" style={{ padding: "12px 14px", textAlign: "center" }}>
+                  <div style={{ fontWeight: 800, fontSize: 18, ...style }}>{val}</div>
+                  <div className="dim" style={{ fontSize: 11, marginTop: 3 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {bench != null && (
+            <div className="card" style={{ padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10,
+              background: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v-bg)" : "var(--red-bg)",
+              borderColor: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v)" : "var(--red)" }}>
+              <Ic d={icons.clock} s={16} style={{ color: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v)" : "var(--red)" }} />
+              <span style={{ fontSize: 13, fontWeight: 700 }}>
+                Benchmark: {fmtTatMins(bench)} &nbsp;
+                <span className="dim" style={{ fontWeight: 400 }}>
+                  {(data?.summary?.avg_min ?? 999) <= bench ? "— avg is within target" : "— avg exceeds target"}
+                </span>
+              </span>
+            </div>
+          )}
+
+          <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+            {[["doctor", "By Doctor"], ["ward", "By Ward"]].map(([k, l]) => (
+              <button key={k} className={"fchip" + (drillView === k ? " on" : "")} onClick={() => setDrillView(k)}
+                style={{ padding: "6px 14px", fontSize: 12 }}>{l}</button>
+            ))}
+          </div>
+
+          {err && <div style={{ color: "var(--red)", fontSize: 12 }}>{err}</div>}
+          {!rows && !err && <div className="dim" style={{ textAlign: "center", padding: 24, fontSize: 13 }}>Loading…</div>}
+          {rows && rows.length === 0 && (
+            <div className="card empty" style={{ padding: 24 }}>
+              <Ic d={icons.chart} s={26} />
+              <div style={{ fontWeight: 600, marginTop: 8 }}>No data for this period</div>
+            </div>
+          )}
+          {rows && rows.length > 0 && (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--line)" }}>
+                      <th style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--ink-2)", fontSize: 11, width: 32 }}>#</th>
+                      <th style={{ padding: "10px 14px", textAlign: "left", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>
+                        {drillView === "doctor" ? "DOCTOR" : "WARD"}
+                      </th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>CASES</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>AVG TAT</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>BEST</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, color: "var(--ink-2)", fontSize: 11 }}>WORST</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={r.name} style={{ borderBottom: "1px solid var(--line)", background: i % 2 === 0 ? "transparent" : "var(--panel-2)" }}>
+                        <td style={{ padding: "10px 14px", fontWeight: 800, fontSize: 13 }}>
+                          {i < 3 ? TAT_MEDALS[i] : <span className="dim">{i + 1}</span>}
+                        </td>
+                        <td style={{ padding: "10px 14px", fontWeight: 700 }}>{r.name}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700 }}>{r.total}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 800, color: tatColorVsBenchmark(r.avg_min, bench) }}>
+                          {fmtTatMins(r.avg_min)}
+                        </td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--green)", fontWeight: 700 }}>{fmtTatMins(r.best_min)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "var(--red)", fontWeight: 700 }}>{fmtTatMins(r.worst_min)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          <div style={{ height: 16 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  OVERSTAY ALERT PANEL — Feature 4
+// ══════════════════════════════════════════════════════════════════════════════
+
+function overstayTier(days) {
+  const n = Number(days);
+  if (n >= 4) return { bg: "var(--red-bg)", color: "var(--red)", label: `${n}d overdue` };
+  if (n >= 2) return { bg: "rgba(245,158,11,.12)", color: "#d97706", label: `${n}d overdue` };
+  return { bg: "var(--blue-bg)", color: "var(--blue)", label: `${n}d overdue` };
+}
+
+export function OverstayPanel({ loadFn = api.cooOverstay }) {
+  const [ov, setOv] = useState(null);
+  const [err, setErr] = useState("");
+
+  const load = useCallback(() => {
+    loadFn()
+      .then(d => { setOv(d); setErr(""); })
+      .catch(e => setErr(toastErr(e)));
+  }, [loadFn]);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const socket = createSocket();
+    const refresh = () => load();
+    socket.on("discharge:update", refresh);
+    socket.on("bed:update", refresh);
+    socket.on("connect", refresh);
+    return () => socket.disconnect();
+  }, [load]);
+
+  const fmtPlanDate = (dateStr) => {
+    const d = new Date(dateStr + "T00:00:00");
+    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  };
+
+  return (
+    <div className="slide-up">
+      {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
+      {!ov && !err && (
+        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
+      )}
+      {ov && (
+        <>
+          <div className="stat-grid" style={{ marginBottom: 16 }}>
+            <div className="stat">
+              <div className="row" style={{ gap: 10 }}>
+                <span className="ic" style={{ background: ov.total ? "var(--red-bg)" : "var(--panel-2)", color: ov.total ? "var(--red)" : "var(--ink-3)" }}>
+                  <Ic d={icons.alert} s={16} />
+                </span>
+                <div className="n" style={{ fontSize: 18, color: ov.total ? "var(--red)" : undefined }}>{ov.total}</div>
+              </div>
+              <div className="l">TOTAL OVERSTAY</div>
+            </div>
+            <div className="stat">
+              <div className="row" style={{ gap: 10 }}>
+                <span className="ic" style={{ background: "var(--blue-bg)", color: "var(--blue)" }}>
+                  <Ic d={icons.clock} s={16} />
+                </span>
+                <div className="n" style={{ fontSize: 18 }}>{ov.tier1}</div>
+              </div>
+              <div className="l">1 DAY OVER</div>
+            </div>
+            <div className="stat">
+              <div className="row" style={{ gap: 10 }}>
+                <span className="ic" style={{ background: "rgba(245,158,11,.12)", color: "#d97706" }}>
+                  <Ic d={icons.alert} s={16} />
+                </span>
+                <div className="n" style={{ fontSize: 18 }}>{ov.tier2}</div>
+              </div>
+              <div className="l">2–3 DAYS OVER</div>
+            </div>
+            <div className="stat">
+              <div className="row" style={{ gap: 10 }}>
+                <span className="ic" style={{ background: "var(--red-bg)", color: "var(--red)" }}>
+                  <Ic d={icons.alert} s={16} />
+                </span>
+                <div className="n" style={{ fontSize: 18, color: ov.tier3 ? "var(--red)" : undefined }}>{ov.tier3}</div>
+              </div>
+              <div className="l">4+ DAYS OVER</div>
+            </div>
+            <div className="stat" style={{ justifyContent: "center" }}>
+              <button className="btn" onClick={load} style={{ gap: 6 }}>
+                <Ic d={icons.refresh} s={14} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          {ov.rows.length === 0 ? (
+            <div className="card empty" style={{ padding: 32 }}>
+              <Ic d={icons.check} s={28} />
+              <div style={{ fontWeight: 700, fontSize: 14, marginTop: 10 }}>No overstay patients</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>All planned discharges are on schedule.</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {ov.rows.map((r) => {
+                const tier = overstayTier(r.days_overdue);
+                return (
+                  <div key={r.admission_id} className="card" style={{ padding: "14px 16px", borderLeft: `4px solid ${tier.color}` }}>
+                    <div className="row between" style={{ flexWrap: "wrap", gap: 8 }}>
+                      <div className="row" style={{ gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+                        <span style={{ fontWeight: 800, fontSize: 15 }}>{r.bed}</span>
+                        <span className="dim" style={{ fontSize: 12, fontWeight: 600 }}>{r.ward}</span>
+                      </div>
+                      <span className="tag" style={{ background: tier.bg, color: tier.color, fontWeight: 800, fontSize: 11, flexShrink: 0 }}>
+                        {tier.label.toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>IP ···{r.ip_last6}</div>
+                    <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12 }}>
+                        <span className="dim">Doctor: </span><span style={{ fontWeight: 700 }}>{r.doctor}</span>
+                      </span>
+                      <span style={{ fontSize: 12 }}>
+                        <span className="dim">Planned: </span>
+                        <span style={{ fontWeight: 700, color: "var(--red)" }}>{fmtPlanDate(r.planned_date)}</span>
+                      </span>
+                      <span style={{ fontSize: 12 }}>
+                        <span className="dim">Status: </span>
+                        <span style={{ fontWeight: 700 }}>{r.discharge_status.replace(/_/g, " ")}</span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  COMMAND CENTER — Feature 1 (CEO TV Mode)
+// ══════════════════════════════════════════════════════════════════════════════
+
+const CC_PANELS = ["Occupancy", "Discharge Pipeline", "Ward Status"];
+
+function CommandCenter({ discharge }) {
+  const [tvMode, setTvMode] = useState(false);
+  const [panel, setPanel] = useState(0);
+  const [liveData, setLiveData] = useState(null);
+
+  const fetchLive = useCallback(() => {
+    api.cooLiveWards().then(d => setLiveData(d)).catch(() => {});
+  }, []);
+  useEffect(() => { fetchLive(); }, [fetchLive]);
+
+  // Refresh every 30s
+  useEffect(() => {
+    const id = setInterval(fetchLive, 30000);
+    return () => clearInterval(id);
+  }, [fetchLive]);
+
+  // Auto-rotate panels in TV mode every 8s
+  useEffect(() => {
+    if (!tvMode) return;
+    const id = setInterval(() => setPanel(p => (p + 1) % CC_PANELS.length), 8000);
+    return () => clearInterval(id);
+  }, [tvMode]);
+
+  // Lock/unlock body scroll when TV mode is active
+  useEffect(() => {
+    document.body.style.overflow = tvMode ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [tvMode]);
+
+  const totals = liveData?.totals;
+  const wards  = liveData?.wards || [];
+  const occ    = totals ? (totals.o ?? 0) + (totals.or ?? 0) : null;
+  const occPct = totals && totals.total > 0 ? Math.round((occ / totals.total) * 100) : null;
+
+  const KPIs = [
+    {
+      label: "OCCUPANCY",
+      value: occPct != null ? `${occPct}%` : "—",
+      sub: occ != null ? `${occ} / ${totals.total} beds` : "",
+      color: occPct >= 90 ? "var(--red)" : occPct >= 75 ? "#d97706" : "var(--green)",
+    },
+    {
+      label: "VACANT BEDS",
+      value: totals ? (totals.v ?? "—") : "—",
+      sub: "available now",
+      color: "var(--green)",
+    },
+    {
+      label: "ACTIVE DISCHARGES",
+      value: discharge != null ? discharge.initiated + discharge.pending : "—",
+      sub: `${discharge?.overduePlanned ?? "—"} overdue planned`,
+      color: "var(--primary)",
+    },
+    {
+      label: "COMPLETED TODAY",
+      value: discharge?.completedToday ?? "—",
+      sub: `${discharge?.plannedToday ?? "—"} planned`,
+      color: "var(--green)",
+    },
+  ];
+
+  const now = new Date().toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata", weekday: "long", year: "numeric",
+    month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+
+  const inner = (
+    <div style={{
+      background: "var(--bg)",
+      padding: tvMode ? 32 : 0,
+      minHeight: tvMode ? "100vh" : undefined,
+    }}>
+      {/* Header */}
+      <div className="row between" style={{ marginBottom: tvMode ? 28 : 20, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontWeight: 900, fontSize: tvMode ? 26 : 20, letterSpacing: "-.02em" }}>
+            KIMS Hospitals — Command Center
+          </div>
+          <div className="dim" style={{ fontSize: tvMode ? 13 : 11 }}>{now}</div>
+        </div>
+        <button className="btn btn-primary" onClick={() => setTvMode(t => !t)} style={{ gap: 6, fontWeight: 700 }}>
+          <Ic d={icons.layers} s={14} /> {tvMode ? "Exit TV Mode" : "TV Mode"}
+        </button>
+      </div>
+
+      {/* KPI strip */}
+      <div className="stat-grid" style={{ marginBottom: tvMode ? 28 : 18 }}>
+        {KPIs.map(k => (
+          <div key={k.label} className="stat" style={{ padding: tvMode ? "22px 18px" : undefined }}>
+            <div className="n" style={{ fontSize: tvMode ? 48 : 26, color: k.color, fontWeight: 900, lineHeight: 1 }}>{k.value}</div>
+            <div className="l" style={{ marginTop: 6, fontSize: tvMode ? 12 : undefined }}>{k.label}</div>
+            <div className="dim" style={{ fontSize: tvMode ? 11 : 10, marginTop: 2 }}>{k.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Panel tabs */}
+      <div className="row" style={{ gap: 8, marginBottom: tvMode ? 20 : 14, flexWrap: "wrap" }}>
+        {CC_PANELS.map((p, i) => (
+          <button key={p} className={"fchip" + (panel === i ? " on" : "")}
+            onClick={() => setPanel(i)} style={{ padding: "7px 14px", fontSize: 13 }}>
+            {p}
+          </button>
+        ))}
+        {tvMode && <span className="dim" style={{ fontSize: 11, marginLeft: 8, alignSelf: "center" }}>Auto-rotating every 8s</span>}
+      </div>
+
+      {/* Panel 0: Occupancy */}
+      {panel === 0 && totals && (
+        <div className="card-grid">
+          {[
+            ["TOTAL BEDS",     totals.total,                          "var(--ink)"],
+            ["VACANT",         totals.v,                              "var(--green)"],
+            ["VAC + RES",      totals.r,                              "var(--ink-2)"],
+            ["OCCUPIED",       totals.o,                              "var(--primary)"],
+            ["OCC + RES",      totals.or,                             "var(--ink-2)"],
+            ["TOTAL OCCUPIED", occ,                                   "var(--primary)"],
+            ["OCC %",          occPct != null ? `${occPct}%` : "—",   occPct >= 90 ? "var(--red)" : occPct >= 75 ? "#d97706" : "var(--green)"],
+          ].map(([l, v, c]) => (
+            <div key={l} className="stat" style={{ padding: tvMode ? "20px 16px" : undefined }}>
+              <div className="n" style={{ fontSize: tvMode ? 38 : 22, color: c, fontWeight: 900 }}>{v ?? "—"}</div>
+              <div className="l">{l}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {panel === 0 && !totals && (
+        <div className="card-grid">{[0, 1, 2, 3].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
+      )}
+
+      {/* Panel 1: Discharge Pipeline */}
+      {panel === 1 && (
+        <div className="card-grid">
+          {[
+            ["PLANNED TODAY",       discharge?.plannedToday,          "var(--primary)"],
+            ["INITIATED",           discharge?.initiated,             "var(--blue)"],
+            ["IN PROGRESS",         discharge?.pending,               "var(--blue)"],
+            ["COMPLETED TODAY",     discharge?.completedToday,        "var(--green)"],
+            ["AWAITING PAYMENT",    discharge?.paymentPending,        "var(--ink)"],
+            ["SYS CHECKOUT DONE",   discharge?.systemCheckoutCompleted, "var(--ink)"],
+            ["PHYS CHECKOUT DONE",  discharge?.physicalCheckoutCompleted, "var(--ink)"],
+            ["OVERDUE PLANNED",     discharge?.overduePlanned,        discharge?.overduePlanned ? "var(--red)" : "var(--green)"],
+          ].map(([l, v, c]) => (
+            <div key={l} className="stat" style={{ padding: tvMode ? "20px 16px" : undefined }}>
+              <div className="n" style={{ fontSize: tvMode ? 38 : 22, color: c, fontWeight: 900 }}>{v ?? "—"}</div>
+              <div className="l">{l}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Panel 2: Ward Status grid */}
+      {panel === 2 && (
+        <div className="card-grid">
+          {wards.length === 0 && [0, 1, 2, 3].map(i => <div key={i} className="preui-sk preui-sk-card" />)}
+          {wards.slice(0, 16).map(w => {
+            const o2 = (w.occupied ?? 0) + (w.occupied_reserved ?? 0);
+            const pct = w.total > 0 ? Math.round((o2 / w.total) * 100) : 0;
+            const col = pct >= 90 ? "var(--red)" : pct >= 75 ? "#d97706" : "var(--green)";
+            return (
+              <div key={w.id} className="stat" style={{ padding: tvMode ? "18px 14px" : undefined }}>
+                <div style={{ fontSize: 10, fontWeight: 800, color: "var(--ink-2)", marginBottom: 4 }}>
+                  {(w.ward || w.name || "").toUpperCase()}
+                </div>
+                <div className="n" style={{ fontSize: tvMode ? 32 : 20, color: col, fontWeight: 900 }}>{pct}%</div>
+                <div className="dim" style={{ fontSize: 10 }}>{o2}/{w.total} occupied</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  if (tvMode) return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 9999, overflowY: "auto" }}>{inner}</div>,
+    document.body,
+  );
+  return inner;
 }

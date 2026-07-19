@@ -6574,3 +6574,263 @@ function DoctorEditor({ user, blocks, onClose, onSaved, showToast }) {
     </div>
   );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  PAYER TAT MANAGER
+// ══════════════════════════════════════════════════════════════════════════════
+
+const PHASE_STEP_LABELS = {
+  DISCHARGE_SUMMARY:        "Discharge Summary (DI)",
+  DISCHARGE_DOC:            "Discharge Doc (DS)",
+  DRUG_RETURN:              "Drug Return (DR)",
+  PHARMACY_CLEARANCE:       "Pharmacy Clearance (PH)",
+  PROCEDURE_RECONCILIATION: "Procedure Reconciliation (PR)",
+  BILLING_STARTED:          "Billing Started (BL)",
+  AUDIT:                    "Audit (AU)",
+  BILL_READY:               "Bill Finalisation (BR)",
+  PAYMENT:                  "Payment (PY)",
+  SYSTEM_CHECKOUT:          "System Checkout (SC)",
+  PHYSICAL_CHECKOUT:        "Physical Checkout (PX)",
+};
+
+function fmtTarget(mins) {
+  if (mins === 0) return "Immediate";
+  if (mins < 60) return `${mins} min`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+export function PayerTATManager({ showToast }) {
+  const [rows,       setRows]       = useState([]);
+  const [payerTypes, setPayerTypes] = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [editId,     setEditId]     = useState(null);
+  const [editDraft,  setEditDraft]  = useState(0);
+  const [busy,       setBusy]       = useState(false);
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [newPayer,   setNewPayer]   = useState("");
+  const [newType,    setNewType]    = useState("overall"); // "overall" | "step"
+  const [newStep,    setNewStep]    = useState("BILL_READY");
+  const [newMins,    setNewMins]    = useState(60);
+  const [confirm, confirmDialog]    = useConfirm();
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [tatRes, ptRes] = await Promise.all([api.mgrPayerTat(), api.mgrPayerTypes()]);
+      setRows(tatRes.rows || []);
+      setPayerTypes((ptRes.payer_types || []).filter(p => p.active));
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  // Initialise the payer dropdown when payer list loads
+  useEffect(() => {
+    if (payerTypes.length > 0 && !newPayer) setNewPayer(payerTypes[0].name);
+  }, [payerTypes]);
+
+  const saveEdit = async () => {
+    const mins = Number(editDraft);
+    if (!Number.isFinite(mins) || mins < 0 || mins > 1440) {
+      showToast("Target must be between 0 and 1440 minutes"); return;
+    }
+    setBusy(true);
+    try {
+      await api.mgrUpdatePayerTat(editId, { target_minutes: mins });
+      setEditId(null);
+      await load();
+      showToast("Updated ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const addRow = async () => {
+    const mins = Number(newMins);
+    if (!newPayer.trim()) { showToast("Select a payer type"); return; }
+    if (!Number.isFinite(mins) || mins < 0 || mins > 1440) {
+      showToast("Target must be 0 – 1440 minutes"); return;
+    }
+    setBusy(true);
+    try {
+      await api.mgrCreatePayerTat({
+        payer_type:     newPayer.trim(),
+        phase_key:      newType === "step" ? newStep : null,
+        target_minutes: mins,
+      });
+      setShowAdd(false);
+      setNewMins(60);
+      await load();
+      showToast("Added ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const deleteRow = async (row) => {
+    const label = row.phase_key
+      ? `${row.payer_type} — ${PHASE_STEP_LABELS[row.phase_key] || row.phase_key}`
+      : `${row.payer_type} overall benchmark`;
+    const ok = await confirm({ title: "Delete config?", message: `Remove "${label}"?`, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await api.mgrDeletePayerTat(row.id);
+      await load();
+      showToast("Deleted ✓");
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const overall   = rows.filter(r => r.phase_key === null);
+  const overrides = rows.filter(r => r.phase_key !== null);
+  const sectionHead = { fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" };
+  const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--line)" };
+
+  const RowActions = ({ row }) => editId === row.id ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <input className="field" type="number" min={0} max={1440} autoFocus value={editDraft}
+        style={{ width: 80, padding: "6px 10px", fontSize: 13 }}
+        onChange={e => setEditDraft(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && saveEdit()} />
+      <span className="dim" style={{ fontSize: 12, flexShrink: 0 }}>min</span>
+      <button className="btn btn-primary" style={{ padding: "6px 14px", fontSize: 12 }} disabled={busy} onClick={saveEdit}>Save</button>
+      <button className="btn btn-ghost" style={{ padding: "6px 14px", fontSize: 12 }} disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
+    </div>
+  ) : (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+      <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 99, background: "var(--blue-bg)", color: "var(--blue)" }}>
+        {fmtTarget(row.target_minutes)}
+      </span>
+      <button title="Edit" disabled={busy} onClick={() => { setEditId(row.id); setEditDraft(row.target_minutes); }}
+        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--primary)", padding: 4, borderRadius: 6, display: "flex" }}>
+        <Ic d={icons.pencil} s={15} />
+      </button>
+      <button title="Delete" disabled={busy} onClick={() => deleteRow(row)}
+        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--red)", padding: 4, borderRadius: 6, display: "flex" }}>
+        <Ic d={icons.trash} s={15} />
+      </button>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <div className="h2" style={{ marginBottom: 4 }}>Payer TAT Configuration</div>
+      <div className="dim" style={{ fontSize: 12, marginBottom: 18 }}>
+        Overall benchmarks colour the <strong>TAT Leaderboard</strong>. Step overrides affect <strong>Delayed</strong> detection
+        on discharge cards per payer type.
+      </div>
+
+      {loading ? (
+        <div className="dim" style={{ padding: 20, textAlign: "center", fontSize: 13 }}>Loading…</div>
+      ) : (<>
+
+        {/* Overall benchmarks */}
+        <div className="dim" style={sectionHead}>Overall TAT Benchmarks</div>
+        <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 18 }}>
+          {overall.length === 0 && (
+            <div className="dim" style={{ padding: "16px", fontSize: 13 }}>No overall benchmarks configured.</div>
+          )}
+          {overall.map(r => (
+            <div key={r.id} style={rowStyle}>
+              <div style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{r.payer_type}</div>
+              <RowActions row={r} />
+            </div>
+          ))}
+        </div>
+
+        {/* Step-level overrides */}
+        <div className="dim" style={sectionHead}>Step-Level Overrides</div>
+        <div className="card" style={{ padding: 0, overflow: "hidden", marginBottom: 18 }}>
+          {overrides.length === 0 && (
+            <div className="dim" style={{ padding: "16px", fontSize: 13 }}>No step overrides configured.</div>
+          )}
+          {overrides.map(r => (
+            <div key={r.id} style={rowStyle}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{r.payer_type}</div>
+                <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>{PHASE_STEP_LABELS[r.phase_key] || r.phase_key}</div>
+              </div>
+              <RowActions row={r} />
+            </div>
+          ))}
+        </div>
+
+        {/* Add new row */}
+        {showAdd ? (
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 14 }}>Add Configuration</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <div className="label" style={{ marginBottom: 4 }}>Payer Type</div>
+                  {payerTypes.length > 0 ? (
+                    <select className="field" value={newPayer} onChange={e => setNewPayer(e.target.value)}
+                      style={{ padding: "7px 10px", fontSize: 13 }}>
+                      {payerTypes.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                    </select>
+                  ) : (
+                    <input className="field" value={newPayer} maxLength={100}
+                      placeholder="e.g. Corporate"
+                      style={{ padding: "7px 10px", fontSize: 13 }}
+                      onChange={e => setNewPayer(e.target.value)} />
+                  )}
+                </div>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <div className="label" style={{ marginBottom: 4 }}>Config Type</div>
+                  <select className="field" value={newType} onChange={e => setNewType(e.target.value)}
+                    style={{ padding: "7px 10px", fontSize: 13 }}>
+                    <option value="overall">Overall TAT Benchmark</option>
+                    <option value="step">Step-Level Override</option>
+                  </select>
+                </div>
+              </div>
+
+              {newType === "step" && (
+                <div>
+                  <div className="label" style={{ marginBottom: 4 }}>Discharge Step</div>
+                  <select className="field" value={newStep} onChange={e => setNewStep(e.target.value)}
+                    style={{ padding: "7px 10px", fontSize: 13 }}>
+                    {Object.entries(PHASE_STEP_LABELS).map(([k, v]) => (
+                      <option key={k} value={k}>{v}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <div className="label" style={{ marginBottom: 4 }}>
+                  Target Minutes <span className="dim" style={{ fontWeight: 400 }}>(0 = Immediate)</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input className="field" type="number" min={0} max={1440} value={newMins}
+                    style={{ width: 100, padding: "7px 10px", fontSize: 13 }}
+                    onChange={e => setNewMins(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addRow()} />
+                  <span className="dim" style={{ fontSize: 13 }}>min</span>
+                  {Number(newMins) >= 60 && (
+                    <span className="dim" style={{ fontSize: 12 }}>
+                      = {Math.floor(Number(newMins) / 60)}h {Number(newMins) % 60 ? `${Number(newMins) % 60}m` : ""}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn btn-primary" disabled={busy} onClick={addRow}>
+                  {busy ? "Adding…" : "Add"}
+                </button>
+                <button className="btn btn-ghost" disabled={busy} onClick={() => setShowAdd(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button className="btn btn-ghost" style={{ width: "100%" }} onClick={() => setShowAdd(true)}>
+            <Ic d={icons.plus} s={15} /> Add Configuration
+          </button>
+        )}
+      </>)}
+
+      {confirmDialog}
+    </div>
+  );
+}

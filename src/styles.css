@@ -1805,3 +1805,142 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
   .appbar,#nav-filters{transition:opacity 200ms ease!important;}
   body.hero-gone .filter-bar-sticky{top:68px;}
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE — cross-role fixes
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 4-column ward stats block (PRE Entry + Nurse Wards) ──────────────── */
+.ward-stats-4{display:flex;background:var(--panel-2);border-radius:10px;overflow:hidden;margin-bottom:14px;}
+.ws-col{flex:1;text-align:center;padding:12px 6px;}
+.ws-col+.ws-col{border-left:1px solid var(--line);}
+.ws-val{font-size:24px;font-weight:800;line-height:1;}
+.ws-label{font-size:11px;font-weight:500;color:var(--ink-2);}
+/* Compact on phones */
+@media(max-width:480px){
+  .ws-col{padding:10px 4px;}
+  .ws-val{font-size:20px;}
+  .ws-label{font-size:10px;}
+}
+/* Wrap to 2×2 on very small phones */
+@media(max-width:359px){
+  .ward-stats-4{flex-wrap:wrap;}
+  .ws-col{flex:1 1 50%;}
+  .ws-col:nth-child(3){border-left:none;border-top:1px solid var(--line);}
+  .ws-col:nth-child(4){border-top:1px solid var(--line);}
+  .ws-val{font-size:18px;}
+}
+
+/* ── Ward card action buttons — smaller gap on tiny phones ──────────────── */
+@media(max-width:359px){
+  .ward-card-btns{gap:6px!important;}
+  .ward-card-btns .btn{font-size:12px;padding:8px 0;}
+}
+
+/* ── WardPage header ──────────────────────────────────────────────────────
+   Back + title on left, actions on right. On very narrow screens the right
+   side drops below so title always has room. */
+.ward-page-hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.ward-page-hdr-left{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 0;}
+.ward-page-hdr-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+/* Hide Review label text on narrow phones — icon only */
+@media(max-width:479px){
+  .ward-review-lbl{display:none;}
+  .ward-review-btn{padding:8px 10px!important;min-width:36px;}
+}
+/* Hide freshness dot text on very tiny phones */
+@media(max-width:360px){
+  .ward-freshness{display:none;}
+  .ward-page-hdr{flex-wrap:wrap;}
+  .ward-page-hdr-right{flex-basis:100%;}
+}
+
+/* ── WardPage search row — stack selects side-by-side on mobile ─────────── */
+@media(max-width:479px){
+  .ward-search-row{flex-wrap:wrap;}
+  .ward-search-row .field-search{flex:1 1 100%;order:-1;}
+  .ward-search-row .field-select{flex:1 1 calc(50% - 4px);max-width:none!important;}
+}
+
+/* ── Payer TAT drill summary — 2×2 on phones ───────────────────────────── */
+.pdr-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}
+@media(max-width:479px){
+  .pdr-summary{grid-template-columns:repeat(2,1fr);gap:8px;}
+}
+
+/* ── TAT Leaderboard toolbar ────────────────────────────────────────────── */
+.tat-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+.tat-view-chips{display:flex;gap:6px;flex-wrap:wrap;}
+@media(max-width:479px){
+  .tat-toolbar{gap:8px;}
+  .tat-view-chips{flex:1 1 100%;}
+  .tat-view-chips .fchip{flex:1;text-align:center;padding:8px 8px!important;font-size:12px!important;}
+  .tat-toolbar>.field{width:100%;}
+}
+
+/* ── TAT table — fix missing borders (var(--border) → var(--line)) ─────── */
+.tat-tbl-row{border-bottom:1px solid var(--line)!important;}
+.tat-tbl-hdr{border-bottom:1px solid var(--line)!important;}
+.tat-legend{font-size:11px;color:var(--ink-3);padding:10px 16px;border-top:1px solid var(--line);line-height:1.7;word-break:break-word;}
+@media(max-width:480px){
+  .tat-legend{font-size:10px;padding:8px 12px;}
+}
+
+/* ── Occupancy chips strip (My occupancy bar) — wrap + compact ──────────── */
+.occ-chips{display:flex;gap:12px;margin-top:10px;flex-wrap:wrap;}
+@media(max-width:360px){
+  .occ-chips{gap:7px;}
+  .occ-chips .tag{font-size:10px;padding:2px 7px;}
+}
+
+/* ── AppShell topbar — tighter on 320px ─────────────────────────────────── */
+@media(max-width:360px){
+  .appbar{padding:0 8px;gap:8px;}
+  .appbar .page-title{font-size:13px;}
+  .appbar-btn{width:32px;height:32px;}
+}
+
+/* ── Profile menu — never clip offscreen on tiny phones ─────────────────── */
+@media(max-width:360px){
+  .profile-menu{right:-8px;min-width:180px;}
+}
+
+/* ── Sheet / overlay — safe padding on very small screens ───────────────── */
+@media(max-width:360px){
+  .sheet{border-radius:14px 14px 0 0;}
+  .overlay{padding:0;}
+}
+
+/* ── Bed tile grid — minimum 3 per row on narrow phones ─────────────────── */
+@media(max-width:359px){
+  .preui .pbed-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
+}
+
+/* ── Stat grid — ensure 2-col fits on 320px ─────────────────────────────── */
+@media(max-width:359px){
+  .stat-grid{grid-template-columns:1fr 1fr;gap:8px;}
+  .stat{padding:11px 12px;}
+  .stat .n{font-size:20px;}
+}
+
+/* ── Ward filter dropdown full width on mobile ───────────────────────────── */
+@media(max-width:479px){
+  .ward-filter-select{max-width:none!important;width:100%!important;}
+}
+
+/* ── Floor head — less top margin on mobile ─────────────────────────────── */
+@media(max-width:479px){
+  .floor-head{margin-top:14px;margin-bottom:7px;}
+  .preui .floor-head{margin:14px 2px 7px;}
+}
+
+/* ── .card padding — slightly tighter on 360px ───────────────────────────── */
+@media(max-width:360px){
+  .preui .ward-card{padding:12px!important;}
+}
+
+/* ── TAT table — compact cells on mobile ────────────────────────────────── */
+@media(max-width:560px){
+  .tat-table-cell{padding:8px 10px!important;}
+  .tat-table-hdr-cell{padding:8px 10px!important;font-size:10px!important;}
+}

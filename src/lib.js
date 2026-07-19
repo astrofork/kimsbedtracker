@@ -73,6 +73,11 @@ export const api = {
     return req(`/coo/activity${s ? "?" + s : ""}`);
   },
   cooCompliance: () => req("/coo/compliance"),
+  cooTat: (range = "7d") => req(`/coo/discharge-tat?range=${encodeURIComponent(range)}`),
+  cooTatByPayer: (payer, range = "7d") => req(`/coo/discharge-tat-payer?payer=${encodeURIComponent(payer)}&range=${encodeURIComponent(range)}`),
+  cooOverstay: () => req("/coo/overstay"),
+  preOverstay: () => req("/pre/overstay"),
+  nurseOverstay: () => req("/nurse/overstay"),
   cooOccupancyTrend: (range = "7d") => req(`/coo/occupancy-trend?range=${range}`),
   cooAdminDashboard: (unit) => req(`/coo/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   cooAdminDashboardHistory: (unit) => req(`/coo/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
@@ -166,6 +171,12 @@ export const api = {
   doctorReview: (blockId) => req(`/doctor/blocks/${blockId}/review`, { method: "POST" }),
   doctorReviewWard: (wardId) => req(`/doctor/wards/${wardId}/review`, { method: "POST" }),
   doctorActivity: () => req("/doctor/activity"),
+  doctorLiveWards: () => req("/doctor/live-wards"),
+  doctorBedDetails: () => req("/doctor/bed-details"),
+  doctorAdminDashboard: (unit) => req(`/doctor/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  doctorAdminDashboardHistory: (unit) => req(`/doctor/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  doctorSnapshots: () => req("/doctor/snapshots"),
+  doctorConsultants: () => req("/doctor/consultants"),
   // ── manager — bed details (create/configure only) ────────────────────────────
   wardBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
@@ -223,6 +234,12 @@ export const api = {
   nurseLiveWards: () => req("/nurse/live-wards"),
   nurseBedDetails: () => req("/nurse/bed-details"),
   nurseAdminDashboard: (unit) => req(`/nurse/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  nurseHospitalLiveWards: () => req("/nurse/hospital/live-wards"),
+  nurseHospitalBedDetails: () => req("/nurse/hospital/bed-details"),
+  nurseHospitalAdminDashboard: (unit) => req(`/nurse/hospital/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  nurseHospitalAdminDashboardHistory: (unit) => req(`/nurse/hospital/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
+  nurseHospitalConsultants: () => req("/nurse/hospital/consultants"),
+  nurseHospitalSnapshots: () => req("/nurse/hospital/snapshots"),
   nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
     req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
   pushSubscribe: (subscription) =>
@@ -301,6 +318,11 @@ export const api = {
     req(`/manager/discharge-phases/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderDischargePhase: (id, direction) =>
     req(`/manager/discharge-phases/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
+  mgrPayerTat: () => req("/manager/payer-tat"),
+  mgrCreatePayerTat: (data) => req("/manager/payer-tat", { method: "POST", body: JSON.stringify(data) }),
+  mgrUpdatePayerTat: (id, data) =>
+    req(`/manager/payer-tat/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeletePayerTat: (id) => req(`/manager/payer-tat/${id}`, { method: "DELETE" }),
   consultantMyWards: () => req("/consultant/my-wards"),
   consultantBeds: (wardId) => req(`/consultant/beds/${wardId}`),
   consultantMyPatients: () => req("/consultant/my-patients"),

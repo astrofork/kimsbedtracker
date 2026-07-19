@@ -7,7 +7,8 @@ import { BackBtn } from "./PREApp.jsx";
 
 // Two-letter code inside each circle — full name appears on hover (title) or tap/hold.
 const STEP_SHORT = {
-  discharge_summary_status: "DS",
+  discharge_summary_status: "DI",
+  discharge_doc_status: "DS",
   drug_return_status: "DR",
   pharmacy_clearance_status: "PH",
   procedure_reconciliation_status: "PR",

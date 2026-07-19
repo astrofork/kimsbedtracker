@@ -5,6 +5,7 @@ import { AppShell } from "./shell.jsx";
 import { bedStateColor } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow, BackBtn } from "./PREApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
+import { LiveBedDashboard } from "./COOApp.jsx";
 
 // Doctor endpoints for the shared ward/bed pages (same UI as PRE, doctor APIs + role).
 const DOCTOR_CFG = {
@@ -339,11 +340,10 @@ export default function DoctorApp({ user, onLogout }) {
   const backToBlocks = () => { setBlockId(null); setWard(null); };
 
   const menu = [
-    { key: "dash",     icon: icons.home,        label: "Dashboard" },
-    { key: "blocks",   icon: icons.grid,        label: "My Blocks" },
-    { key: "discharges", icon: icons.clipboard,  label: "Discharges" },
-    { key: "activity", icon: icons.clock,       label: "Activity" },
-    { key: "profile",  icon: icons.user,        label: "Profile" },
+    { key: "dash",       icon: icons.home,      label: "Home" },
+    { key: "dashboard",  icon: icons.chart,     label: "Dashboard" },
+    { key: "entry",      icon: icons.grid,      label: "Entry" },
+    { key: "discharges", icon: icons.clipboard, label: "Discharges" },
   ];
 
   if (me === null) return (
@@ -366,7 +366,7 @@ export default function DoctorApp({ user, onLogout }) {
     </div>
   );
 
-  const title = ward ? ward.name : blockId ? "Block Details" : menu.find((m) => m.key === tab)?.label || "Doctor";
+  const title = ward ? ward.name : blockId ? "Entry" : menu.find((m) => m.key === tab)?.label || "Doctor";
 
   return (
     <div className="preui">
@@ -389,32 +389,10 @@ export default function DoctorApp({ user, onLogout }) {
         />
       ) : blockId ? (
         <BlockDetail blockId={blockId} reloadKey={reloadKey} onBack={backToBlocks} onOpenWard={setWard} showToast={showToast} />
+      ) : tab === "dashboard" ? (
+        <LiveBedDashboard refreshKey={reloadKey} userName={user.name || user.username || "Doctor"} scope="doctor" />
       ) : tab === "discharges" ? (
         <DischargesPage role="DOCTOR" />
-      ) : tab === "activity" ? (
-        <ActivityView />
-      ) : tab === "profile" ? (
-        <div className="slide-up">
-          <div className="card" style={{ padding: 22, maxWidth: 440 }}>
-            <div className="row" style={{ gap: 14, marginBottom: 18 }}>
-              <div className="doc-profile-av">{initialsOf(user.name || user.username)}</div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-.01em" }}>{user.name || "—"}</div>
-                <div className="dim" style={{ fontSize: 13 }}>@{user.username}</div>
-                <span className="tag v" style={{ marginTop: 6 }}><Ic d={icons.stethoscope} s={12} /> Doctor</span>
-              </div>
-            </div>
-            {[["Assigned blocks", me.blocks.length], ["Assigned wards", me.wardCount], ["Total beds", me.summary.total]].map(([l, v]) => (
-              <div key={l} className="row between" style={{ padding: "10px 0", borderTop: "1px solid var(--line)" }}>
-                <span className="dim" style={{ fontSize: 13 }}>{l}</span>
-                <span style={{ fontWeight: 700, fontSize: 14 }}>{v}</span>
-              </div>
-            ))}
-            <button className="btn btn-ghost btn-block" style={{ marginTop: 18 }} onClick={onLogout}>
-              <Ic d={icons.logout} s={15} /> Logout
-            </button>
-          </div>
-        </div>
       ) : (
         <Dashboard me={me} user={user} onOpenBlock={openBlock} showSummary={tab === "dash"} />
       )}

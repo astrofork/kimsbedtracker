@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, createSocket } from "./lib.js";
 import { Ic, icons, StatusBar, ThemeToggle, useModal } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
+import { OverstayPanel } from "./COOApp.jsx";
 import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus } from "./bedUtils.js";
 import DischargeTab, { TransferSection } from "./DischargeTab.jsx";
 import DischargesPage from "./DischargesPage.jsx";
@@ -10,7 +11,7 @@ import { LiveBedDashboard } from "./COOApp.jsx";
 
 // "dashboard" is no longer a tab of its own — the full dashboard now renders
 // underneath Home on the same page (see the home branch below).
-const TAB_TITLES = { home: "Home", entry: "Bed Entry", discharges: "Discharges" };
+const TAB_TITLES = { home: "Home", entry: "Bed Entry", discharges: "Discharges", overstay: "Overstay Alerts" };
 
 // Role configuration for the shared ward/bed pages. Nurse and Doctor reuse the exact
 // same pages (WardPage → bed page → discharge pages) with their own endpoints — only
@@ -150,6 +151,7 @@ export default function PREApp({ user, meta, onLogout }) {
     { key: "home",       icon: icons.home,      label: "Home" },
     { key: "entry",      icon: icons.bed,       label: "Entry", dot: alarmActive },
     { key: "discharges", icon: icons.clipboard, label: "Discharges" },
+    { key: "overstay",   icon: icons.alert,     label: "Overstay" },
   ];
 
   return (
@@ -180,6 +182,7 @@ export default function PREApp({ user, meta, onLogout }) {
         )}
         {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} />}
         {tab === "discharges" && <DischargesPage role="PRE" wards={data.wards.map(w => ({ id: w.id, name: w.ward }))} />}
+        {tab === "overstay" && <OverstayPanel loadFn={api.preOverstay} />}
 
         <ProfileThemeRow />
         {toast && <div className="toast">{toast}</div>}
@@ -393,28 +396,19 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
 
                   {/* Stats block */}
                   {entered && !nonOp && (
-                    <div style={{
-                      display: "flex",
-                      background: "var(--panel-2)",
-                      borderRadius: 10,
-                      overflow: "hidden",
-                      marginBottom: 14,
-                    }}>
+                    <div className="ward-stats-4">
                       {[
                         { label: "Vacant",   val: w.vacant,                color: "var(--st-v)"  },
                         { label: "Vac+Res",  val: w.reserved  ?? 0,        color: "var(--st-vr)" },
                         { label: "Occupied", val: w.occupied  ?? 0,        color: "var(--st-o)"  },
                         { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "var(--st-or)" },
-                      ].map(({ label, val, color }, idx) => (
-                        <div key={label} style={{
-                          flex: 1, textAlign: "center", padding: "12px 6px",
-                          borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
-                        }}>
+                      ].map(({ label, val, color }) => (
+                        <div key={label} className="ws-col">
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
                             <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                            <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
+                            <span className="ws-label">{label}</span>
                           </div>
-                          <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+                          <div className="ws-val" style={{ color }}>{val}</div>
                         </div>
                       ))}
                     </div>
@@ -422,12 +416,12 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
 
                   {/* Action buttons — each opens the full-page ward view on its tab */}
                   {!nonOp && (
-                    <div className="row" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
-                      <button className="btn btn-primary" style={{ flex: "1 1 110px", padding: "9px 0", fontSize: 13 }}
+                    <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
+                      <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
                         onClick={() => setOpenWard({ ward: w, tab: "manage" })}>
                         <Ic d={icons.bed} s={13} /> Manage Beds
                       </button>
-                      <button className="btn btn-ghost" style={{ flex: "1 1 96px", padding: "9px 0", fontSize: 13 }}
+                      <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
                         onClick={() => setOpenWard({ ward: w, tab: "discharge" })}>
                         <Ic d={icons.clipboard} s={13} /> Discharges
                       </button>
@@ -1690,8 +1684,8 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
   // Rendered inline in WardPage (NOT as a nested component) so the input keeps
   // focus across keystrokes — a component defined inside render remounts every time.
   const searchBar = (
-    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-      <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+    <div className="ward-search-row" style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+      <div className="field-search" style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
           <Ic d={icons.search} s={15} />
         </span>
@@ -1713,7 +1707,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
         )}
       </div>
       <select
-        className="field"
+        className="field field-select"
         aria-label="Filter beds"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
@@ -1727,7 +1721,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
           In Manage it opens the bed's page; in View it narrows the grid to it. */}
       {sortedBeds.length > 1 && (
         <select
-          className="field"
+          className="field field-select"
           aria-label="Go to bed"
           value=""
           onChange={(e) => {
@@ -1879,7 +1873,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
   return (
     <div className="slide-up">
       {/* Header — back · ward name + count · refresh + freshness */}
-      <div className="row between" style={{ marginBottom: 14, gap: 10 }}>
+      <div className="ward-page-hdr">
         <div className="row" style={{ gap: 12, minWidth: 0 }}>
           <BackBtn onClick={onBack} />
           <div style={{ minWidth: 0 }}>
@@ -1894,10 +1888,10 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0 }}>
           {cfg.reviewWard && (
-            <button className="btn btn-ghost" style={{ padding: "8px 12px", fontSize: 13, whiteSpace: "nowrap" }}
+            <button className="btn btn-ghost ward-review-btn"
               disabled={reviewing || inCooldown} onClick={reviewWard}
               title={inCooldown ? `Available again in ${Math.ceil(cooldownMsLeft / 60000)}m` : "No changes needed — mark this ward reviewed"}>
-              <Ic d={icons.check} s={14} /> {reviewing ? "…" : inCooldown ? `${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}
+              <Ic d={icons.check} s={14} /> <span className="ward-review-lbl">{reviewing ? "…" : inCooldown ? `${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}</span>
             </button>
           )}
           <button className="appbar-btn" onClick={load} title="Refresh" aria-label="Refresh beds">

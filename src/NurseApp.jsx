@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { api, toastErr, createSocket } from "./lib.js";
-import { Ic, icons } from "./ui.jsx";
+import { api, createSocket } from "./lib.js";
+import { Ic, icons, StatusBar } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
-import { LiveBedDashboard } from "./COOApp.jsx";
+import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 
 // Nurse endpoints for the shared ward/bed pages (same UI as PRE, nurse APIs + role).
@@ -16,93 +16,72 @@ const NURSE_CFG = {
   reviewWard: (wardId) => api.nurseReviewWard(wardId),
 };
 
-// ── Ward summary card ──────────────────────────────────────────────────────────
-function WardCard({ ward, index, onManage }) {
-  const counts = { vn: ward.vacant ?? 0, vr: ward.reserved ?? 0, on: ward.occupied ?? 0 };
-  const total  = ward.total_beds ?? 0;
-  const allVacant = counts.vn === total && total > 0;
-
-  // Ward is non-operational — show warning, block manage
-  if (ward.operational === false) {
-    return (
-      <div className="ward-card slide-up" style={{
-        animationDelay: index * 0.03 + "s",
-        padding: 16, display: "flex", flexDirection: "column",
-        opacity: 0.75,
-      }}>
-        <div className="row between" style={{ marginBottom: 14 }}>
-          <div>
-            {(ward.block_name || ward.floor_name) && (
-              <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>
-                {[ward.block_name, ward.floor_name].filter(Boolean).join(" · ")}
-              </div>
-            )}
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{ward.name}</div>
-            <div className="dim" style={{ fontSize: 12 }}>{ward.total_beds ?? 0} beds</div>
-          </div>
-          <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
-            <Ic d={icons.alert} s={12} /> Non-op
-          </span>
-        </div>
-        <div style={{
-          background: "var(--panel-2)", borderRadius: 10, padding: "14px 16px",
-          display: "flex", alignItems: "flex-start", gap: 10,
-        }}>
-          <Ic d={icons.alert} s={16} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13, color: "var(--warn, #b45309)" }}>Ward non-operational</div>
-            <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
-              This ward has been marked non-operational by the manager. Beds cannot be updated.
-            </div>
-          </div>
-        </div>
+// ── Occupancy summary bar (mirrors PRE Entry OccupancyCards) ─────────────────
+function NurseOccupancy({ wards }) {
+  const v  = wards.reduce((s, w) => s + (w.vacant   ?? 0), 0);
+  const r  = wards.reduce((s, w) => s + (w.reserved ?? 0), 0);
+  const o  = wards.reduce((s, w) => s + (w.occupied ?? 0), 0);
+  const or = wards.reduce((s, w) => s + (w.occupied_reserved ?? 0), 0);
+  const total = v + r + o + or;
+  const occPct = total > 0 ? Math.round((o + or) / total * 100) : 0;
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+      <div className="row between" style={{ marginBottom: 10 }}>
+        <span className="h2">My occupancy</span>
+        <span className="chip mono">{occPct}% full</span>
       </div>
-    );
-  }
-
-  // No beds assigned to this nurse for this ward — show warning, block manage
-  if (ward.beds_warning) {
-    return (
-      <div className="ward-card slide-up" style={{
-        animationDelay: index * 0.03 + "s",
-        padding: 16,
-        display: "flex", flexDirection: "column",
-      }}>
-        <div className="row between" style={{ marginBottom: 14 }}>
-          <div>
-            {(ward.block_name || ward.floor_name) && (
-              <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>
-                {[ward.block_name, ward.floor_name].filter(Boolean).join(" · ")}
-              </div>
-            )}
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{ward.name}</div>
-            <div className="dim" style={{ fontSize: 12 }}>{total} beds</div>
-          </div>
-          <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
-            <Ic d={icons.alert} s={12} /> No access
-          </span>
-        </div>
-        <div style={{
-          background: "var(--panel-2)", borderRadius: 10, padding: "14px 16px",
-          display: "flex", alignItems: "flex-start", gap: 10,
-        }}>
-          <Ic d={icons.alert} s={16} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
-          <div>
-            <div style={{ fontWeight: 600, fontSize: 13, color: "var(--warn, #b45309)" }}>No beds assigned</div>
-            <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
-              Contact your manager to assign beds to your account for this ward.
-            </div>
-          </div>
-        </div>
+      <StatusBar v={v} r={r} o={o} or={or} total={total} />
+      <div className="occ-chips">
+        <span className="tag v">{v} vacant</span>
+        <span className="tag r">{r} vac+res</span>
+        <span className="tag o">{o} occupied</span>
+        {or > 0 && <span className="tag or">{or} occ+res</span>}
       </div>
-    );
-  }
+    </div>
+  );
+}
+
+// ── Ward summary card (PRE Entry style) ──────────────────────────────────────
+function WardCard({ ward, index, onOpen }) {
+  const v  = ward.vacant   ?? 0;
+  const r  = ward.reserved ?? 0;
+  const o  = ward.occupied ?? 0;
+  const or = ward.occupied_reserved ?? 0;
+  const total = ward.total_beds ?? 0;
+
+  const warningBlock = (msg, title) => (
+    <div className="ward-card slide-up" style={{ animationDelay: index * 0.03 + "s", padding: 16, opacity: 0.8 }}>
+      <div className="row between" style={{ marginBottom: 14 }}>
+        <div>
+          {(ward.block_name || ward.floor_name) && (
+            <div className="dim" style={{ fontSize: 11, marginBottom: 2 }}>
+              {[ward.block_name, ward.floor_name].filter(Boolean).join(" · ")}
+            </div>
+          )}
+          <div style={{ fontWeight: 700, fontSize: 15 }}>{ward.name}</div>
+          <div className="dim" style={{ fontSize: 12 }}>{total} beds</div>
+        </div>
+        <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
+          <Ic d={icons.alert} s={12} /> {title}
+        </span>
+      </div>
+      <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: "14px 16px", display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <Ic d={icons.alert} s={16} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
+        <div className="dim" style={{ fontSize: 12 }}>{msg}</div>
+      </div>
+    </div>
+  );
+
+  if (ward.operational === false)
+    return warningBlock("This ward has been marked non-operational by the manager. Beds cannot be updated.", "Non-op");
+  if (ward.beds_warning)
+    return warningBlock("Contact your manager to assign beds to your account for this ward.", "No access");
 
   return (
     <div className="ward-card slide-up" style={{
-      animationDelay: index * 0.03 + "s",
-      padding: 16,
+      animationDelay: index * 0.03 + "s", padding: 16,
       display: "flex", flexDirection: "column",
+      borderColor: "var(--st-v)",
     }}>
       {/* Header */}
       <div className="row between" style={{ marginBottom: 14 }}>
@@ -113,44 +92,38 @@ function WardCard({ ward, index, onManage }) {
             </div>
           )}
           <div style={{ fontWeight: 700, fontSize: 15 }}>{ward.name}</div>
-          <div className="dim" style={{ fontSize: 12 }}>
-            {total} beds
-            {allVacant
-              ? <span style={{ color: "var(--st-v)" }}> · all vacant</span>
-              : <span style={{ color: "var(--primary)" }}> · complete</span>}
-          </div>
+          <div className="dim" style={{ fontSize: 12 }}>{total} beds</div>
         </div>
-        <span className="tag v"><Ic d={icons.check} s={12} /> ok</span>
+        <span className="tag v"><Ic d={icons.check} s={12} /> Complete</span>
       </div>
 
-      {/* Stats block */}
-      <div style={{
-        display: "flex", background: "var(--panel-2)",
-        borderRadius: 10, overflow: "hidden", marginBottom: 14,
-      }}>
+      {/* 4-column stats block */}
+      <div className="ward-stats-4">
         {[
-          { label: "Vacant",   val: counts.vn, color: "var(--st-v)"  },
-          { label: "Vac+Res",  val: counts.vr, color: "var(--st-vr)" },
-          { label: "Occupied", val: counts.on, color: "var(--st-o)"  },
-        ].map(({ label, val, color }, idx) => (
-          <div key={label} style={{
-            flex: 1, textAlign: "center", padding: "12px 6px",
-            borderLeft: idx > 0 ? "1px solid var(--line)" : "none",
-          }}>
+          { label: "Vacant",   val: v,  color: "var(--st-v)"  },
+          { label: "Vac+Res",  val: r,  color: "var(--st-vr)" },
+          { label: "Occupied", val: o,  color: "var(--st-o)"  },
+          { label: "Occ+Res",  val: or, color: "var(--st-or)" },
+        ].map(({ label, val, color }) => (
+          <div key={label} className="ws-col">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-              <span style={{ fontSize: 11, fontWeight: 500, color: "var(--ink-2)" }}>{label}</span>
+              <span className="ws-label">{label}</span>
             </div>
-            <div style={{ fontSize: 24, fontWeight: 800, color, lineHeight: 1 }}>{val}</div>
+            <div className="ws-val" style={{ color }}>{val}</div>
           </div>
         ))}
       </div>
 
       {/* Action buttons */}
-      <div className="row" style={{ gap: 8, marginTop: "auto" }}>
-        <button className="btn btn-primary" style={{ flex: 1, padding: "9px 0", fontSize: 13 }}
-          onClick={() => onManage(ward)}>
+      <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
+        <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
+          onClick={() => onOpen(ward, "manage")}>
           <Ic d={icons.bed} s={13} /> Manage Beds
+        </button>
+        <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
+          onClick={() => onOpen(ward, "discharge")}>
+          <Ic d={icons.clipboard} s={13} /> Discharges
         </button>
       </div>
     </div>
@@ -165,13 +138,12 @@ export default function NurseApp({ user, onLogout }) {
   const [loadError,   setLoadError]   = useState(null); // null | string — real network errors only
   const [configError, setConfigError] = useState(null); // null | string — account config issues
   const [openWard, setOpenWard] = useState(null); // { ward, tab } | null — full-page ward view
-  const [navTab, setNavTab] = useState("dash"); // "dash" | "beds" | "discharges"
+  const [navTab, setNavTab] = useState("dash"); // "dash" | "wards" | "discharges"
   const [stationFilter, setStationFilter] = useState("all"); // "all" | station id
+  const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [stationName, setStationName] = useState(user.nursing_station || "");
   const [stations,    setStations]    = useState([]); // [{id, name}] — every station this nurse covers
-  const [toast,       setToast]       = useState("");
-  const [lastSync,    setLastSync]    = useState(null);
-  const [liveKey,     setLiveKey]     = useState(0); // bumped on every live event — feeds the Dashboard tab
+  const [liveKey,     setLiveKey]     = useState(0); // bumped on every live event — feeds the Home dashboard
   // Home's summary numbers — computed server-side (DB aggregate, excludes
   // non-operational wards + Discharge Lounge) instead of reducing `wards` in
   // the browser. null until first load.
@@ -181,9 +153,6 @@ export default function NurseApp({ user, onLogout }) {
 
   // Derived: always the current ward object from live wards state
 
-  const showToast = useCallback((m) => {
-    setToast(m); setTimeout(() => setToast(""), 2200);
-  }, []);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -194,7 +163,6 @@ export default function NurseApp({ user, onLogout }) {
       setStationName(data.nursing_station || "");
       setStations(data.stations || []);
       setTotals(data.totals || null);
-      setLastSync(new Date());
     } catch (e) {
       const msg = e?.message ?? "";
       if (msg === "Unauthorized") return;
@@ -224,11 +192,10 @@ export default function NurseApp({ user, onLogout }) {
       if (!bedId && !wardId) return;
       // Reload to get fresh aggregate counts (vacant/reserved/occupied) for the ward cards
       loadRef.current();
-      setLastSync(new Date());
       setLiveKey(k => k + 1);
     });
 
-    socket.on("discharge:update", () => { loadRef.current(); setLastSync(new Date()); setLiveKey(k => k + 1); });
+    socket.on("discharge:update", () => { loadRef.current(); setLiveKey(k => k + 1); });
 
     // On reconnect, do a full reload to catch any updates missed while disconnected
     socket.on("connect", () => { loadRef.current(); setLiveKey(k => k + 1); });
@@ -253,7 +220,6 @@ export default function NurseApp({ user, onLogout }) {
           <div className="dim" style={{ marginTop: 12, fontSize: 13 }}>Loading…</div>
         </>
       )}
-      {toast && <div className="toast">{toast}</div>}
     </div>
     </div>
   );
@@ -264,21 +230,19 @@ export default function NurseApp({ user, onLogout }) {
   // first /nurse/me response lands.
   const totalWards = totals?.wards ?? 0;
   const totalBeds  = totals?.totalBeds ?? 0;
-  const totalVacant = totals?.totalVacant ?? 0;
-  const totalOcc     = totals?.totalOccupied ?? 0;
 
   return (
     <div className="preui">
     <AppShell
       menu={[
         { key: "dash",       icon: icons.home,      label: "Home" },
-        { key: "dashboard",  icon: icons.chart,     label: "Dashboard" },
-        { key: "beds",       icon: icons.bed,       label: "Manage Beds" },
+        { key: "wards",      icon: icons.bed,       label: "Wards" },
         { key: "discharges", icon: icons.clipboard, label: "Discharges" },
+        { key: "overstay",   icon: icons.alert,     label: "Overstay" },
       ]}
       active={navTab}
       onSelect={(k) => { setNavTab(k); setOpenWard(null); }}
-      title={{ dash: stations.length === 1 ? (stationName || "Home") : "Home", dashboard: "Dashboard", beds: "Manage Beds", discharges: "Discharges" }[navTab]}
+      title={openWard ? "Bed Entry" : { dash: "Home", wards: "Wards", discharges: "Discharges", overstay: "Overstay Alerts" }[navTab] || "Home"}
       user={{ name: user.name || user.username || "Nurse", role: "NURSE" }}
       onLogout={onLogout}
       topExtra={
@@ -287,10 +251,10 @@ export default function NurseApp({ user, onLogout }) {
         </button>
       }
     >
-      {navTab === "dashboard" ? (
-        <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "Nurse"} scope="nurse" />
-      ) : navTab === "discharges" ? (
+      {navTab === "discharges" ? (
         <DischargesPage role="NURSE" />
+      ) : navTab === "overstay" ? (
+        <OverstayPanel loadFn={api.nurseOverstay} />
       ) : openWard ? (
         <WardPage
           ward={{ ...openWard.ward, ward: openWard.ward.name }}
@@ -299,14 +263,17 @@ export default function NurseApp({ user, onLogout }) {
           allWards={[]}
           onBack={() => { setOpenWard(null); load(); }}
         />
-      ) : navTab === "beds" ? (<>
-      {/* Manage Beds — station picker + ward cards */}
-      {stations.length > 1 && (
-        <select className="field" aria-label="Filter by station" value={stationFilter}
-          onChange={(e) => setStationFilter(e.target.value)}
+      ) : navTab === "wards" ? (<>
+      {/* Occupancy summary bar */}
+      {wards.length > 0 && <NurseOccupancy wards={wards} />}
+
+      {/* Ward picker dropdown */}
+      {wards.length > 1 && (
+        <select className="field" aria-label="Filter by ward" value={wardFilter}
+          onChange={(e) => setWardFilter(e.target.value)}
           style={{ marginBottom: 14, maxWidth: 380, fontWeight: 600 }}>
-          <option value="all">All stations ({stations.length})</option>
-          {stations.map((st) => <option key={st.id} value={String(st.id)}>{st.name}</option>)}
+          <option value="all">All wards ({wards.length})</option>
+          {wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
         </select>
       )}
 
@@ -324,38 +291,55 @@ export default function NurseApp({ user, onLogout }) {
         stations
           .filter((st) => stationFilter === "all" || String(st.id) === stationFilter)
           .map((st) => {
-          const list = wards.filter((w) => w.station_id === st.id);
-          if (list.length === 0) return null;
-          const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
-          return (
-            <div key={st.id} style={{ marginBottom: 18 }}>
-              <div className="floor-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>{st.name}</span>
-                <span className="dim" style={{ fontSize: 11, fontWeight: 600 }}>
-                  {list.length} ward{list.length !== 1 ? "s" : ""} · {beds} beds
-                </span>
+            const list = wards.filter((w) =>
+              w.station_id === st.id && (wardFilter === "all" || String(w.id) === wardFilter)
+            );
+            if (list.length === 0) return null;
+            const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
+            return (
+              <div key={st.id} style={{ marginBottom: 18 }}>
+                <div className="floor-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>{st.name}</span>
+                  <span className="dim" style={{ fontSize: 11, fontWeight: 600 }}>
+                    {list.length} ward{list.length !== 1 ? "s" : ""} · {beds} beds
+                  </span>
+                </div>
+                <div className="card-grid">
+                  {list.map((ward, i) => (
+                    <WardCard key={ward.id} ward={ward} index={i}
+                      onOpen={(w, tab) => setOpenWard({ ward: w, tab })} />
+                  ))}
+                </div>
               </div>
-              <div className="card-grid">
-                {list.map((ward, i) => (
-                  <WardCard key={ward.id} ward={ward} index={i} onManage={(w) => setOpenWard({ ward: w, tab: "manage" })} />
-                ))}
-              </div>
-            </div>
-          );
-        })
+            );
+          })
       ) : (
-        <>
-          <div className="floor-head">Ward summary</div>
-          <div className="card-grid">
-            {wards.map((ward, i) => (
-              <WardCard key={ward.id} ward={ward} index={i} onManage={(w) => setOpenWard({ ward: w, tab: "manage" })} />
+        <div className="card-grid">
+          {wards
+            .filter((w) => wardFilter === "all" || String(w.id) === wardFilter)
+            .map((ward, i) => (
+              <WardCard key={ward.id} ward={ward} index={i}
+                onOpen={(w, tab) => setOpenWard({ ward: w, tab })} />
             ))}
-          </div>
-        </>
+        </div>
       )}
       </>) : (<>
-      {/* Dashboard — stats + clickable station directory */}
+      {/* Home — 3 summary cards + full hospital dashboard */}
       <div className="stat-grid" style={{ marginBottom: 14 }}>
+        <div className="stat">
+          <div className="row" style={{ gap: 10 }}>
+            <span className="ic"><Ic d={icons.grid} s={16} /></span>
+            <div className="n" style={{ fontSize: 18 }}>{totalWards}</div>
+          </div>
+          <div className="l">NURSING WARDS</div>
+        </div>
+        <div className="stat">
+          <div className="row" style={{ gap: 10 }}>
+            <span className="ic" style={{ background: "var(--st-v-bg)", color: "var(--st-v)" }}><Ic d={icons.bed} s={16} /></span>
+            <div className="n" style={{ fontSize: 18 }}>{totalBeds}</div>
+          </div>
+          <div className="l">BEDS ALLOCATED</div>
+        </div>
         <div className="stat">
           <div className="row" style={{ gap: 10 }}>
             <span className="ic"><Ic d={icons.building} s={16} /></span>
@@ -365,75 +349,10 @@ export default function NurseApp({ user, onLogout }) {
           </div>
           <div className="l">{stations.length > 1 ? "NURSING STATIONS" : "NURSING STATION"}</div>
         </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic"><Ic d={icons.grid} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{totalWards}</div>
-          </div>
-          <div className="l">TOTAL WARDS</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{ background: "var(--st-v-bg)", color: "var(--st-v)" }}><Ic d={icons.bed} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{totalBeds}</div>
-          </div>
-          <div className="l">TOTAL BEDS · {totalVacant} vacant · {totalOcc} occ</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{ background: "var(--st-vr-bg)", color: "var(--st-vr)" }}><Ic d={icons.clock} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>
-              {lastSync ? lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
-            </div>
-          </div>
-          <div className="l">LAST UPDATE</div>
-        </div>
       </div>
-
-      {wards.length === 0 ? (
-        <div className="card empty" style={{ marginTop: 20 }}>
-          <Ic d={icons.grid} s={32} />
-          <div style={{ marginTop: 10, fontWeight: 600 }}>
-            {configError ? "No nursing station assigned" : "No wards in this station"}
-          </div>
-          <div style={{ fontSize: 12, marginTop: 4, color: "var(--ink-3)" }}>
-            {configError ?? "Ask the Manager to assign wards to your nursing station."}
-          </div>
-        </div>
-      ) : stations.length > 1 ? (
-        <>
-          <div className="floor-head">Stations — tap to open its wards</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {stations.map((st) => {
-              // Same server-computed, operational/lounge-excluded totals as the
-              // headline cards above — see data.totals.byStation (nurse.ts /me).
-              const t = totals?.byStation?.[st.id] ?? { wards: 0, totalBeds: 0, totalVacant: 0, totalOccupied: 0 };
-              return (
-                <button key={st.id} className="card" style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-                  width: "100%", padding: "13px 16px", cursor: "pointer", textAlign: "left",
-                }} onClick={() => { setStationFilter(String(st.id)); setNavTab("beds"); }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{st.name}</div>
-                    <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-                      {t.wards} ward{t.wards !== 1 ? "s" : ""} · {t.totalBeds} beds · {t.totalVacant} vacant · {t.totalOccupied} occupied
-                    </div>
-                  </div>
-                  <Ic d={icons.chevron} s={15} style={{ color: "var(--ink-3)", flexShrink: 0 }} />
-                </button>
-              );
-            })}
-          </div>
-        </>
-      ) : (
-        <button className="btn btn-primary" onClick={() => setNavTab("beds")}>
-          <Ic d={icons.bed} s={15} /> Manage Beds
-        </button>
-      )}
+      <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "Nurse"} scope="nurse-full" />
       </>)}
 
-      {/* Toast */}
-      {toast && <div className="toast">{toast}</div>}
       <ProfileThemeRow />
     </AppShell>
     </div>
