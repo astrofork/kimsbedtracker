@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 
 export const Ic = ({ d, s = 22, style, className }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -372,7 +373,7 @@ export function useConfirm() {
     setState(null);
   };
 
-  const node = state ? (
+  const node = state ? createPortal(
     <ConfirmDialog
       title={state.title}
       message={state.message}
@@ -381,7 +382,8 @@ export function useConfirm() {
       danger={state.danger}
       onConfirm={() => close(true)}
       onCancel={() => close(false)}
-    />
+    />,
+    document.body
   ) : null;
 
   return [confirm, node];

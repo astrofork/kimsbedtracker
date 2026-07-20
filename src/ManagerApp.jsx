@@ -6834,3 +6834,243 @@ export function PayerTATManager({ showToast }) {
     </div>
   );
 }
+
+// ── Simple Login Manager (FC / Pharmacy with master variants) ───────────────
+
+const SIMPLE_LOGIN_TABS = [
+  { role: "FC", label: "FC" },
+  { role: "MASTER_FC", label: "Master FC" },
+  { role: "PHARMACY", label: "Pharmacy" },
+  { role: "MASTER_PHARMACY", label: "Master Pharmacy" },
+];
+
+function SimpleLoginEditor({ user, roleLabel, onClose, onSaved, showToast, activeRole }) {
+  useModal(onClose);
+  const isNew = !user;
+  const [username, setUsername] = useState(user?.username || "");
+  const [name, setName] = useState(user?.name || "");
+  const [password, setPassword] = useState("");
+  const [showPwd, setShowPwd] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Display name is required."); return; }
+    if (isNew) {
+      const uname = username.trim().toLowerCase();
+      if (!uname) { showToast("Username is required."); return; }
+      if (!/^[a-z0-9_]+$/.test(uname)) {
+        showToast("Username: letters, numbers, and underscores only.");
+        return;
+      }
+      if (!password) { showToast("Password is required."); return; }
+      if (password.length < 6) { showToast("Password must be at least 6 characters."); return; }
+    }
+    if (password && !isNew && password.length < 6) {
+      showToast("New password must be at least 6 characters."); return;
+    }
+    setBusy(true);
+    try {
+      if (isNew) {
+        await api.mgrCreateSimpleLogin(activeRole, username.trim().toLowerCase(), password, name.trim());
+      } else {
+        await api.mgrUpdateSimpleLogin(user.id, {
+          username: username.trim().toLowerCase(),
+          name: name.trim(),
+          ...(password ? { password } : {}),
+        });
+      }
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>{isNew ? `New ${roleLabel}` : `Edit ${user.name}`}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Display name</label>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder={`${roleLabel} user name`} maxLength={120} autoFocus />
+          <div style={{ height: 12 }} />
+
+          {isNew ? (
+            <>
+              <label className="label">Username <span className="dim" style={{ fontSize: 11 }}>(for login)</span></label>
+              <input className="field" value={username} autoCapitalize="none"
+                onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="pharmacy1" maxLength={60} />
+              <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+                Letters, numbers, and underscores only
+              </div>
+              <div style={{ height: 12 }} />
+            </>
+          ) : (
+            <>
+              <label className="label">Username</label>
+              <input className="field" value={username} autoCapitalize="none"
+                onChange={(e) => setUsername(e.target.value.toLowerCase())} maxLength={60} />
+              <div style={{ height: 12 }} />
+            </>
+          )}
+
+          <label className="label">{isNew ? "Password" : "New password (blank = keep current)"}</label>
+          <div style={{ position: "relative" }}>
+            <input className="field" type={showPwd ? "text" : "password"} value={password}
+              onChange={(e) => setPassword(e.target.value)} placeholder={isNew ? "min 6 characters" : "Unchanged"}
+              maxLength={72} style={{ paddingRight: 42 }} />
+            <button type="button" onClick={() => setShowPwd((v) => !v)}
+              style={{
+                position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+                background: "none", border: "none", padding: 0, cursor: "pointer",
+                color: "var(--ink-3)", display: "flex", alignItems: "center",
+              }}
+              aria-label={showPwd ? "Hide password" : "Show password"}
+            >
+              <Ic d={showPwd ? icons.eyeOff : icons.eye} s={18} />
+            </button>
+          </div>
+          <div style={{ height: 12 }} />
+
+          <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
+            {busy ? "Saving…" : isNew ? `Create ${roleLabel} user` : "Save changes"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function SimpleLoginManager({ showToast }) {
+  const [activeRole, setActiveRole] = useState("FC");
+  const [logins, setLogins] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ username: "", password: "", name: "" });
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async (role) => {
+    try {
+      const r = await api.mgrSimpleLogins(role || activeRole);
+      setLogins(r.logins || []);
+    } catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { load(activeRole); }, [activeRole]);
+
+  const openNew = () => {
+    setEditing("new");
+    setForm({ username: "", password: "", name: "" });
+    setErr("");
+  };
+  const openEdit = (u) => {
+    setEditing(u);
+    setForm({ username: u.username, password: "", name: u.name });
+    setErr("");
+  };
+
+  const save = async () => {
+    if (!form.name.trim() || !form.username.trim()) { setErr("Name and username are required"); return; }
+    if (editing === "new" && !form.password) { setErr("Password is required"); return; }
+    setBusy(true); setErr("");
+    try {
+      if (editing === "new") {
+        await api.mgrCreateSimpleLogin(activeRole, form.username.trim(), form.password, form.name.trim());
+        showToast("Login created");
+      } else {
+        await api.mgrUpdateSimpleLogin(editing.id, {
+          username: form.username.trim(),
+          name: form.name.trim(),
+          ...(form.password ? { password: form.password } : {}),
+        });
+        showToast("Login updated");
+      }
+      setEditing(null);
+      await load(activeRole);
+    } catch (e) { setErr(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (u) => {
+    const ok = await confirm({
+      title: `Delete "${u.name}"?`,
+      message: `Username: ${u.username}\nRole: ${u.role}\n\nThey will lose access immediately.`,
+      confirmLabel: "Delete", danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.mgrDeleteSimpleLogin(u.id);
+      showToast("Login deleted");
+      await load(activeRole);
+    } catch (e) { showToast(toastErr(e)); }
+  };
+
+  const tabLabel = SIMPLE_LOGIN_TABS.find(t => t.role === activeRole)?.label || activeRole;
+
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 4 }}>
+        <div className="h1" style={{ fontSize: 18 }}>FC & Pharmacy Users</div>
+        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }} onClick={openNew}>
+          <Ic d={icons.user} s={15} /> Add {tabLabel}
+        </button>
+      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+        Manage Finance Coordinator and Pharmacy logins. Master roles can approve reopen requests.
+      </div>
+
+      <div className="seg" style={{ marginBottom: 14, maxWidth: 500 }}>
+        {SIMPLE_LOGIN_TABS.map(t => (
+          <button key={t.role} className={activeRole === t.role ? "on" : ""} onClick={() => setActiveRole(t.role)}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {logins.map((u) => (
+        <div className="card" key={u.id} style={{ padding: 14, marginBottom: 10 }}>
+          <div className="row between">
+            <div className="row" style={{ gap: 10 }}>
+              <BlockAvatar code={(u.name || "?")[0]} size={36} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{u.name}</div>
+                <div className="dim" style={{ fontSize: 11 }}>
+                  @{u.username}
+                  {u.status === "inactive" && <span style={{ color: "var(--red)" }}> · inactive</span>}
+                </div>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="chip" onClick={() => openEdit(u)}>Edit</button>
+              <button className="chip" style={{ color: "var(--red)" }} onClick={() => remove(u)}>Delete</button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {logins.length === 0 && (
+        <div className="card empty" style={{ marginTop: 8 }}>
+          <Ic d={icons.user} s={28} />
+          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">No {tabLabel} users yet.</div>
+        </div>
+      )}
+
+      {editing && (
+        <SimpleLoginEditor
+          user={editing === "new" ? null : editing}
+          roleLabel={tabLabel}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(activeRole); showToast("Saved"); }}
+          showToast={showToast}
+          activeRole={activeRole}
+        />
+      )}
+
+      {confirmDialog}
+    </div>
+  );
+}

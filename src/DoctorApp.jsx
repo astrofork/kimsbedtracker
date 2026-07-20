@@ -332,6 +332,7 @@ export default function DoctorApp({ user, onLogout }) {
     const onChange = () => { loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); };
     socket.on("bed:update", onChange);
     socket.on("discharge:update", onChange);
+    socket.on("discharge:overstay", onChange);
     socket.on("connect", onChange);
     return () => { socket.disconnect(); };
   }, []);
@@ -377,7 +378,7 @@ export default function DoctorApp({ user, onLogout }) {
       title={title}
       user={{ name: user.name || user.username || "Doctor", role: "DOCTOR" }}
       onLogout={onLogout}
-      topExtra={<button onClick={load} className="appbar-btn" title="Refresh"><Ic d={icons.refresh} s={17} /></button>}
+      topExtra={null}
     >
       {ward ? (
         <WardPage

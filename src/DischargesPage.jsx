@@ -144,7 +144,7 @@ function DischargeCard({ row, onOpen }) {
  *  Tapping a card opens the full discharge page for that bed. Live via websocket.
  *  props: role ("PRE"|"NURSE"|"DOCTOR"), wards (PRE only, for Transfer),
  *  wardId (optional — scopes the list to a single ward, e.g. embedded in WardPage's Discharges tab) */
-export default function DischargesPage({ role, wards, wardId }) {
+export default function DischargesPage({ role, wards, wardId, onRequestReopen }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL | PLANNED | RUNNING
@@ -180,7 +180,7 @@ export default function DischargesPage({ role, wards, wardId }) {
         Discharge — {openBed.bed_name}
       </div>
       <div className="card" style={{ padding: "16px 18px" }}>
-        <DischargeTab bed={openBed} wards={wards} role={role} onChanged={load} />
+        <DischargeTab bed={openBed} wards={wards} role={role} onChanged={load} onRequestReopen={onRequestReopen} />
       </div>
     </div>
   );

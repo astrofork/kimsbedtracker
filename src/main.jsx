@@ -12,6 +12,7 @@ import NurseApp from "./NurseApp.jsx";
 import DoctorApp from "./DoctorApp.jsx";
 import ConsultantApp from "./ConsultantApp.jsx";
 import FCApp from "./FCApp.jsx";
+import PharmacyApp from "./PharmacyApp.jsx";
 
 // Apply saved theme before first paint — prevents flash-of-wrong-theme.
 initTheme();
@@ -84,11 +85,12 @@ function App() {
       )}
     </div>
   );
-  if (user.role === "FC")         return <><FCApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
+  if (user.role === "FC" || user.role === "MASTER_FC") return <><FCApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "COO")        return <><COOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "NURSE")      return <><NurseApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "DOCTOR")     return <><DoctorApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "CONSULTANT") return <><ConsultantApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
+  if (user.role === "PHARMACY" || user.role === "MASTER_PHARMACY") return <><PharmacyApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   return <><PREApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
 }
 

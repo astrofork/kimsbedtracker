@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { api, toastErr, createSocket, fmtRelative } from "./lib.js";
+import { api, toastErr, fmtRelative, createSocket } from "./lib.js";
 import { AppShell } from "./shell.jsx";
 import { Ic, icons } from "./ui.jsx";
 import { fmtIpLast6 } from "./bedUtils.js";
@@ -7,27 +7,25 @@ import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
 
 const SECTIONS = [
-  { key: "BILLING_STARTED", label: "Bill Prep Pending", color: "#d97706", bg: "#fef3c7", emptyIcon: icons.fileText, emptyMsg: "No bills awaiting prep." },
-  { key: "AUDIT", label: "Bill Audit Pending", color: "#2563eb", bg: "#dbeafe", emptyIcon: icons.clipboard, emptyMsg: "No bills awaiting audit." },
-  { key: "BILL_READY", label: "Bill Finalization Pending", color: "#7c3aed", bg: "#ede9fe", emptyIcon: icons.fileText, emptyMsg: "No bills awaiting finalization." },
-  { key: "PAYMENT", label: "Payment / Approval Pending", color: "#16a34a", bg: "#dcfce7", emptyIcon: icons.banknote, emptyMsg: "No payments pending." },
+  { key: "DRUG_RETURN", dataKey: "drugReturn", label: "Drug Return Pending", color: "#d97706", bg: "#fef3c7", emptyIcon: icons.fileText, emptyMsg: "All Drug Returns cleared." },
+  { key: "PHARMACY_CLEARANCE", dataKey: "pharmacyClearance", label: "Pharmacy Clearance Pending", color: "#2563eb", bg: "#dbeafe", emptyIcon: icons.clipboard, emptyMsg: "All Pharmacy Clearances done." },
+  { key: "PROCEDURE_RECONCILIATION", dataKey: "procedureReconciliation", label: "OT / Cat Clearance Pending", color: "#7c3aed", bg: "#ede9fe", emptyIcon: icons.fileText, emptyMsg: "All OT / Cat Clearances done." },
 ];
 
-const STEP_LABEL = { BILLING_STARTED: "Bill Prep", AUDIT: "Audit", BILL_READY: "Bill Finalized", PAYMENT: "Payment" };
+const STEP_LABEL = { DRUG_RETURN: "Drug Return", PHARMACY_CLEARANCE: "Pharmacy Clearance", PROCEDURE_RECONCILIATION: "OT / Cat Clearance" };
 
-const BILLING_STEPS_ORDER = [
-  { key: "BILLING_STARTED", col: "billing_started_status" },
-  { key: "AUDIT", col: "audit_status" },
-  { key: "BILL_READY", col: "bill_ready_status" },
-  { key: "PAYMENT", col: "payment_status" },
+const PHARMACY_STEPS_ORDER = [
+  { key: "DRUG_RETURN", col: "drug_return_status" },
+  { key: "PHARMACY_CLEARANCE", col: "pharmacy_clearance_status" },
+  { key: "PROCEDURE_RECONCILIATION", col: "procedure_reconciliation_status" },
 ];
 
-function completedBillingSteps(row) {
-  return BILLING_STEPS_ORDER.filter((s) => row[s.col] === "COMPLETED").map((s) => s.key);
+function completedPharmacySteps(row) {
+  return PHARMACY_STEPS_ORDER.filter((s) => row[s.col] === "COMPLETED").map((s) => s.key);
 }
 
-function FCCard({ row, color, onComplete, onRequestReopen, busy, isMaster }) {
-  const completed = onRequestReopen ? completedBillingSteps(row) : [];
+function PharmacyCard({ row, color, onComplete, onRequestReopen, busy, isMaster }) {
+  const completed = onRequestReopen ? completedPharmacySteps(row) : [];
 
   return (
     <div style={{
@@ -129,12 +127,82 @@ function CollapsibleSection({ section, rows, onComplete, onRequestReopen, busyId
               gap: 8,
             }}>
               {rows.map((row) => (
-                <FCCard key={row.admission_id} row={row} color={section.color}
+                <PharmacyCard key={row.admission_id} row={row} color={section.color}
                   onComplete={onComplete} onRequestReopen={onRequestReopen}
                   busy={busyId === row.admission_id} isMaster={isMaster} />
               ))}
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NaSection({ rows }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          background: "#f3f4f6", border: "none", borderRadius: 10, padding: "11px 14px",
+          cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <span style={{
+          width: 24, height: 24, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center",
+          background: "#6b7280", color: "#fff", fontSize: 15, fontWeight: 800, flexShrink: 0,
+        }}>
+          {open ? "−" : "+"}
+        </span>
+        <span style={{ fontWeight: 700, fontSize: 14, color: "#6b7280", flex: 1 }}>
+          OT / Cat Clearance — N/A
+        </span>
+        <span style={{
+          fontWeight: 800, fontSize: 12, color: "#fff", background: "#6b7280",
+          borderRadius: 99, padding: "3px 10px", minWidth: 26, textAlign: "center", flexShrink: 0,
+        }}>
+          {rows.length}
+        </span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(148px, 1fr))",
+            gap: 8,
+          }}>
+            {rows.map((row) => (
+              <div key={row.admission_id} style={{
+                display: "flex", flexDirection: "column", gap: 5,
+                background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12,
+                padding: "10px 11px", boxShadow: "var(--shadow)", textAlign: "left", minHeight: 90,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-.01em", lineHeight: 1.2 }}>
+                    {row.bed_name}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 800, color: "#6b7280", background: "#f3f4f6",
+                    borderRadius: 6, padding: "2px 6px",
+                  }}>N/A</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
+                  <span style={{ color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 }}>IP</span>
+                  <span style={{ fontWeight: 700, color: "var(--ink)" }}>{row.ip_last6 || "—"}</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
+                  <span style={{ color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 }}>Ward</span>
+                  <span style={{ fontWeight: 700, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={row.ward_name}>{row.ward_name}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 500 }}>
+                  {fmtRelative(row.updated_at)}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -187,7 +255,7 @@ function ReopenModal({ admissionId, stepKeys, onClose, onSubmitted, showToast })
     if (!reason.trim()) { showToast("Please provide a reason"); return; }
     setBusy(true);
     try {
-      await api.fcReopenRequest(admissionId, selectedStep, reason.trim());
+      await api.pharmacyReopenRequest(admissionId, selectedStep, reason.trim());
       onSubmitted();
     } catch (e) { showToast(toastErr(e)); setBusy(false); }
   };
@@ -232,7 +300,7 @@ function ReopenModal({ admissionId, stepKeys, onClose, onSubmitted, showToast })
   );
 }
 
-export default function FCApp({ user, onLogout }) {
+export default function PharmacyApp({ user, onLogout }) {
   const [tab, setTab] = useState("beds");
   const [data, setData] = useState(null);
   const [toast, setToast] = useState("");
@@ -243,29 +311,31 @@ export default function FCApp({ user, onLogout }) {
   const [reopenModal, setReopenModal] = useState(null);
   const [liveKey, setLiveKey] = useState(0);
   const loadRef = useRef(() => {});
-  const isMaster = user.role === "MASTER_FC";
+  const isMaster = user.role === "MASTER_PHARMACY";
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
 
   const load = useCallback(async () => {
     try {
-      const [pipeline, countRes] = await Promise.all([
-        api.dischargeBillingPipeline(),
-        isMaster ? api.fcReopenPendingCount() : Promise.resolve({ count: 0 }),
-      ]);
-      setData(pipeline);
-      setReopenPending(countRes.count || 0);
+      const r = await api.pharmacyDashboard();
+      setData({
+        DRUG_RETURN: r.drugReturn || [],
+        PHARMACY_CLEARANCE: r.pharmacyClearance || [],
+        PROCEDURE_RECONCILIATION: r.procedureReconciliation || [],
+        PROCEDURE_NA: r.procedureNA || [],
+      });
+      setReopenPending(r.reopenPending || 0);
       setLastSync(new Date());
     } catch (e) {
       if (e?.message === "Unauthorized") return;
       showToast(toastErr(e));
     }
-  }, [showToast, isMaster]);
+  }, [showToast]);
   loadRef.current = load;
 
   const loadRequests = useCallback(async () => {
     try {
-      const r = await api.fcReopenRequests();
+      const r = await api.pharmacyReopenRequests();
       setReopenRequests(r.requests || []);
     } catch (e) { showToast(toastErr(e)); }
   }, [showToast]);
@@ -279,12 +349,12 @@ export default function FCApp({ user, onLogout }) {
     socket.on("discharge:update", refresh);
     socket.on("discharge:overstay", refresh);
     socket.on("bed:update", refresh);
-    socket.on("fc:reopen-request", () => { loadRef.current(); setLiveKey(k => k + 1); if (tab === "requests") loadRequests(); });
+    socket.on("pharmacy:reopen-request", () => { loadRef.current(); setLiveKey(k => k + 1); if (tab === "requests") loadRequests(); });
     socket.on("connect", refresh);
     return () => { socket.disconnect(); };
   }, []);
 
-  const STEP_TOAST = { BILLING_STARTED: "Bill Prep done", AUDIT: "Audit done", BILL_READY: "Bill finalized", PAYMENT: "Payment complete" };
+  const STEP_TOAST = { DRUG_RETURN: "Drug Return done", PHARMACY_CLEARANCE: "Pharmacy Clearance done", PROCEDURE_RECONCILIATION: "OT / Cat Clearance done" };
   const completeStep = async (admissionId, stepKey) => {
     setBusyId(admissionId);
     const label = STEP_TOAST[stepKey] || "Step completed";
@@ -299,7 +369,7 @@ export default function FCApp({ user, onLogout }) {
   const reviewRequest = async (requestId, action) => {
     setBusyId(requestId);
     try {
-      await api.fcReviewRequest(requestId, action, null);
+      await api.pharmacyReviewRequest(requestId, action, null);
       showToast(action === "APPROVED" ? "Request approved — step reopened" : "Request denied");
       await loadRequests();
       await load();
@@ -334,19 +404,19 @@ export default function FCApp({ user, onLogout }) {
       menu={menu}
       active={tab}
       onSelect={setTab}
-      title={isMaster ? "Master FC" : "Finance Coordinator"}
-      user={{ name: user.name || user.username || "FC", role: isMaster ? "MASTER FC" : "FC" }}
+      title={isMaster ? "Master Pharmacy" : "Pharmacy"}
+      user={{ name: user.name || user.username || "Pharmacy", role: isMaster ? "MASTER PHARMACY" : "PHARMACY" }}
       onLogout={onLogout}
       topExtra={null}
     >
       {tab === "dashboard" && (
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{totalPending}</div><div className="l">TOTAL BILLING</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILLING_STARTED?.length || 0}</div><div className="l">PREP</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.AUDIT?.length || 0}</div><div className="l">AUDIT</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILL_READY?.length || 0}</div><div className="l">FINALIZE</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.PAYMENT?.length || 0}</div><div className="l">PAYMENT</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{totalPending}</div><div className="l">TOTAL PENDING</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.DRUG_RETURN?.length || 0}</div><div className="l">DRUG RETURN</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.PHARMACY_CLEARANCE?.length || 0}</div><div className="l">PHARMACY CLR</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.PROCEDURE_RECONCILIATION?.length || 0}</div><div className="l">OT / CAT CLR</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18, color: "#6b7280" }}>{data.PROCEDURE_NA?.length || 0}</div><div className="l">OT / CAT N/A</div></div>
             <div className="stat">
               <div className="n" style={{ fontSize: 18 }}>{lastSync ? lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</div>
               <div className="l">LAST UPDATE</div>
@@ -373,15 +443,19 @@ export default function FCApp({ user, onLogout }) {
               onComplete={(admissionId) => completeStep(admissionId, sec.key)} busyId={busyId}
               onRequestReopen={!isMaster ? handleRequestReopen : null} isMaster={isMaster} />
           ))}
+
+          {(data.PROCEDURE_NA?.length > 0) && (
+            <NaSection rows={data.PROCEDURE_NA} />
+          )}
         </>
       )}
 
       {tab === "beds" && (
-        <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "FC"} scope="fc" />
+        <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "Pharmacy"} scope="pharmacy" />
       )}
 
       {tab === "overstay" && (
-        <OverstayPanel loadFn={api.fcOverstay} />
+        <OverstayPanel loadFn={api.pharmacyOverstay} />
       )}
 
       {tab === "discharges" && (

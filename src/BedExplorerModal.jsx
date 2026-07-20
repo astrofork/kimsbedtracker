@@ -109,6 +109,8 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
 
   const [allBeds, setAllBeds] = useState(null);
   const [error, setError] = useState(null);
+  const [bxSearch, setBxSearch] = useState("");
+  const [bxSearchBy, setBxSearchBy] = useState("bed");
 
   useEffect(() => {
     let cancelled = false;
@@ -133,9 +135,22 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
     });
   }, [allBeds, wardIdSet, filter]);
 
+  const filteredBeds = useMemo(() => {
+    const q = bxSearch.trim().toLowerCase();
+    if (!q) return matchedBeds;
+    if (bxSearchBy === "ip") return matchedBeds.filter((b) => (b.ip_last6 || "").toLowerCase().includes(q));
+    if (bxSearchBy === "ward") {
+      return matchedBeds.filter((b) => {
+        const meta = wardMeta.get(b.ward_id);
+        return (meta?.ward || "").toLowerCase().includes(q);
+      });
+    }
+    return matchedBeds.filter((b) => (b.bed_name || "").toLowerCase().includes(q));
+  }, [matchedBeds, bxSearch, bxSearchBy, wardMeta]);
+
   const wardGroups = useMemo(() => {
     const byWard = new Map();
-    for (const b of matchedBeds) {
+    for (const b of filteredBeds) {
       if (!byWard.has(b.ward_id)) byWard.set(b.ward_id, []);
       byWard.get(b.ward_id).push(b);
     }
@@ -153,7 +168,7 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
         return { wardId, meta, beds, incomplete: meta.total != null && recordedCount < meta.total, recordedCount };
       })
       .sort((a, b) => (a.meta.ward || "").localeCompare(b.meta.ward || ""));
-  }, [matchedBeds, allBeds, wardIdSet, wardMeta]);
+  }, [filteredBeds, allBeds, wardIdSet, wardMeta]);
 
   const loading = allBeds === null && !error;
 
@@ -169,12 +184,33 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
             <div>
               <div className="h1" style={{ fontSize: 18 }}>{(entry?.label || "Beds").replace(/^admin:/, "")}</div>
               <div className="dim" style={{ fontSize: 12.5 }}>
-                {loading ? "Loading…" : `${matchedBeds.length} bed${matchedBeds.length === 1 ? "" : "s"}`}
+                {loading ? "Loading…"
+                  : filteredBeds.length === matchedBeds.length ? `${matchedBeds.length} bed${matchedBeds.length === 1 ? "" : "s"}`
+                  : `${filteredBeds.length} of ${matchedBeds.length} beds`}
               </div>
             </div>
           </div>
           <button className="bx-close" onClick={onClose} aria-label="Close"><Ic d={icons.x} s={18} /></button>
         </div>
+
+        {!loading && !error && matchedBeds.length > 0 && (
+          <div style={{ display: "flex", gap: 8, padding: "0 22px 10px", alignItems: "center" }}>
+            <div className="seg-pill" style={{ flexShrink: 0 }}>
+              {[{ value: "ward", label: "Ward" }, { value: "bed", label: "Bed" }, { value: "ip", label: "IP" }].map((o) => (
+                <button key={o.value} className={bxSearchBy === o.value ? "on" : ""}
+                  onClick={() => { setBxSearchBy(o.value); setBxSearch(""); }}>{o.label}</button>
+              ))}
+            </div>
+            <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+              <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", pointerEvents: "none", display: "flex" }}>
+                <Ic d={icons.search} s={14} />
+              </span>
+              <input className="field" value={bxSearch} onChange={(e) => setBxSearch(e.target.value)}
+                placeholder={bxSearchBy === "ip" ? "Search by IP…" : bxSearchBy === "ward" ? "Search by ward…" : "Search by bed name…"}
+                style={{ paddingLeft: 30, fontSize: 12, height: 32, width: "100%", borderRadius: 9 }} maxLength={40} />
+            </div>
+          </div>
+        )}
 
         <div className="bx-main">
           {error ? (
@@ -186,7 +222,9 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
           ) : wardGroups.length === 0 ? (
             <div className="card empty" style={{ margin: "8px 0" }}>
               <Ic d={icons.bed} s={26} />
-              <div style={{ marginTop: 10, fontWeight: 600 }}>No beds match this right now</div>
+              <div style={{ marginTop: 10, fontWeight: 600 }}>
+                {bxSearch.trim() ? "No beds match your search" : "No beds match this right now"}
+              </div>
             </div>
           ) : (
             wardGroups.map((g) => (
@@ -201,7 +239,7 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
                       {g.recordedCount} of {g.meta.total} beds in this ward have an individual record (Setup → Bed Master) — the rest are counted but can't be shown individually.
                     </div>
                   )}
-                  <div className="bx-bed-grid">
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(152px, 1fr))", gap: 8 }}>
                     {g.beds.map((b) => <BedCard key={b.id} bed={b} />)}
                   </div>
                 </div>
@@ -214,36 +252,43 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
   );
 }
 
+const KV = ({ label, value, title }) => (
+  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
+    <span style={{ color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 }}>{label}</span>
+    <span style={{ fontWeight: 700, color: "var(--ink)", textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>
+      {value}
+    </span>
+  </div>
+);
+
 function BedCard({ bed }) {
   const status = classify(bed);
   const meta = STATUS_META[status];
-  const rich = status === "OCC_RES" || status === "VAC_RES";
+  const badge = (status === "ON_BED" || status === "OCC_RES") ? dischargeBadge(bed.discharge_tracking) : null;
   return (
-    <div className={"bx-bed" + (rich ? " bx-bed-rich" : "")} style={{ borderColor: meta.color, background: meta.bg }}>
-      <div className="bx-bed-top">
-        <span className="bx-bed-name">{bed.bed_name}</span>
-        <span className="bx-bed-status" style={{ color: meta.color, background: meta.bg }}>{meta.label}</span>
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 5,
+      background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12,
+      padding: "10px 11px", boxShadow: "var(--shadow)", minHeight: 90,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: "-.01em", lineHeight: 1.2, wordBreak: "break-word" }}>
+          {bed.bed_name}
+        </span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: meta.color, background: meta.bg, padding: "2px 7px", borderRadius: 6, whiteSpace: "nowrap", flexShrink: 0 }}>
+          {meta.label}
+        </span>
       </div>
-      {(status === "ON_BED" || status === "OCC_RES") && dischargeBadge(bed.discharge_tracking) && (
-        <div className="bx-bed-row" style={{ fontSize: 11, fontWeight: 700, color: "var(--primary)" }}>
-          🏷 {dischargeBadge(bed.discharge_tracking)}
+      <KV label="IP" value={bed.ip_last6 || "—"} />
+      <KV label="Ward" value={bed.ward || "—"} title={bed.ward} />
+      {badge && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
+          <span style={{ color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 }}>Disch</span>
+          <span style={{ fontWeight: 700, color: "var(--primary)", textAlign: "right", whiteSpace: "nowrap" }}>{badge}</span>
         </div>
       )}
-      {rich && (
-        <div className="bx-bed-detail">
-          {status === "OCC_RES" ? (
-            <div className="bx-bed-row" title={bed.destination || ""}>
-              <Ic d={icons.share} s={12} /> <span className="bx-clamp2">{bed.destination || "Destination not specified"}</span>
-            </div>
-          ) : (
-            <div className="bx-bed-row" title={bed.reservation_note || ""}>
-              <Ic d={icons.fileText} s={12} /> <span className="bx-clamp2">{bed.reservation_note || "No note recorded"}</span>
-            </div>
-          )}
-        </div>
-      )}
-      <div className="bx-bed-time">
-        <Ic d={icons.clock} s={11} /> {fmtRelative(bed.updated_at)}
+      <div style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 500, marginTop: "auto" }}>
+        {fmtRelative(bed.updated_at)}
       </div>
     </div>
   );

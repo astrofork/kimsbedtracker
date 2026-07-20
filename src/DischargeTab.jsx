@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { api, toastErr, fmtDateTime, createSocket } from "./lib.js";
-import { Ic, icons } from "./ui.jsx";
+import { Ic, icons, useConfirm } from "./ui.jsx";
 import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 
 // Steps are organized into 5 groups. Groups run in parallel — none of them wait
@@ -13,25 +13,26 @@ import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 // documentation only — the UI renders each group as its own card with no
 // heading, so the labels aren't carried in the data.
 const STEPS = [
-  { key: "DISCHARGE_SUMMARY", label: "Discharge Initiate", roles: ["DOCTOR", "CONSULTANT"], group: 1 },
+  { key: "DISCHARGE_SUMMARY", label: "Discharge Initiate", roles: ["DOCTOR", "CONSULTANT"], group: 1, hidden: true },
   { key: "DISCHARGE_DOC",     label: "Discharge Summary", roles: ["DOCTOR", "CONSULTANT"], group: 1 },
-  { key: "DRUG_RETURN", label: "Drug Return", roles: ["PRE", "NURSE"], group: 2 },
-  { key: "PHARMACY_CLEARANCE", label: "Pharmacy Clearance", roles: ["PRE", "NURSE"], group: 2 },
-  { key: "PROCEDURE_RECONCILIATION", label: "Procedure Reconciliation (OT / Cath Lab)", roles: ["PRE"], allowNA: true, group: 2 },
-  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE"], group: 3 },
-  { key: "AUDIT", label: "Audit", roles: ["PRE"], group: 3 },
-  { key: "BILL_READY", label: "Bill Finalized", roles: ["FC"], group: 3 },
-  { key: "PAYMENT", label: "Payment Status", roles: ["FC"], group: 3 },
+  { key: "DRUG_RETURN", label: "Drug Return", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2 },
+  { key: "PHARMACY_CLEARANCE", label: "Pharmacy Clearance", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2, after: "DRUG_RETURN" },
+  { key: "PROCEDURE_RECONCILIATION", label: "Procedure Reconciliation (OT / Cath Lab)", roles: ["PRE"], allowNA: true, group: 2, after: "DRUG_RETURN" },
+  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
+  { key: "AUDIT", label: "Audit", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
+  { key: "BILL_READY", label: "Bill Finalized", roles: ["FC", "MASTER_FC"], group: 3 },
+  { key: "PAYMENT", label: "Payment Status", roles: ["FC", "MASTER_FC"], group: 3 },
   { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE"], group: 4 },
   { key: "PHYSICAL_CHECKOUT", label: "Physical Checkout", roles: ["PRE", "NURSE"], needsPatientLeft: true, group: 5 },
 ];
 const GROUPS = [...new Set(STEPS.map((s) => s.group))].map((id) => ({
-  id, steps: STEPS.filter((s) => s.group === id),
+  id, steps: STEPS.filter((s) => s.group === id && !s.hidden),
 }));
 // Every step System Checkout must wait on — everything except itself and Physical
 // Checkout (which runs after/parallel to it, not before). Mirrors the backend gate
 // in dischargeService.updateStep so the button reflects what the API will actually allow.
 const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !["SYSTEM_CHECKOUT", "PHYSICAL_CHECKOUT"].includes(s.key));
+const PRE_PHYSICAL_CHECKOUT_STEPS = STEPS.filter((s) => s.key !== "PHYSICAL_CHECKOUT");
 const PLAN_ROLES = ["PRE", "DOCTOR", "CONSULTANT"];
 
 // --ink-2 rather than --ink-3 for the neutral states: --ink-3 (#9CA3AF light) is
@@ -46,9 +47,13 @@ function todayStr(offsetDays = 0) {
   return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
-function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast }) {
+function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone }) {
   const [pickingLeft, setPickingLeft] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   const canAct = step.roles.includes(role);
+  const isPharmacyStep = ["DRUG_RETURN", "PHARMACY_CLEARANCE"].includes(step.key);
+  const isBillingStep = ["BILLING_STARTED", "AUDIT", "BILL_READY", "PAYMENT"].includes(step.key);
+  const canDirectReopen = !(role === "PHARMACY" && isPharmacyStep) && !(role === "FC" && isBillingStep);
   const showPatientLeft = step.needsPatientLeft && status === "COMPLETED";
 
   // SLA line — all values come from the backend's `workflow.phases`; this only
@@ -58,14 +63,17 @@ function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lock
   const tat = phase ? `TAT ${fmtMins(phase.expectedMinutes)}` : null;
   const slaLine = (() => {
     if (!phase) return null;
-    if (phase.state === "COMPLETED" && phase.completedAt) {
-      const took = phase.actualMinutes != null ? ` · took ${fmtMins(phase.actualMinutes)}` : "";
-      const late = phase.actualMinutes != null && phase.actualMinutes > phase.expectedMinutes;
-      return (
-        <span style={{ color: late ? "var(--amber)" : "var(--ink-2)" }}>
-          Done {fmtClock(phase.completedAt)}{took} · {tat}
-        </span>
-      );
+    if (phase.state === "COMPLETED") {
+      if (phase.completedAt) {
+        const took = phase.actualMinutes != null ? ` · took ${fmtMins(phase.actualMinutes)}` : "";
+        const late = phase.actualMinutes != null && phase.actualMinutes > phase.expectedMinutes;
+        return (
+          <span style={{ color: late ? "var(--amber)" : "var(--ink-2)" }}>
+            Done {fmtClock(phase.completedAt)}{took} · {tat}
+          </span>
+        );
+      }
+      return <span style={{ color: "var(--ink-2)" }}>Completed · {tat}</span>;
     }
     if (phase.startedAt) {
       return (
@@ -117,9 +125,22 @@ function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lock
       ) : pickingLeft ? (
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
           <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-            onClick={() => { setPickingLeft(false); onSetStatus(step.key, "COMPLETED", { patientLeft: true }); }}>Patient left: Yes</button>
+            onClick={async () => {
+              if (systemCheckoutDone) {
+                const ok = await confirm({
+                  title: "Confirm Patient Left",
+                  message: "This bed will become vacant and the discharge will be completed.\n\nThis action cannot be undone — there is no way to reopen after this.",
+                  confirmLabel: "Yes, Patient Left",
+                  cancelLabel: "Go Back",
+                  danger: true,
+                });
+                if (!ok) return;
+              }
+              setPickingLeft(false);
+              onSetStatus(step.key, "COMPLETED", { patientLeft: true });
+            }}>Patient Left</button>
           <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-            onClick={() => { setPickingLeft(false); onSetStatus(step.key, "COMPLETED", { patientLeft: false }); }}>No</button>
+            onClick={() => setPickingLeft(false)}>Cancel</button>
         </div>
       ) : (
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
@@ -127,29 +148,34 @@ function StepRow({ step, status, role, onSetStatus, busy, locked, lockedOn, lock
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
               onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</button>
           )}
-          {status !== "COMPLETED" && (
+          {status !== "COMPLETED" && status !== "NOT_APPLICABLE" && (
             <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
               onClick={() => step.needsPatientLeft ? setPickingLeft(true) : onSetStatus(step.key, "COMPLETED")}>
               Mark Completed
             </button>
           )}
-          {status !== "PENDING" && (
+          {status !== "PENDING" && canDirectReopen && (
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
               onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</button>
           )}
+          {status === "COMPLETED" && !canDirectReopen && onRequestReopen && (
+            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px", color: "var(--amber)" }} disabled={busy}
+              onClick={() => onRequestReopen(step.key)}>Request Reopen</button>
+          )}
         </div>
       )}
+      {confirmDialog}
     </div>
   );
 }
 
 function PlanSection({ bed, existing, onClose, onSaved }) {
-  const [option, setOption] = useState("today");
-  const [customDate, setCustomDate] = useState(existing?.planned_date || todayStr());
+  const [option, setOption] = useState("tomorrow");
+  const [customDate, setCustomDate] = useState(existing?.planned_date || todayStr(1));
   const [time, setTime] = useState(existing?.planned_time || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const plannedDate = option === "today" ? todayStr() : option === "tomorrow" ? todayStr(1) : customDate;
+  const plannedDate = option === "tomorrow" ? todayStr(1) : customDate;
 
   async function save() {
     setSaving(true); setError("");
@@ -165,7 +191,7 @@ function PlanSection({ bed, existing, onClose, onSaved }) {
   return (
     <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: 14, marginTop: 10 }}>
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        {[["today", "Today"], ["tomorrow", "Tomorrow"], ["custom", "Custom"]].map(([val, lbl]) => (
+        {[["tomorrow", "Tomorrow"], ["custom", "Custom"]].map(([val, lbl]) => (
           <button key={val} onClick={() => setOption(val)} style={{
             flex: 1, padding: "8px 0", borderRadius: 8, fontSize: 12, fontWeight: 700,
             border: `2px solid ${option === val ? "var(--primary)" : "var(--line)"}`,
@@ -294,7 +320,7 @@ function HistorySection({ admissionId }) {
  *  within this one panel instead of stacking separate popups. Bed Transfer lives
  *  outside this component now — see BedDetailSheet's top-level Actions row.
  *  props: bed { id, bed_name, ward_id }, role, onChanged */
-export default function DischargeTab({ bed, role, onChanged }) {
+export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) {
   const [admission, setAdmission] = useState(undefined);
   const [tracking, setTracking] = useState(null);
   // Backend-computed SLA view: per-phase deadlines/state plus the overall ETA.
@@ -305,8 +331,6 @@ export default function DischargeTab({ bed, role, onChanged }) {
   const [cancelReason, setCancelReason] = useState(null); // string | null (null = hidden)
   // PRE only, for now — see the "Physical Checkout while System Checkout is still
   // pending" fork below. true while the choice popup is open.
-  const [physicalFork, setPhysicalFork] = useState(false);
-  const [loungeMoved, setLoungeMoved] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -314,8 +338,18 @@ export default function DischargeTab({ bed, role, onChanged }) {
       setAdmission(r.admission);
       setTracking(r.tracking);
       setWorkflow(r.workflow ?? null);
-    } catch (e) { setError(toastErr(e)); }
-  }, [bed.id]);
+    } catch (e) {
+      const msg = toastErr(e);
+      if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
+        setAdmission(null);
+        setTracking(null);
+        setWorkflow(null);
+        onChanged?.();
+      } else {
+        setError(msg);
+      }
+    }
+  }, [bed.id, onChanged]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -348,36 +382,9 @@ export default function DischargeTab({ bed, role, onChanged }) {
   // Vacant (paperwork isn't done). PRE only for now; every other role keeps the
   // previous direct-complete behavior unchanged.
   const onStepAction = (step, status, opts = {}) => {
-    if (step === "PHYSICAL_CHECKOUT" && status === "COMPLETED" && opts.patientLeft === true
-        && role === "PRE" && tracking.system_checkout_status !== "COMPLETED") {
-      setPhysicalFork(true);
-      return;
-    }
     setStep(step, status, opts);
   };
 
-  const moveToLounge = async () => {
-    setBusy(true); setError("");
-    try {
-      await api.dischargeUpdateStep(tracking.admission_id, "PHYSICAL_CHECKOUT", "COMPLETED", { patientLeft: true });
-      await api.dischargeMoveToLounge(tracking.admission_id);
-      setPhysicalFork(false);
-      setLoungeMoved(true);
-      await refresh();
-    } catch (e) { setError(toastErr(e)); }
-    finally { setBusy(false); }
-  };
-
-  const completePhysicalAndSystem = async () => {
-    setBusy(true); setError("");
-    try {
-      await api.dischargeUpdateStep(tracking.admission_id, "PHYSICAL_CHECKOUT", "COMPLETED", { patientLeft: true });
-      await api.dischargeUpdateStep(tracking.admission_id, "SYSTEM_CHECKOUT", "COMPLETED");
-      setPhysicalFork(false);
-      await refresh();
-    } catch (e) { setError(toastErr(e)); }
-    finally { setBusy(false); }
-  };
   const initiate = async () => {
     setBusy(true);
     try { await api.dischargeInitiate(tracking.admission_id); await refresh(); }
@@ -403,16 +410,7 @@ export default function DischargeTab({ bed, role, onChanged }) {
   if (admission === null) return (
     <div className="card empty" style={{ padding: 20, marginTop: 4 }}>
       <Ic d={icons.bed} s={24} />
-      {loungeMoved ? (
-        <>
-          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: "var(--st-v)" }}>Moved to Discharge Lounge</div>
-          <div style={{ marginTop: 4, fontSize: 12 }} className="dim">
-            This bed is now vacant — the discharge continues on a lounge bed pending System Checkout.
-          </div>
-        </>
-      ) : (
-        <div style={{ marginTop: 8, fontSize: 13 }} className="dim">No active patient admission on this bed.</div>
-      )}
+      <div style={{ marginTop: 8, fontSize: 13 }} className="dim">No active patient admission on this bed.</div>
     </div>
   );
 
@@ -466,19 +464,22 @@ export default function DischargeTab({ bed, role, onChanged }) {
           </div>
 
           {/* Delay detail — named phases, so it's actionable rather than just a flag. */}
-          {workflow?.delayed?.length > 0 && (
-            <div style={{
-              display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 12,
-              background: "var(--red-bg)", borderRadius: 10, padding: "9px 12px",
-            }}>
-              <Ic d={icons.alert} s={14} style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} />
-              <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--red)" }}>
-                {workflow.delayed.length === 1 ? "1 phase is" : `${workflow.delayed.length} phases are`} past the expected time:{" "}
-                {workflow.phases.filter(p => p.state === "DELAYED")
-                  .map(p => `${p.label} (${fmtMins(p.overdueMinutes)} over)`).join(", ")}
+          {(() => {
+            const visibleDelayed = workflow?.phases?.filter(p => p.state === "DELAYED" && !STEPS.find(s => s.key === p.key)?.hidden) || [];
+            if (!visibleDelayed.length) return null;
+            return (
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 12,
+                background: "var(--red-bg)", borderRadius: 10, padding: "9px 12px",
+              }}>
+                <Ic d={icons.alert} s={14} style={{ color: "var(--red)", flexShrink: 0, marginTop: 1 }} />
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--red)" }}>
+                  {visibleDelayed.length === 1 ? "1 phase is" : `${visibleDelayed.length} phases are`} past the expected time:{" "}
+                  {visibleDelayed.map(p => `${p.label} (${fmtMins(p.overdueMinutes)} over)`).join(", ")}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {tracking.status === "PLANNED" && section === "plan" && (
             <PlanSection bed={bed} existing={tracking} onClose={() => setSection(null)} onSaved={refresh} />
@@ -513,29 +514,37 @@ export default function DischargeTab({ bed, role, onChanged }) {
                   }}>
                     {g.steps.map((step, i) => {
                       const status = tracking[step.key.toLowerCase() + "_status"];
-                      const prev = i > 0 ? g.steps[i - 1] : null;
-                      const prevStatus = prev ? tracking[prev.key.toLowerCase() + "_status"] : null;
+                      // Explicit dependency (parallel fan-out) overrides the default
+                      // "previous sibling in this group" sequential chain.
+                      const depStep = step.after
+                        ? STEPS.find((s) => s.key === step.after)
+                        : (i > 0 ? g.steps[i - 1] : null);
+                      const depStatus = depStep ? tracking[depStep.key.toLowerCase() + "_status"] : null;
                       // System Checkout is a lone step in its own group, so the normal
                       // "previous step in this group" check never fires for it — it needs
                       // every OTHER step in the flow done first, not just one.
-                      const pendingBeforeCheckout = step.key === "SYSTEM_CHECKOUT"
+                      const pendingBefore = step.key === "SYSTEM_CHECKOUT"
                         ? PRE_SYSTEM_CHECKOUT_STEPS.filter((s) => !["COMPLETED", "NOT_APPLICABLE"].includes(tracking[s.key.toLowerCase() + "_status"]))
+                        : step.key === "PHYSICAL_CHECKOUT"
+                        ? PRE_PHYSICAL_CHECKOUT_STEPS.filter((s) => !["COMPLETED", "NOT_APPLICABLE"].includes(tracking[s.key.toLowerCase() + "_status"]))
                         : [];
-                      const locked = step.key === "SYSTEM_CHECKOUT"
-                        ? status === "PENDING" && pendingBeforeCheckout.length > 0
-                        : status === "PENDING" && !!prev && !["COMPLETED", "NOT_APPLICABLE"].includes(prevStatus);
-                      const lockedOn = step.key === "SYSTEM_CHECKOUT"
-                        ? (pendingBeforeCheckout.length === 1
-                            ? pendingBeforeCheckout[0].label
-                            : `${pendingBeforeCheckout.length} steps`)
-                        : (locked ? prev.label : null);
-                      const lockedTitle = step.key === "SYSTEM_CHECKOUT" && pendingBeforeCheckout.length > 1
-                        ? pendingBeforeCheckout.map((s) => s.label).join(", ")
+                      const locked = (step.key === "SYSTEM_CHECKOUT" || step.key === "PHYSICAL_CHECKOUT")
+                        ? status === "PENDING" && pendingBefore.length > 0
+                        : status === "PENDING" && !!depStep && !["COMPLETED", "NOT_APPLICABLE"].includes(depStatus);
+                      const lockedOn = (step.key === "SYSTEM_CHECKOUT" || step.key === "PHYSICAL_CHECKOUT")
+                        ? (pendingBefore.length === 1
+                            ? pendingBefore[0].label
+                            : `${pendingBefore.length} steps`)
+                        : (locked ? depStep.label : null);
+                      const lockedTitle = (step.key === "SYSTEM_CHECKOUT" || step.key === "PHYSICAL_CHECKOUT") && pendingBefore.length > 1
+                        ? pendingBefore.map((s) => s.label).join(", ")
                         : undefined;
                       return (
                         <StepRow key={step.key} step={step} role={role} busy={busy} status={status}
                           locked={locked} lockedOn={locked ? lockedOn : null} lockedTitle={lockedTitle}
-                          onSetStatus={onStepAction} patientLeft={tracking.patient_left}
+                          onSetStatus={onStepAction} onRequestReopen={onRequestReopen ? (stepKey) => onRequestReopen(bed.admission_id, stepKey) : null}
+                          patientLeft={tracking.patient_left}
+                          systemCheckoutDone={tracking.system_checkout_status === "COMPLETED"}
                           phase={phaseByKey.get(step.key)} isLast={i === g.steps.length - 1} />
                       );
                     })}
@@ -543,27 +552,6 @@ export default function DischargeTab({ bed, role, onChanged }) {
                 ))}
               </div>
 
-              {physicalFork && (
-                <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: 14, marginBottom: 14 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 3 }}>Patient has left — System Checkout isn't done yet</div>
-                  <div className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
-                    This bed can't stay Occupied. Move it to the Discharge Lounge and free it up now,
-                    or complete System Checkout in the same step and finish the discharge.
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button className="btn btn-primary" style={{ flex: "1 1 160px", fontSize: 12.5 }}
-                      disabled={busy} onClick={moveToLounge}>
-                      <Ic d={icons.exchange} s={13} /> Move to Discharge Lounge
-                    </button>
-                    <button className="btn btn-ghost" style={{ flex: "1 1 160px", fontSize: 12.5 }}
-                      disabled={busy} onClick={completePhysicalAndSystem}>
-                      Mark System Checkout Complete Too
-                    </button>
-                  </div>
-                  <button className="btn btn-ghost" style={{ width: "100%", marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}
-                    disabled={busy} onClick={() => setPhysicalFork(false)}>Back</button>
-                </div>
-              )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 {canPlan && (

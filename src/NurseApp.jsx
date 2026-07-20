@@ -196,6 +196,7 @@ export default function NurseApp({ user, onLogout }) {
     });
 
     socket.on("discharge:update", () => { loadRef.current(); setLiveKey(k => k + 1); });
+    socket.on("discharge:overstay", () => { loadRef.current(); setLiveKey(k => k + 1); });
 
     // On reconnect, do a full reload to catch any updates missed while disconnected
     socket.on("connect", () => { loadRef.current(); setLiveKey(k => k + 1); });
@@ -245,11 +246,7 @@ export default function NurseApp({ user, onLogout }) {
       title={openWard ? "Bed Entry" : { dash: "Home", wards: "Wards", discharges: "Discharges", overstay: "Overstay Alerts" }[navTab] || "Home"}
       user={{ name: user.name || user.username || "Nurse", role: "NURSE" }}
       onLogout={onLogout}
-      topExtra={
-        <button onClick={load} className="appbar-btn" title="Refresh">
-          <Ic d={icons.refresh} s={17} />
-        </button>
-      }
+      topExtra={null}
     >
       {navTab === "discharges" ? (
         <DischargesPage role="NURSE" />

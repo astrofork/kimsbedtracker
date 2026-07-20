@@ -290,8 +290,10 @@ export const api = {
   dischargesForWard: (wardId) => req(`/discharge/ward/${wardId}`),
   dischargesActive: (wardId) => req("/discharge/active" + (wardId ? `?wardId=${wardId}` : "")),
   dischargesPendingStep: (step) => req(`/discharge/pending?step=${step}`),
+  dischargeBillingPipeline: () => req("/discharge/billing-pipeline"),
   dischargesAdmittedToday: () => req("/discharge/admitted-today"),
   dischargesCancelledToday: () => req("/discharge/cancelled-today"),
+  dischargesInitiatedToday: () => req("/discharge/initiated-today"),
   dischargesCompletedToday: () => req("/discharge/completed-today"),
   dischargesPatientLeft: () => req("/discharge/patient-left"),
   transferCandidates: (wardId) => req(`/discharge/transfer/candidates?wardId=${wardId}`),
@@ -311,6 +313,10 @@ export const api = {
   consultantBedDetails: () => req("/consultant/bed-details"),
   consultantAdminDashboard: (unit) => req(`/consultant/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   consultantPayerTypes: () => req("/consultant/payer-types"),
+  consultantAdminDashboardHistory: (u) => req(`/consultant/admin-dashboard-history${u && u !== "TOTAL" ? `?unit=${encodeURIComponent(u)}` : ""}`),
+  consultantConsultants: () => req("/consultant/consultants"),
+  consultantSnapshots: () => req("/consultant/snapshots"),
+  consultantOverstay: () => req("/consultant/overstay"),
   // ── Discharge phase SLAs ────────────────────────────────────────────────────
   dischargePhaseConfig: () => req("/discharge/phase-config"),
   mgrDischargePhases: () => req("/manager/discharge-phases"),
@@ -332,6 +338,44 @@ export const api = {
     const s = qs.toString();
     return req(`/consultant/my-discharges${s ? "?" + s : ""}`);
   },
+  // ── Pharmacy ──────────────────────────────────────────────────────────────
+  pharmacyDashboard: () => req("/pharmacy/dashboard"),
+  pharmacyReopenRequest: (admissionId, stepKey, reason) =>
+    req("/pharmacy/reopen-request", { method: "POST", body: JSON.stringify({ admissionId, stepKey, reason }) }),
+  pharmacyReopenRequests: () => req("/pharmacy/reopen-requests"),
+  pharmacyReviewRequest: (id, action, reviewNote) =>
+    req(`/pharmacy/reopen-requests/${id}/review`, { method: "POST", body: JSON.stringify({ action, reviewNote }) }),
+  pharmacyLiveWards: () => req("/pharmacy/live-wards"),
+  pharmacyBedDetails: (wardId) => req(`/pharmacy/bed-details${wardId ? "?ward=" + wardId : ""}`),
+  pharmacyAdminDashboard: (u) => req(`/pharmacy/admin-dashboard${u ? "?unit=" + u : ""}`),
+  pharmacyAdminDashboardHistory: (u) => req(`/pharmacy/admin-dashboard-history${u ? "?unit=" + u : ""}`),
+  pharmacyConsultants: () => req("/pharmacy/consultants"),
+  pharmacyPayerTypes: () => req("/pharmacy/payer-types"),
+  pharmacySnapshots: () => req("/pharmacy/snapshots"),
+  pharmacyOverstay: () => req("/pharmacy/overstay"),
+  // ── FC reopen requests ────────────────────────────────────────────────────
+  fcReopenPendingCount: () => req("/fc/reopen-pending-count"),
+  fcReopenRequest: (admissionId, stepKey, reason) =>
+    req("/fc/reopen-request", { method: "POST", body: JSON.stringify({ admissionId, stepKey, reason }) }),
+  fcReopenRequests: () => req("/fc/reopen-requests"),
+  fcReviewRequest: (id, action, reviewNote) =>
+    req(`/fc/reopen-requests/${id}/review`, { method: "POST", body: JSON.stringify({ action, reviewNote }) }),
+  fcLiveWards: () => req("/fc/live-wards"),
+  fcBedDetails: (wardId) => req(`/fc/bed-details${wardId ? "?ward=" + wardId : ""}`),
+  fcAdminDashboard: (u) => req(`/fc/admin-dashboard${u ? "?unit=" + u : ""}`),
+  fcAdminDashboardHistory: (u) => req(`/fc/admin-dashboard-history${u ? "?unit=" + u : ""}`),
+  fcConsultants: () => req("/fc/consultants"),
+  fcPayerTypes: () => req("/fc/payer-types"),
+  fcSnapshots: () => req("/fc/snapshots"),
+  fcOverstay: () => req("/fc/overstay"),
+  // ── Simple logins (FC, Pharmacy) — admin management ───────────────────────
+  mgrSimpleLogins: (role) => req(`/manager/simple-logins?role=${role}`),
+  mgrCreateSimpleLogin: (role, username, password, name) =>
+    req("/manager/simple-logins", { method: "POST", body: JSON.stringify({ role, username, password, name }) }),
+  mgrUpdateSimpleLogin: (id, data) =>
+    req(`/manager/simple-logins/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  mgrDeleteSimpleLogin: (id) =>
+    req(`/manager/simple-logins/${id}`, { method: "DELETE" }),
 };
 
 // ---- WebSocket ----

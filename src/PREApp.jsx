@@ -30,12 +30,12 @@ export const PRE_CFG = {
 
 export default function PREApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("home");
-  const [data,      setData]      = useState(null);
-  const [loading,   setLoading]   = useState(true);
-  const [loadError,   setLoadError]   = useState(null); // null | string — real network errors
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null); // null | string — real network errors
   const [configError, setConfigError] = useState(null); // null | string — account config issues
-  const [toast,     setToast]     = useState("");
-  const [liveKey,   setLiveKey]   = useState(0); // bumped on every live event — feeds the Dashboard tab
+  const [toast, setToast] = useState("");
+  const [liveKey, setLiveKey] = useState(0); // bumped on every live event — feeds the Dashboard tab
   const loadRef = useRef(null);
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
@@ -64,12 +64,13 @@ export default function PREApp({ user, meta, onLogout }) {
   useEffect(() => {
     const socket = createSocket();
     const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
-    socket.on("bed:update",       refresh); // ward counts changed
+    socket.on("bed:update", refresh); // ward counts changed
     socket.on("discharge:update", refresh); // discharge step/plan/transfer changed
-    socket.on("round:submit",     refresh); // round submitted → alarm clears
-    socket.on("alarm:active",     refresh); // scheduler fired → alarm state changed
+    socket.on("discharge:overstay", refresh); // 60-min overstay timer fired
+    socket.on("round:submit", refresh); // round submitted → alarm clears
+    socket.on("alarm:active", refresh); // scheduler fired → alarm state changed
     socket.on("ward:operational", refresh); // manager toggled ward operational status
-    socket.on("connect",          refresh); // reconnect → catch missed updates
+    socket.on("connect", refresh); // reconnect → catch missed updates
     return () => { socket.disconnect(); };
   }, []);
 
@@ -104,7 +105,7 @@ export default function PREApp({ user, meta, onLogout }) {
         <AppShell
           menu={[]}
           active=""
-          onSelect={() => {}}
+          onSelect={() => { }}
           title="PRE Dashboard"
           user={{ name: user.username, role: "PRE" }}
           onLogout={onLogout}
@@ -148,10 +149,10 @@ export default function PREApp({ user, meta, onLogout }) {
   }
 
   const menu = [
-    { key: "home",       icon: icons.home,      label: "Home" },
-    { key: "entry",      icon: icons.bed,       label: "Entry", dot: alarmActive },
+    { key: "home", icon: icons.home, label: "Home" },
+    { key: "entry", icon: icons.bed, label: "Entry", dot: alarmActive },
     { key: "discharges", icon: icons.clipboard, label: "Discharges" },
-    { key: "overstay",   icon: icons.alert,     label: "Overstay" },
+    { key: "overstay", icon: icons.alert, label: "Overstay" },
   ];
 
   return (
@@ -277,9 +278,9 @@ function Home({ data, setTab, alarmActive }) {
 
       <div className="floor-head">Wards summary</div>
       <div className="stat-grid">
-        <div className="stat"><div className="n" style={{ color: "var(--st-v)"  }}>{s.wardsDone > 0 ? s.v  : "–"}</div><div className="l">VACANT</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--st-vr)" }}>{s.wardsDone > 0 ? s.r  : "–"}</div><div className="l">VAC + RES</div></div>
-        <div className="stat"><div className="n" style={{ color: "var(--st-o)"  }}>{s.wardsDone > 0 ? s.o  : "–"}</div><div className="l">OCCUPIED</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-v)" }}>{s.wardsDone > 0 ? s.v : "–"}</div><div className="l">VACANT</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-vr)" }}>{s.wardsDone > 0 ? s.r : "–"}</div><div className="l">VAC + RES</div></div>
+        <div className="stat"><div className="n" style={{ color: "var(--st-o)" }}>{s.wardsDone > 0 ? s.o : "–"}</div><div className="l">OCCUPIED</div></div>
         <div className="stat"><div className="n" style={{ color: "var(--st-or)" }}>{s.wardsDone > 0 ? s.or : "–"}</div><div className="l">OCC + RES</div></div>
       </div>
 
@@ -342,96 +343,96 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
         const visibleWards = block.wards.filter((w) => wardFilter === "all" || String(w.id) === wardFilter);
         if (visibleWards.length === 0) return null;
         return (
-        <div key={block.id}>
-          {(data.blocks ?? []).length > 1 && (
-            <div className="floor-head" style={{ marginTop: bi > 0 ? 24 : 0, marginBottom: 12 }}>
-              {block.name}
-              <span className="chip" style={{ marginLeft: 8, fontSize: 11, verticalAlign: "middle" }}>
-                {visibleWards.length} ward{visibleWards.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-          )}
-          <div className="card-grid">
-            {visibleWards.map((w, i) => {
-              const entered = w.vacant !== null;
-              const nonOp = w.operational === false;
-              return (
-                <div className="ward-card slide-up" key={w.id}
-                  style={{
-                    animationDelay: i * 0.03 + "s",
-                    borderColor: nonOp ? "var(--line)" : entered ? "var(--st-v)" : "var(--line)",
-                    padding: 16,
-                    display: "flex", flexDirection: "column",
-                    opacity: nonOp ? 0.75 : 1,
-                  }}>
-                  {/* Header */}
-                  <div className="row between" style={{ marginBottom: (entered && !nonOp) ? 14 : 12 }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
-                      <div className="dim" style={{ fontSize: 12 }}>{w.total} beds</div>
-                    </div>
-                    {/* One success state only — the badge is the single source of
+          <div key={block.id}>
+            {(data.blocks ?? []).length > 1 && (
+              <div className="floor-head" style={{ marginTop: bi > 0 ? 24 : 0, marginBottom: 12 }}>
+                {block.name}
+                <span className="chip" style={{ marginLeft: 8, fontSize: 11, verticalAlign: "middle" }}>
+                  {visibleWards.length} ward{visibleWards.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+            )}
+            <div className="card-grid">
+              {visibleWards.map((w, i) => {
+                const entered = w.vacant !== null;
+                const nonOp = w.operational === false;
+                return (
+                  <div className="ward-card slide-up" key={w.id}
+                    style={{
+                      animationDelay: i * 0.03 + "s",
+                      borderColor: nonOp ? "var(--line)" : entered ? "var(--st-v)" : "var(--line)",
+                      padding: 16,
+                      display: "flex", flexDirection: "column",
+                      opacity: nonOp ? 0.75 : 1,
+                    }}>
+                    {/* Header */}
+                    <div className="row between" style={{ marginBottom: (entered && !nonOp) ? 14 : 12 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{w.ward}</div>
+                        <div className="dim" style={{ fontSize: 12 }}>{w.total} beds</div>
+                      </div>
+                      {/* One success state only — the badge is the single source of
                         truth; the old "· complete" subtitle said the same thing. */}
-                    {nonOp
-                      ? <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
+                      {nonOp
+                        ? <span className="tag" style={{ background: "var(--warn-bg, #fff3cd)", color: "var(--warn, #b45309)" }}>
                           <Ic d={icons.alert} s={12} /> Non-op
                         </span>
-                      : entered
-                        ? <span className="tag v"><Ic d={icons.check} s={12} /> Complete</span>
-                        : <span className="tag b">no data</span>}
-                  </div>
-
-                  {/* Non-operational warning */}
-                  {nonOp && (
-                    <div style={{
-                      background: "var(--panel-2)", borderRadius: 10, padding: "12px 14px",
-                      display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14,
-                    }}>
-                      <Ic d={icons.alert} s={15} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
-                      <div className="dim" style={{ fontSize: 12 }}>
-                        Ward non-operational — excluded from this round.
-                      </div>
+                        : entered
+                          ? <span className="tag v"><Ic d={icons.check} s={12} /> Complete</span>
+                          : <span className="tag b">no data</span>}
                     </div>
-                  )}
 
-                  {/* Stats block */}
-                  {entered && !nonOp && (
-                    <div className="ward-stats-4">
-                      {[
-                        { label: "Vacant",   val: w.vacant,                color: "var(--st-v)"  },
-                        { label: "Vac+Res",  val: w.reserved  ?? 0,        color: "var(--st-vr)" },
-                        { label: "Occupied", val: w.occupied  ?? 0,        color: "var(--st-o)"  },
-                        { label: "Occ+Res",  val: w.occupied_reserved ?? 0, color: "var(--st-or)" },
-                      ].map(({ label, val, color }) => (
-                        <div key={label} className="ws-col">
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                            <span className="ws-label">{label}</span>
-                          </div>
-                          <div className="ws-val" style={{ color }}>{val}</div>
+                    {/* Non-operational warning */}
+                    {nonOp && (
+                      <div style={{
+                        background: "var(--panel-2)", borderRadius: 10, padding: "12px 14px",
+                        display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 14,
+                      }}>
+                        <Ic d={icons.alert} s={15} style={{ color: "var(--warn, #b45309)", flexShrink: 0, marginTop: 1 }} />
+                        <div className="dim" style={{ fontSize: 12 }}>
+                          Ward non-operational — excluded from this round.
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    )}
 
-                  {/* Action buttons — each opens the full-page ward view on its tab */}
-                  {!nonOp && (
-                    <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
-                      <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
-                        onClick={() => setOpenWard({ ward: w, tab: "manage" })}>
-                        <Ic d={icons.bed} s={13} /> Manage Beds
-                      </button>
-                      <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
-                        onClick={() => setOpenWard({ ward: w, tab: "discharge" })}>
-                        <Ic d={icons.clipboard} s={13} /> Discharges
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    {/* Stats block */}
+                    {entered && !nonOp && (
+                      <div className="ward-stats-4">
+                        {[
+                          { label: "Vacant", val: w.vacant, color: "var(--st-v)" },
+                          { label: "Vac+Res", val: w.reserved ?? 0, color: "var(--st-vr)" },
+                          { label: "Occupied", val: w.occupied ?? 0, color: "var(--st-o)" },
+                          { label: "Occ+Res", val: w.occupied_reserved ?? 0, color: "var(--st-or)" },
+                        ].map(({ label, val, color }) => (
+                          <div key={label} className="ws-col">
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 5, marginBottom: 6 }}>
+                              <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                              <span className="ws-label">{label}</span>
+                            </div>
+                            <div className="ws-val" style={{ color }}>{val}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Action buttons — each opens the full-page ward view on its tab */}
+                    {!nonOp && (
+                      <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
+                        <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
+                          onClick={() => setOpenWard({ ward: w, tab: "manage" })}>
+                          <Ic d={icons.bed} s={13} /> Manage Beds
+                        </button>
+                        <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
+                          onClick={() => setOpenWard({ ward: w, tab: "discharge" })}>
+                          <Ic d={icons.clipboard} s={13} /> Discharges
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
         );
       })}
 
@@ -511,8 +512,8 @@ function MyMap({ data }) {
                 </div>
                 {entered
                   ? <span className="tag" style={{ background: full ? "var(--st-o-bg)" : "var(--panel-2)", color: full ? "var(--st-o)" : "var(--ink-2)" }}>
-                      {full ? "FULL" : wPct + "% full"}
-                    </span>
+                    {full ? "FULL" : wPct + "% full"}
+                  </span>
                   : <span className="tag b">not entered</span>}
               </div>
               {entered && (
@@ -564,7 +565,7 @@ const STATE_KEY = (p, r) =>
 const STATE_LABEL = (p, r) =>
   p === "OCCUPIED" ? (r === "RESERVED" ? "OCC[RES]" : "OCCUPIED") : (r === "RESERVED" ? "VAC[RES]" : "VACANT");
 
-export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
+export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardLabel, hideDoctorDept }) {
   const sk = STATE_KEY(bed.physical_status, bed.reservation_status);
   const dimmed = bed.operational_status === false;
   const occupied = bed.physical_status === "OCCUPIED";
@@ -573,7 +574,7 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
   // planned-but-not-initiated discharge shouldn't show on the bed card yet.
   const dischargeStarted = !!badge && bed.discharge_tracking?.status !== "PLANNED";
   const color = bedStateColor(bed.physical_status, bed.reservation_status);
-  const bg    = bedStateBg(bed.physical_status, bed.reservation_status);
+  const bg = bedStateBg(bed.physical_status, bed.reservation_status);
   // Overstay — System Checkout done but the patient hasn't actually left yet
   // (same condition the Admin dashboard counts as "overstay"). patient_left can
   // never be true here while still Occupied — completeIfEligible vacates the bed
@@ -581,7 +582,7 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
   const overstay = occupied && bed.discharge_tracking?.system_checkout_status === "COMPLETED"
     && bed.discharge_tracking?.patient_left !== true;
   const hasRows = !!(
-    (occupied && (bed.payer_type || bed.ip_last6 || bed.admission_type || bed.consultant_name || bed.department_name)) || dischargeStarted ||
+    (occupied && (bed.payer_type || bed.ip_last6 || bed.admission_type || (!hideDoctorDept && (bed.consultant_name || bed.department_name)))) || dischargeStarted ||
     (occupied && bed.reservation_status === "RESERVED" && bed.destination) ||
     (!occupied && bed.reservation_status === "RESERVED" && bed.reservation_note)
   );
@@ -600,6 +601,9 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
           <Ic d={icons.alert} s={11} /> Patient Not Left
         </div>
       )}
+      {wardLabel && (
+        <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", letterSpacing: ".02em", marginBottom: -2, paddingTop: 2 }}>{wardLabel}</div>
+      )}
       <div className="pbed-head">
         <span className="pbed-name">{bed.bed_name}</span>
         <span className={`pbadge ${sk}`}>{STATE_LABEL(bed.physical_status, bed.reservation_status)}</span>
@@ -612,10 +616,10 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
       {occupied && bed.ip_last6 && (
         <div className="pbed-kv"><span className="pk">IP</span><span className="pv" title={bed.ip_last6}>{bed.ip_last6}</span></div>
       )}
-      {occupied && bed.consultant_name && (
+      {!hideDoctorDept && occupied && bed.consultant_name && (
         <div className="pbed-kv"><span className="pk">Dr</span><span className="pv" title={bed.consultant_name}>{bed.consultant_name}</span></div>
       )}
-      {occupied && bed.department_name && (
+      {!hideDoctorDept && occupied && bed.department_name && (
         <div className="pbed-kv"><span className="pk">Dept</span><span className="pv" title={bed.department_name}>{bed.department_name}</span></div>
       )}
       {occupied && bed.payer_type && (
@@ -655,9 +659,9 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick }) {
 // permanent inline section fighting Physical Status/Payer for space.
 function ReservationPopup({ bed, destinations, onClose, onSave }) {
   useModal(onClose);
-  const [val,     setVal]     = useState(bed.reservation_status);
-  const [dest,    setDest]    = useState(bed.destination || "");
-  const [saving,  setSaving]  = useState(false);
+  const [val, setVal] = useState(bed.reservation_status);
+  const [dest, setDest] = useState(bed.destination || "");
+  const [saving, setSaving] = useState(false);
   const needsDest = val === "RESERVED";
 
   async function save() {
@@ -742,14 +746,14 @@ function planPopupTodayStr(offsetDays = 0) {
 // Schedule keeps the familiar Today/Tomorrow/Custom + time picker.
 function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
   useModal(onClose);
-  const [mode,       setMode]       = useState(null); // null | "schedule"
-  const [option,     setOption]     = useState("today"); // today | tomorrow | custom
-  const [customDate, setCustomDate] = useState(planPopupTodayStr());
-  const [time,       setTime]       = useState("");
-  const [saving,     setSaving]     = useState(false);
-  const [error,      setError]      = useState("");
+  const [mode, setMode] = useState(null); // null | "schedule"
+  const [option, setOption] = useState("tomorrow"); // tomorrow | custom
+  const [customDate, setCustomDate] = useState(planPopupTodayStr(1));
+  const [time, setTime] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const plannedDate = option === "today" ? planPopupTodayStr() : option === "tomorrow" ? planPopupTodayStr(1) : customDate;
+  const plannedDate = option === "tomorrow" ? planPopupTodayStr(1) : customDate;
 
   async function initiateNow() {
     setSaving(true); setError("");
@@ -798,7 +802,7 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
           {mode === "schedule" && (
             <>
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                {[["today", "Today"], ["tomorrow", "Tomorrow"], ["custom", "Custom"]].map(([val, lbl]) => (
+                {[["tomorrow", "Tomorrow"], ["custom", "Custom"]].map(([val, lbl]) => (
                   <button key={val} onClick={() => setOption(val)} style={{
                     flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 12.5, fontWeight: 700,
                     border: `2px solid ${option === val ? "var(--primary)" : "var(--line)"}`,
@@ -831,17 +835,18 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
 }
 
 // ── Bed status dialog — centered popup ────────────────────────────────────────
-function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG, onToast, onTransferred, payerTypes = [], destinations = [], departments = [] }) {
-  const [physical,     setPhysical]     = useState(bed.physical_status);
-  const [reservation,  setReservation]  = useState(bed.reservation_status);
-  const [payer,        setPayer]        = useState(bed.payer_type || "");
-  const [destination,  setDestination]  = useState(bed.destination || "");
-  const [resNote,      setResNote]      = useState(bed.reservation_note || "");
-  const [saving,       setSaving]       = useState(false);
-  const [ipLast6,      setIpLast6]      = useState("");
+export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG, onToast, onTransferred, payerTypes = [], destinations = [], departments = [] }) {
+  const [physical, setPhysical] = useState(bed.physical_status);
+  const [reservation, setReservation] = useState(bed.reservation_status);
+  const [payer, setPayer] = useState(bed.payer_type || "");
+  const [destination, setDestination] = useState(bed.destination || "");
+  const [resNote, setResNote] = useState(bed.reservation_note || "");
+  const [saving, setSaving] = useState(false);
+  const [ipLast6, setIpLast6] = useState("");
   const [admissionType, setAdmissionType] = useState("");
   const [consultantName, setConsultantName] = useState("");
   const [departmentName, setDepartmentName] = useState("");
+  const [allDoctors, setAllDoctors] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [selectedDeptId, setSelectedDeptId] = useState(null);
   const [selectedDoctorId, setSelectedDoctorId] = useState(null);
@@ -868,19 +873,26 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
   // wiping the seeded doctor the moment selectedDeptId changes, which it otherwise
   // does on every normal "user picked a different department" change.
   const skipDoctorResetRef = useRef(false);
+  const prevDeptIdRef = useRef(selectedDeptId);
+  useEffect(() => {
+    api.doctors().then(r => setAllDoctors(r.doctors || [])).catch(() => { });
+  }, []);
   useEffect(() => {
     if (selectedDeptId) {
-      api.doctors(selectedDeptId).then(r => setDoctors(r.doctors || [])).catch(() => {});
+      setDoctors(allDoctors.filter(d => d.departments?.some(dep => dep.id === selectedDeptId)));
     } else {
-      setDoctors([]);
+      setDoctors(allDoctors);
     }
+    const deptChanged = prevDeptIdRef.current !== selectedDeptId;
+    prevDeptIdRef.current = selectedDeptId;
+    if (!deptChanged) return;
     if (skipDoctorResetRef.current) {
       skipDoctorResetRef.current = false;
     } else {
       setSelectedDoctorId(null);
       setDoctorSearch("");
     }
-  }, [selectedDeptId]);
+  }, [selectedDeptId, allDoctors]);
 
   function openEditPatientInfo() {
     skipDoctorResetRef.current = true;
@@ -973,22 +985,28 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
             </div>
           )}
         </div>
-        {/* Doctor dropdown — filtered by selected department */}
+        {/* Doctor dropdown — always enabled, filtered by department if one is selected */}
         <div ref={doctorRef} style={{ flex: "1 1 160px", position: "relative" }}>
-          <input className="field" style={{ width: "100%", opacity: selectedDeptId ? 1 : 0.5, borderColor: selectedDeptId && !selectedDoctorId ? "var(--red)" : undefined }}
-            placeholder={selectedDeptId ? "Select consultant" : "Select dept first"}
-            disabled={!selectedDeptId}
-            value={doctorOpen ? doctorSearch : (doctors.find(d => d.id === selectedDoctorId)?.name || "")}
+          <input className="field" style={{ width: "100%", borderColor: !selectedDoctorId ? "var(--red)" : undefined }}
+            placeholder="Select consultant"
+            value={doctorOpen ? doctorSearch : (doctors.find(d => d.id === selectedDoctorId)?.name || allDoctors.find(d => d.id === selectedDoctorId)?.name || "")}
             onFocus={() => { setDoctorOpen(true); setDoctorSearch(""); }}
             onChange={(e) => setDoctorSearch(e.target.value)} />
           {selectedDoctorId && !doctorOpen && (
             <span onClick={() => { setSelectedDoctorId(null); setDoctorSearch(""); setConsultantName(""); }}
               style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "var(--ink-3)", fontSize: 16, lineHeight: 1 }}>&times;</span>
           )}
-          {doctorOpen && selectedDeptId && (
+          {doctorOpen && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
               {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).map(d => (
-                <div key={d.id} onClick={() => { setSelectedDoctorId(d.id); setConsultantName(d.name); setDoctorOpen(false); setDoctorSearch(""); }}
+                <div key={d.id} onClick={() => {
+                  setSelectedDoctorId(d.id); setConsultantName(d.name); setDoctorOpen(false); setDoctorSearch("");
+                  if (!selectedDeptId && d.departments?.length === 1) {
+                    skipDoctorResetRef.current = true;
+                    setSelectedDeptId(d.departments[0].id);
+                    setDepartmentName(d.departments[0].name);
+                  }
+                }}
                   style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
                   onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
@@ -996,7 +1014,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
                 </div>
               ))}
               {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).length === 0 && (
-                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No doctors in this department</div>
+                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No consultants found</div>
               )}
             </div>
           )}
@@ -1059,7 +1077,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
     if (needsIp && !selectedDoctorId) return;
     setSaving(true);
     const payerArg = physical === "VACANT" ? null : needsIp ? (payer || null) : undefined;
-    const destinationArg = (!showActionsRow && needsDestination) ? destination : undefined;
+    const destinationArg = (physical === "OCCUPIED" && reservation === "RESERVED") ? (destination || bed.destination || undefined) : undefined;
     const resNoteArg = (!showActionsRow && showResNote) ? resNote : undefined;
     const ipArg = needsIp ? ipLast6 : undefined;
     const admissionTypeArg = needsIp ? admissionType : undefined;
@@ -1078,7 +1096,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
   }
 
   const savedSk = STATE_KEY(bed.physical_status, bed.reservation_status);
-  const liveSk  = STATE_KEY(physical, reservation);
+  const liveSk = STATE_KEY(physical, reservation);
 
   // Full-page discharge view — "Discharge Details" navigates here, back returns to the bed.
   if (dischargeOpen) return (
@@ -1107,9 +1125,6 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
       {/* Title — name · unit · operational · saved status · live selection */}
       <div className="row" style={{ gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
         <span style={{ fontWeight: 800, fontSize: 24, letterSpacing: "-.02em" }}>{bed.bed_name}</span>
-        <span className="chip" style={{ fontSize: 11, padding: "6px 12px" }}>
-          <Ic d={icons.bed} s={13} /> {bed.bed_type || "Census"} Bed
-        </span>
         {bed.unit_type && (
           <span className="chip" style={{ fontSize: 11, padding: "6px 12px" }}>
             <Ic d={icons.building} s={13} /> {bed.unit_type}
@@ -1121,6 +1136,9 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
           color: bed.operational_status !== false ? "var(--st-v)" : "var(--st-or)",
         }}>
           <Ic d={icons.settings} s={12} /> {bed.operational_status !== false ? "Operational" : "Non-operational"}
+        </span>
+        <span className="chip" style={{ fontSize: 11, padding: "6px 12px" }}>
+          <Ic d={icons.bed} s={13} /> {bed.bed_type || "Census"} Bed
         </span>
         <span className={`pbadge ${savedSk}`} style={{ gap: 5, padding: "6px 12px", fontSize: 10.5 }}>
           <Ic d={bed.physical_status === "OCCUPIED" ? icons.user : icons.bed} s={12} />
@@ -1233,7 +1251,7 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
         )}
         {bed.physical_status === "OCCUPIED" && dischargeBadge(bed.discharge_tracking) && (
           <div className="pdlg-row" style={{ padding: "10px 0" }}>
-            <span className="k row" style={{ gap: 10 }}><Ic d={icons.clipboard} s={16} /> Discharge</span>
+            <span className="k row" style={{ gap: 10 }}><Ic d={icons.clipboard} s={16} /> Discharge Status</span>
             <span className="v" style={{ color: "var(--st-vr)" }}>
               {dischargeBadge(bed.discharge_tracking)}
               {dischargeProgress(bed.discharge_tracking) && (() => {
@@ -1268,119 +1286,119 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
 
       <div>
 
-          {/* Physical Status — first: this decides what the rest of the form asks for. */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-              Physical Status
-            </div>
-            {cfg.readOnly ? (
-              <div style={{ display: "flex", gap: 10 }}>
-                {[["VACANT","var(--st-v)","Vacant"],["OCCUPIED","var(--st-o)","Occupied"]].map(([val, c, lbl]) => (
-                  <div key={val} style={{
-                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
-                    border: `2px solid ${physical === val ? c : "var(--line)"}`,
-                    background: physical === val ? c : "var(--panel)",
-                    color: physical === val ? "#fff" : "var(--ink-2)",
-                    opacity: physical === val ? 1 : 0.4,
-                  }}><Ic d={icons.bed} s={16} /> {lbl}</div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ display: "flex", gap: 10 }}>
-                {[["VACANT","var(--st-v)","Vacant"],["OCCUPIED","var(--st-o)","Occupied"]].map(([val, c, lbl]) => (
-                  <button key={val} onClick={() => handleSetPhysical(val)} style={{
-                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
-                    border: `2px solid ${physical === val ? c : "var(--line)"}`,
-                    background: physical === val ? c : "var(--panel)",
-                    color: physical === val ? "#fff" : "var(--ink-2)",
-                    cursor: "pointer", transition: "all 0.15s",
-                  }}><Ic d={icons.bed} s={16} /> {lbl}</button>
-                ))}
-              </div>
-            )}
+        {/* Physical Status — first: this decides what the rest of the form asks for. */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+            Physical Status
           </div>
+          {cfg.readOnly ? (
+            <div style={{ display: "flex", gap: 10 }}>
+              {[["VACANT", "var(--st-v)", "Vacant"], ["OCCUPIED", "var(--st-o)", "Occupied"]].map(([val, c, lbl]) => (
+                <div key={val} style={{
+                  flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                  border: `2px solid ${physical === val ? c : "var(--line)"}`,
+                  background: physical === val ? c : "var(--panel)",
+                  color: physical === val ? "#fff" : "var(--ink-2)",
+                  opacity: physical === val ? 1 : 0.4,
+                }}><Ic d={icons.bed} s={16} /> {lbl}</div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 10 }}>
+              {[["VACANT", "var(--st-v)", "Vacant"], ["OCCUPIED", "var(--st-o)", "Occupied"]].map(([val, c, lbl]) => (
+                <button key={val} onClick={() => handleSetPhysical(val)} style={{
+                  flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                  border: `2px solid ${physical === val ? c : "var(--line)"}`,
+                  background: physical === val ? c : "var(--panel)",
+                  color: physical === val ? "#fff" : "var(--ink-2)",
+                  cursor: "pointer", transition: "all 0.15s",
+                }}><Ic d={icons.bed} s={16} /> {lbl}</button>
+              ))}
+            </div>
+          )}
+        </div>
 
-          {/* Patient Section — required when a Vacant bed is about to become Occupied.
+        {/* Patient Section — required when a Vacant bed is about to become Occupied.
               Future: full IP number will come from HIS; this is manual for V1. Consultant/Dept
               is a plain field for now — it'll become an admin-configured dropdown (Setup) later. */}
-          {needsIp && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Admission Type <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
-              </div>
-              <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-                {[["IP", "IP"], ["DAYCARE", "Daycare"], ["OPD", "OPD"]].map(([val, lbl]) => (
-                  <button key={val} onClick={() => setAdmissionType(val)} style={{
-                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
-                    border: `2px solid ${admissionType === val ? "var(--primary)" : "var(--line)"}`,
-                    background: admissionType === val ? "var(--primary)" : "var(--panel)",
-                    color: admissionType === val ? "#fff" : "var(--ink-2)",
-                    cursor: "pointer", transition: "all 0.15s",
-                  }}><Ic d={icons.stethoscope} s={16} /> {lbl}</button>
-                ))}
-              </div>
-              {!admissionType && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: -10, marginBottom: 16 }}>Select an admission type.</div>
-              )}
-
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Patient — Last 6 Digits of IP Number <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
-              </div>
-              <input className="field" inputMode="numeric" maxLength={6} value={ipLast6}
-                placeholder="e.g. 123456"
-                onChange={(e) => setIpLast6(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                style={{ borderColor: !ipValid ? "var(--red)" : undefined }} />
-              {!ipValid && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Enter exactly 6 digits.</div>
-              )}
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 16, marginBottom: 10 }}>
-                Department &amp; Consultant <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
-              </div>
-              {renderDeptDoctorPicker()}
-              {!selectedDeptId && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a department.</div>
-              )}
-              {selectedDeptId && !selectedDoctorId && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a consultant.</div>
-              )}
+        {needsIp && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Admission Type <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
             </div>
-          )}
-
-          {/* Payer type — only needed for fresh admission (VACANT → OCCUPIED); for occupied beds edit via Patient Information */}
-          {needsIp && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Payer Type <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
-              </div>
-              <div style={{ position: "relative" }}>
-                <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", pointerEvents: "none" }}>
-                  <Ic d={icons.wallet} s={16} />
-                </span>
-                <select className="field" value={payer}
-                  onChange={(e) => setPayer(e.target.value)}
-                  style={{ paddingLeft: 40, borderColor: !payer ? "var(--red)" : undefined }}>
-                  <option value="">— Select payer type —</option>
-                  {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
-                </select>
-              </div>
-              {!payer && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Payer type is required for new admissions.</div>
-              )}
+            <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+              {[["IP", "IP"], ["DAYCARE", "Daycare"], ["OPD", "OPD"]].map(([val, lbl]) => (
+                <button key={val} onClick={() => setAdmissionType(val)} style={{
+                  flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                  border: `2px solid ${admissionType === val ? "var(--primary)" : "var(--line)"}`,
+                  background: admissionType === val ? "var(--primary)" : "var(--panel)",
+                  color: admissionType === val ? "#fff" : "var(--ink-2)",
+                  cursor: "pointer", transition: "all 0.15s",
+                }}><Ic d={icons.stethoscope} s={16} /> {lbl}</button>
+              ))}
             </div>
-          )}
+            {!admissionType && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: -10, marginBottom: 16 }}>Select an admission type.</div>
+            )}
 
-          {/* Status — Reservation / Bed Transfer / Discharge. Only once a bed is
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Patient — Last 6 Digits of IP Number <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            <input className="field" inputMode="numeric" maxLength={6} value={ipLast6}
+              placeholder="e.g. 123456"
+              onChange={(e) => setIpLast6(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              style={{ borderColor: !ipValid ? "var(--red)" : undefined }} />
+            {!ipValid && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Enter exactly 6 digits.</div>
+            )}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 16, marginBottom: 10 }}>
+              Department &amp; Consultant <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            {renderDeptDoctorPicker()}
+            {!selectedDeptId && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a department.</div>
+            )}
+            {selectedDeptId && !selectedDoctorId && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a consultant.</div>
+            )}
+          </div>
+        )}
+
+        {/* Payer type — only needed for fresh admission (VACANT → OCCUPIED); for occupied beds edit via Patient Information */}
+        {needsIp && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Payer Type <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            <div style={{ position: "relative" }}>
+              <span style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", pointerEvents: "none" }}>
+                <Ic d={icons.wallet} s={16} />
+              </span>
+              <select className="field" value={payer}
+                onChange={(e) => setPayer(e.target.value)}
+                style={{ paddingLeft: 40, borderColor: !payer ? "var(--red)" : undefined }}>
+                <option value="">— Select payer type —</option>
+                {payerTypes.map(pt => <option key={pt.id} value={pt.name}>{pt.name}</option>)}
+              </select>
+            </div>
+            {!payer && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Payer type is required for new admissions.</div>
+            )}
+          </div>
+        )}
+
+        {/* Status — Reservation / Bed Transfer / Discharge. Only once a bed is
               already saved Occupied (not while admitting). */}
-          {showActionsRow && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Status
-              </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                {!cfg.readOnly && (
+        {showActionsRow && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Status
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {!cfg.readOnly && (
                 <button onClick={() => setReservationOpen(true)} style={{
                   display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
                   background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
@@ -1390,79 +1408,85 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
                   Reservation
                   <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{bed.reservation_status === "RESERVED" ? "Reserved" : "None"}</span>
                 </button>
-                )}
-                {cfg.role === "PRE" && (
-                  <button onClick={() => setTransferOpen(true)} style={{
-                    display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
-                    background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
-                    padding: "12px 14px", fontSize: 13, fontWeight: 600, color: "var(--ink)", cursor: "pointer",
-                  }}>
-                    <Ic d={icons.exchange} s={15} style={{ color: "var(--primary)" }} />
-                    Bed Transfer
-                  </button>
-                )}
-                <button onClick={() => {
-                  // No plan yet and this role is allowed to make one — ask Initiate
-                  // Now vs Schedule first, instead of dropping into an empty form.
-                  // Otherwise (already planned/running, or a role that can't plan
-                  // e.g. Nurse) go straight to the full Discharge Details page.
-                  const canPlanRole = cfg.role === "PRE" || cfg.role === "DOCTOR" || cfg.role === "CONSULTANT";
-                  if (!bed.discharge_tracking && canPlanRole) setDischargePlanOpen(true);
-                  else setDischargeOpen(true);
-                }} style={{
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
-                  flex: "1 1 100%", borderRadius: 999, padding: "12px 14px", fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
-                  background: "var(--blue-bg)", color: "var(--blue)",
+              )}
+              {cfg.role === "PRE" && (
+                <button onClick={() => setTransferOpen(true)} style={{
+                  display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
+                  background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
+                  padding: "12px 14px", fontSize: 13, fontWeight: 600, color: "var(--ink)", cursor: "pointer",
                 }}>
-                  <Ic d={icons.fileText} s={14} /> Discharge
+                  <Ic d={icons.exchange} s={15} style={{ color: "var(--primary)" }} />
+                  Bed Transfer
                 </button>
-              </div>
+              )}
+              <button onClick={() => {
+                // No plan yet and this role is allowed to make one — ask Initiate
+                // Now vs Schedule first, instead of dropping into an empty form.
+                // Otherwise (already planned/running, or a role that can't plan
+                // e.g. Nurse) go straight to the full Discharge Details page.
+                const canPlanRole = cfg.role === "PRE" || cfg.role === "DOCTOR" || cfg.role === "CONSULTANT";
+                if (!bed.discharge_tracking && canPlanRole) setDischargePlanOpen(true);
+                else setDischargeOpen(true);
+              }} style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
+                flex: "1 1 100%", borderRadius: 999, padding: "12px 14px", fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
+                background: "var(--blue-bg)", color: "var(--blue)",
+              }}>
+                <Ic d={icons.fileText} s={14} /> Discharge
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Reservation Status — inline only while the bed is (or is becoming) Vacant.
+        {/* Reservation Status — inline only while the bed is (or is becoming) Vacant.
               Occupied+Reserved is never set here; it's decided later, via the Reservation
               popup in the Actions row, only after the bed has already been saved Occupied. */}
-          {showReservationInline && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Reservation Status
-              </div>
-              <div style={{ display: "flex", gap: 10 }}>
-                {[["NONE","var(--ink-2)","None",icons.ban],["RESERVED","var(--st-vr)","Reserved",icons.bookmark]].map(([val, c, lbl, ic]) => (
-                  <button key={val} onClick={() => setReservation(val)} style={{
-                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
-                    border: `2px solid ${reservation === val ? c : "var(--line)"}`,
-                    background: reservation === val ? c : "var(--panel)",
-                    color: reservation === val ? "#fff" : "var(--ink-2)",
-                    cursor: "pointer", transition: "all 0.15s",
-                  }}><Ic d={ic} s={16} /> {lbl}</button>
-                ))}
-              </div>
+        {showReservationInline && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Reservation Status
             </div>
-          )}
+            <div style={{ display: "flex", gap: 10 }}>
+              {[["NONE", "var(--ink-2)", "None", icons.ban], ["RESERVED", "var(--st-vr)", "Reserved", icons.bookmark]].map(([val, c, lbl, ic]) => (
+                <button key={val} onClick={() => setReservation(val)} style={{
+                  flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                  border: `2px solid ${reservation === val ? c : "var(--line)"}`,
+                  background: reservation === val ? c : "var(--panel)",
+                  color: reservation === val ? "#fff" : "var(--ink-2)",
+                  cursor: "pointer", transition: "all 0.15s",
+                }}><Ic d={ic} s={16} /> {lbl}</button>
+              ))}
+            </div>
+          </div>
+        )}
 
-          {/* Reservation note — shown only for Vacant + Reserved (bed held for incoming patient) */}
-          {showResNote && (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-                Note <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
-              </div>
-              <textarea className="field" value={resNote} maxLength={255} rows={2}
-                placeholder="e.g. Reserved for incoming transfer from ICU"
-                onChange={(e) => setResNote(e.target.value)}
-                style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", wordBreak: "break-word", overflowWrap: "anywhere", borderColor: !resNote.trim() ? "var(--red)" : undefined }} />
-              {!resNote.trim() && (
-                <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>A note is required for Vacant + Reserved beds.</div>
-              )}
+        {/* Reservation note — shown only for Vacant + Reserved (bed held for incoming patient) */}
+        {showResNote && (
+          <div style={{ marginBottom: 24 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
+              Note <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
             </div>
-          )}
+            <textarea className="field" value={resNote} maxLength={255} rows={2}
+              placeholder="e.g. Reserved for incoming transfer from ICU"
+              onChange={(e) => setResNote(e.target.value)}
+              style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", wordBreak: "break-word", overflowWrap: "anywhere", borderColor: !resNote.trim() ? "var(--red)" : undefined }} />
+            {!resNote.trim() && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>A note is required for Vacant + Reserved beds.</div>
+            )}
+          </div>
+        )}
 
       </div>{/* /controls */}
 
       {reservationOpen && createPortal(
-        <ReservationPopup bed={bed} destinations={destinations} onClose={() => setReservationOpen(false)} onSave={onSave} />,
+        <ReservationPopup bed={bed} destinations={destinations} onClose={() => setReservationOpen(false)} onSave={async (...args) => {
+          await onSave(...args);
+          const newRes = args[2];
+          const newDest = args[4];
+          if (newRes !== undefined) setReservation(newRes);
+          if (newDest !== undefined) setDestination(newDest);
+        }} />,
         document.body
       )}
       {transferOpen && createPortal(
@@ -1511,30 +1535,30 @@ function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG,
 // ══════════════════════════════════════════════════════════════════════════════
 //  WARD PAGE — full-page ward view (View / Manage / Discharge tabs, no popup)
 // ══════════════════════════════════════════════════════════════════════════════
-export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) {
-  const [tab,        setTab]        = useState(initialTab || "view");
-  const [beds,       setBeds]       = useState([]);
-  const [filter,     setFilter]     = useState("ALL");
-  const [search,     setSearch]     = useState("");
+export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, focusBedId }) {
+  const [tab, setTab] = useState(initialTab || "manage");
+  const [beds, setBeds] = useState([]);
+  const [filter, setFilter] = useState("ALL");
+  const [search, setSearch] = useState("");
   const [editingBed, setEditingBed] = useState(null);  // bed object | null
-  const [loading,    setLoading]    = useState(false);
-  const [loadedAt,   setLoadedAt]   = useState(null);  // Date | null — freshness dot in the header
-  const [toast,      setToast]      = useState("");
-  const [reviewing,  setReviewing]  = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadedAt, setLoadedAt] = useState(null);
+  const [toast, setToast] = useState("");
+  const [reviewing, setReviewing] = useState(false);
   const [reviewedAt, setReviewedAt] = useState(ward.reviewedAt ?? null);
   // Reference/lookup data (payer types, destinations, departments) — not tied to any
   // one bed, so it's fetched once per ward visit here and passed down, instead of
   // BedDetailSheet re-fetching it on every mount (e.g. every time key={liveBed.id}
   // forces a remount, such as right after a transfer).
-  const [payerTypes,   setPayerTypes]   = useState([]);
+  const [payerTypes, setPayerTypes] = useState([]);
   const [destinations, setDestinations] = useState([]);
-  const [departments,  setDepartments]  = useState([]);
+  const [departments, setDepartments] = useState([]);
   // Optional-chained: read-only cfgs (e.g. CONSULTANT) omit the endpoints they
   // can't use, so a missing fetcher must be a no-op rather than a crash.
   useEffect(() => {
-    cfg.payerTypes?.().then(r => setPayerTypes(r.payerTypes || [])).catch(() => {});
-    cfg.destinations?.().then(r => setDestinations(r.destinations || [])).catch(() => {});
-    api.departments().then(r => setDepartments(r.departments || [])).catch(() => {});
+    cfg.payerTypes?.().then(r => setPayerTypes(r.payerTypes || [])).catch(() => { });
+    cfg.destinations?.().then(r => setDestinations(r.destinations || [])).catch(() => { });
+    api.departments().then(r => setDepartments(r.departments || [])).catch(() => { });
   }, [cfg]);
 
   const showToast = useCallback((m) => {
@@ -1580,6 +1604,14 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
 
   useEffect(() => { load(); }, [load]);
 
+  const focusedRef = useRef(false);
+  useEffect(() => {
+    if (focusBedId && beds.length > 0 && !focusedRef.current) {
+      const match = beds.find(b => b.id === focusBedId);
+      if (match) { setEditingBed(match); focusedRef.current = true; }
+    }
+  }, [focusBedId, beds]);
+
   // Live refresh — every bed/discharge change lands here instantly via websocket.
   // Payloads carrying a wardId are filtered to this ward; anything else reloads
   // defensively. The ref keeps the handler on the latest load closure without
@@ -1592,7 +1624,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
       if (p && p.wardId != null && Number(p.wardId) !== Number(ward.id)) return;
       liveLoadRef.current();
     };
-    socket.on("bed:update",       onData);
+    socket.on("bed:update", onData);
     socket.on("discharge:update", onData);
     socket.on("ward:operational", onData);
     socket.on("connect", () => liveLoadRef.current()); // reconnect → catch missed updates
@@ -1613,11 +1645,11 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
   const q = search.trim().toLowerCase();
   const displayed = sortedBeds.filter(b => {
     if (q && !b.bed_name.toLowerCase().includes(q)) return false;
-    if (filter === "KIMS")     return b.unit_type === "KIMS";
-    if (filter === "Renova")   return b.unit_type?.includes("Renova");
-    if (filter === "Op")       return !!b.operational_status;
-    if (filter === "Non-Op")   return !b.operational_status;
-    if (filter === "Vacant")   return b.physical_status === "VACANT";
+    if (filter === "KIMS") return b.unit_type === "KIMS";
+    if (filter === "Renova") return b.unit_type?.includes("Renova");
+    if (filter === "Op") return !!b.operational_status;
+    if (filter === "Non-Op") return !b.operational_status;
+    if (filter === "Vacant") return b.physical_status === "VACANT";
     if (filter === "Occupied") return b.physical_status === "OCCUPIED";
     if (filter === "Reserved") return b.reservation_status === "RESERVED";
     return true;
@@ -1633,11 +1665,12 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
       snapshot = prev;
       return prev.map(b => b.id === bedId
         ? {
-            ...b, physical_status: physicalStatus, reservation_status: reservationStatus,
-            payer_type: physicalStatus === "VACANT" ? null : (payerType ?? b.payer_type),
-            destination: stillOccRes ? (destination ?? b.destination) : null,
-            reservation_note: stillVacRes ? (reservationNote ?? b.reservation_note) : null,
-          }
+          ...b, physical_status: physicalStatus, reservation_status: reservationStatus,
+          payer_type: physicalStatus === "VACANT" ? null : (payerType ?? b.payer_type),
+          destination: stillOccRes ? (destination ?? b.destination) : null,
+          reservation_note: stillVacRes ? (reservationNote ?? b.reservation_note) : null,
+          ...(physicalStatus === "VACANT" ? { ip_last6: null, admission_type: null, consultant_name: null, department_name: null, doctor_id: null, department_id: null, discharge_tracking: null } : {}),
+        }
         : b);
     });
     try {
@@ -1672,13 +1705,13 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
     if (b.reservation_status === "RESERVED") fc["Reserved"]++;
   }
   const FILTER_OPTIONS = [
-    { key: "ALL",      label: "All beds" },
-    { key: "Vacant",   label: "Vacant" },
+    { key: "ALL", label: "All beds" },
+    { key: "Vacant", label: "Vacant" },
     { key: "Occupied", label: "Occupied" },
     { key: "Reserved", label: "Reserved" },
-    { key: "Non-Op",   label: "Non-operational" },
-    { key: "KIMS",     label: "KIMS" },
-    { key: "Renova",   label: "Renova" },
+    { key: "Non-Op", label: "Non-operational" },
+    { key: "KIMS", label: "KIMS" },
+    { key: "Renova", label: "Renova" },
   ].filter(o => o.key === "ALL" || fc[o.key] > 0);
 
   // Rendered inline in WardPage (NOT as a nested component) so the input keeps
@@ -1717,8 +1750,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
           <option key={o.key} value={o.key}>{o.label} ({fc[o.key] ?? fc.ALL})</option>
         ))}
       </select>
-      {/* Jump straight to one bed — same pattern as the ward/station dropdowns.
-          In Manage it opens the bed's page; in View it narrows the grid to it. */}
+      {/* Jump straight to one bed — opens the bed's edit page. */}
       {sortedBeds.length > 1 && (
         <select
           className="field field-select"
@@ -1727,7 +1759,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
           onChange={(e) => {
             const b = sortedBeds.find((x) => String(x.id) === e.target.value);
             if (!b) return;
-            if (tab === "manage" && b.operational_status !== false) setEditingBed(b);
+            if (b.operational_status !== false) setEditingBed(b);
             else { setSearch(b.bed_name); setFilter("ALL"); }
           }}
           style={{ width: "auto", flex: "0 1 auto", maxWidth: 150, fontWeight: 600 }}
@@ -1778,10 +1810,10 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
   const summaryStrip = (
     <div className="wsum">
       {[
-        { n: sum.total,    l: "Total Beds", ic: icons.bed,       c: "var(--primary)", bg: "var(--st-vr-bg)" },
-        { n: sum.vacant,   l: "Vacant",     ic: icons.bed,       c: "var(--st-v)",    bg: "var(--st-v-bg)" },
-        { n: sum.occupied, l: "Occupied",   ic: icons.user,      c: "var(--st-o)",    bg: "var(--st-o-bg)" },
-        { n: sum.planned,  l: "Planned",    ic: icons.clipboard, c: "var(--st-vr)",   bg: "var(--st-vr-bg)" },
+        { n: sum.total, l: "Total Beds", ic: icons.bed, c: "var(--primary)", bg: "var(--st-vr-bg)" },
+        { n: sum.vacant, l: "Vacant", ic: icons.bed, c: "var(--st-v)", bg: "var(--st-v-bg)" },
+        { n: sum.occupied, l: "Occupied", ic: icons.user, c: "var(--st-o)", bg: "var(--st-o-bg)" },
+        { n: sum.planned, l: "Planned", ic: icons.clipboard, c: "var(--st-vr)", bg: "var(--st-vr-bg)" },
       ].map(({ n, l, ic, c, bg }) => (
         <div className="wsum-item" key={l}>
           <span className="wsum-ic" style={{ background: bg, color: c }}><Ic d={ic} s={16} /></span>
@@ -1872,7 +1904,6 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
 
   return (
     <div className="slide-up">
-      {/* Header — back · ward name + count · refresh + freshness */}
       <div className="ward-page-hdr">
         <div className="row" style={{ gap: 12, minWidth: 0 }}>
           <BackBtn onClick={onBack} />
@@ -1880,37 +1911,25 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
             <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ward.ward}</div>
             <div className="dim" style={{ fontSize: 11.5 }}>
               {beds.length} bed{beds.length !== 1 ? "s" : ""}
-              {reviewedAt
+              {tab === "manage" && reviewedAt
                 ? <> · <Ic d={icons.check} s={11} /> Reviewed {fmtRelative(reviewedAt)}</>
-                : cfg.reviewWard ? " · Not reviewed yet" : ""}
+                : tab === "manage" && cfg.reviewWard ? " · Not reviewed yet" : ""}
             </div>
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0 }}>
-          {cfg.reviewWard && (
+          {tab === "manage" && cfg.reviewWard && (
             <button className="btn btn-ghost ward-review-btn"
               disabled={reviewing || inCooldown} onClick={reviewWard}
               title={inCooldown ? `Available again in ${Math.ceil(cooldownMsLeft / 60000)}m` : "No changes needed — mark this ward reviewed"}>
-              <Ic d={icons.check} s={14} /> <span className="ward-review-lbl">{reviewing ? "…" : inCooldown ? `${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}</span>
+              {reviewing ? "…" : inCooldown ? `${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}
             </button>
-          )}
-          <button className="appbar-btn" onClick={load} title="Refresh" aria-label="Refresh beds">
-            <Ic d={icons.refresh} s={15} />
-          </button>
-          {loadedAt && (
-            <span className="dim" style={{ fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--st-v)" }} />
-              {fmtRelative(loadedAt.getTime())}
-            </span>
           )}
         </div>
       </div>
 
       {/* Tab bar — Discharges is a first-class tab, not a popup */}
       <div className="seg" style={{ marginBottom: 14, maxWidth: 420 }}>
-        <button className={tab === "view" ? "on" : ""} onClick={() => setTab("view")}>
-          <Ic d={icons.grid} s={14} /> View
-        </button>
         <button className={tab === "manage" ? "on" : ""} onClick={() => setTab("manage")}>
           <Ic d={icons.bed} s={14} /> Manage
         </button>
@@ -1929,7 +1948,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG }) 
       ) : (
         <>
           {!loading && beds.length > 0 && searchBar}
-          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable={tab === "manage"} />}
+          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable />}
           {!loading && beds.length > 0 && summaryStrip}
         </>
       )}

@@ -210,7 +210,7 @@ input,select,textarea{font-size:16px;}
 
 /* Topbar */
 .appbar{
-  position:sticky;top:0;z-index:50;
+  position:sticky;top:0;z-index:700;
   height:60px;flex-shrink:0;
   background:var(--topbar-bg);
   border-bottom:1px solid var(--line);
@@ -634,17 +634,18 @@ body.hero-gone .appbar{
 @media (max-width:900px){
   .dash-toolbar{gap:8px 10px;}
   .dash-toolbar .dt-divider{display:none;}
-  .dash-toolbar .dt-search{flex-basis:100%;order:-1;}
+  .dash-toolbar .dt-search{flex-basis:100%;order:10;}
 }
-/* Phone: hide the icon tiles + labels (controls speak for themselves) and shrink the pills. */
+/* Phone: compact toolbar — Unit + View-by share row 1, search full-width row 2. */
 @media (max-width:560px){
-  .dash-toolbar{gap:8px;align-items:stretch;}
-  .dash-toolbar .dtg{flex:1 1 100%;}
+  .dash-toolbar{gap:6px;align-items:center;flex-wrap:wrap;}
+  .dash-toolbar .dtg{flex:1 1 0;min-width:0;}
+  .dash-toolbar .dtg .field{width:100%;}
   .dash-toolbar .dtg-head{display:none;}
-  .dash-toolbar .dt-search{order:0;}
-  .seg-pill{width:100%;}
-  .seg-pill button{flex:1;padding:8px 8px;font-size:12px;}
-  .dash-toolbar .field{width:100%;}
+  .dash-toolbar .dt-search{flex:1 1 100%;order:10;min-width:0;}
+  .seg-pill{padding:2px;border-radius:8px;}
+  .seg-pill button{padding:5px 10px;font-size:11px;border-radius:6px;}
+  .dash-toolbar .field{height:32px;font-size:12px;}
 }
 
 /* ── Alarm banner ─────────────────────────────────────────────────────────── */
@@ -655,7 +656,7 @@ body.hero-gone .appbar{
 
 /* ── Sheet / overlay — centered modal desktop, bottom sheet mobile ────────── */
 /* Above all dashboard chrome — .filter-bar-sticky(500), .snav(600),
-   .snav-overlay(700) — so modals are never rendered under the sticky filter
+   .appbar(700), .snav-overlay(700) — so modals are never rendered under the sticky filter
    bar or section navigator. Stays below .toast(9999). */
 .overlay{position:fixed;inset:0;z-index:800;background:rgba(0,0,0,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:24px;}
 .sheet{
@@ -1793,11 +1794,35 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
   font-size:12px;font-weight:700;
 }
 
-/* Mobile: navbar never hides on small screens */
+/* Desktop/tablet: hide mobile-only elements */
+.dt-mobile-only{display:none!important;}
+
+/* Mobile toolbar */
 @media(max-width:768px){
-  body.hero-gone .appbar{transform:none;opacity:1;pointer-events:auto;}
-  body.hero-gone .filter-bar-sticky{top:68px;}
   .filter-lift-bar{display:none!important;}
+  /* Full-width, no rounded corners */
+  .filter-bar-sticky{
+    margin-left:-12px;margin-right:-12px;
+    border-radius:0!important;
+  }
+  .filter-bar--stuck{border-radius:0!important;}
+  /* Hero-gone: toolbar to very top, allow wrap, hide pills/theme/avatar */
+  body.hero-gone .filter-bar-sticky{top:0!important;}
+  body.hero-gone .dash-toolbar{flex-wrap:wrap;}
+  .dt-desktop-only{display:none!important;}
+  .dt-mobile-only{display:block!important;}
+  /* Row 1: Unit + View-by side by side; Row 2: search full width */
+  .dash-toolbar .dtg{flex:1 1 0;min-width:0;}
+  .dash-toolbar .dtg .field{width:100%;}
+  .dash-toolbar .dt-search{flex:1 1 100%;order:10;min-width:0;}
+}
+@media(max-width:479px){
+  .filter-bar-sticky{margin-left:-10px;margin-right:-10px;}
+}
+/* Sidebar and scrim must always sit above the toolbar on mobile */
+@media(max-width:768px){
+  .sidebar{z-index:600!important;}
+  .sb-scrim{z-index:550!important;}
 }
 
 /* Reduced motion: keep fades only, skip top transition */
@@ -1843,10 +1868,8 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
 .ward-page-hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
 .ward-page-hdr-left{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 0;}
 .ward-page-hdr-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}
-/* Hide Review label text on narrow phones — icon only */
 @media(max-width:479px){
-  .ward-review-lbl{display:none;}
-  .ward-review-btn{padding:8px 10px!important;min-width:36px;}
+  .ward-review-btn{padding:8px 10px!important;}
 }
 /* Hide freshness dot text on very tiny phones */
 @media(max-width:360px){
