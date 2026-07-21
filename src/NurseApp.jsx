@@ -170,7 +170,7 @@ export default function NurseApp({ user, onLogout }) {
         setConfigError(msg);
         setWards([]);
       } else {
-        setLoadError(msg || "Unable to connect to server");
+        setLoadError("Unable to connect to server");
       }
     }
   }, []);

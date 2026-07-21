@@ -195,7 +195,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
 
 // ── Dashboard ────────────────────────────────────────────────────────────────────
 function Dashboard({ me, user, onOpenBlock, showSummary }) {
-  const s = me.summary;
+  const s = me.summary || {};
   const totalOcc = (s.occupied || 0) + (s.occupied_reserved || 0);
   const occPct = s.total > 0 ? Math.round((totalOcc / s.total) * 100) : 0;
   const hour = new Date().getHours();
@@ -321,7 +321,7 @@ export default function DoctorApp({ user, onLogout }) {
   const load = useCallback(async () => {
     setLoadError(null);
     try { const data = await api.doctorMe(); setMe(data); setLastSync(new Date()); }
-    catch (e) { const msg = e?.message ?? ""; if (msg === "Unauthorized") return; setLoadError(msg || "Unable to connect to server"); }
+    catch (e) { const msg = e?.message ?? ""; if (msg === "Unauthorized") return; setLoadError("Unable to connect to server"); }
   }, []);
   loadRef.current = load;
 

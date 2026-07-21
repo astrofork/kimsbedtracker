@@ -513,7 +513,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                     padding: "2px 12px",
                   }}>
                     {g.steps.map((step, i) => {
-                      const status = tracking[step.key.toLowerCase() + "_status"];
+                      const status = tracking[step.key.toLowerCase() + "_status"] || "PENDING";
                       // Explicit dependency (parallel fan-out) overrides the default
                       // "previous sibling in this group" sequential chain.
                       const depStep = step.after

@@ -50,7 +50,7 @@ export default function PREApp({ user, meta, onLogout }) {
       const msg = e?.message ?? "";
       if (msg === "Unauthorized") return;
       if (msg.includes("No PRE Block")) setConfigError(msg);
-      else setLoadError(msg || "Unable to connect to server");
+      else setLoadError("Unable to connect to server");
     }
     finally { setLoading(false); }
   }, [showToast]);
@@ -233,8 +233,8 @@ function RoundDuePopup({ round, onGo, onDismiss }) {
 }
 
 function Home({ data, setTab, alarmActive }) {
-  const s = data.summary;
-  const round = data.alarm.round;
+  const s = data.summary || {};
+  const round = data.alarm?.round;
 
   // Popup shows once per alarm activation. Dismissing drops back to the inline
   // strip; a *new* alarm (or a re-fire after submit) opens the popup again.
@@ -460,8 +460,8 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
 // Now shared: it renders at the top of My Wards and at the top of Entry, and is
 // no longer rendered by the map itself.
 export function OccupancyCards({ data }) {
-  const s = data.summary;
-  const enteredBeds = s.v + s.r + s.o + s.or;
+  const s = data.summary || {};
+  const enteredBeds = (s.v || 0) + (s.r || 0) + (s.o || 0) + (s.or || 0);
   const occPct = enteredBeds > 0 ? Math.round((s.o + s.or) / enteredBeds * 100) : 0;
 
   return (
@@ -500,7 +500,7 @@ function MyMap({ data }) {
           const wPct = wEntered > 0 ? Math.round((wt.totalOccupied / wEntered) * 100) : 0;
           const full = entered && (w.occupied || 0) === w.total;
           return (
-            <div className="ward-card" key={w.ward} style={{ borderColor: full ? "var(--st-o)" : entered ? "var(--st-v)" : "var(--line)" }}>
+            <div className="ward-card" key={w.id} style={{ borderColor: full ? "var(--st-o)" : entered ? "var(--st-v)" : "var(--line)" }}>
               <div className="row between" style={{ marginBottom: entered ? 10 : 0 }}>
                 <div>
                   <div style={{ fontWeight: 700 }}>{w.ward}</div>
@@ -667,9 +667,11 @@ function ReservationPopup({ bed, destinations, onClose, onSave }) {
   async function save() {
     if (needsDest && !dest) return;
     setSaving(true);
-    await onSave(bed.id, bed.physical_status, val, undefined, needsDest ? dest : undefined, undefined, undefined, undefined, undefined, undefined);
-    setSaving(false);
-    onClose();
+    try {
+      await onSave(bed.id, bed.physical_status, val, undefined, needsDest ? dest : undefined, undefined, undefined, undefined, undefined, undefined);
+      onClose();
+    } catch {}
+    finally { setSaving(false); }
   }
 
   return (
@@ -761,7 +763,7 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
       const r = await api.dischargePlan(bed.id, planPopupTodayStr(), null);
       await api.dischargeInitiate(r.tracking.admission_id);
       onDone();
-    } catch (e) { setError(toastErr(e)); setSaving(false); }
+    } catch (e) { setError(toastErr(e)); } finally { setSaving(false); }
   }
 
   async function schedule() {
@@ -769,7 +771,7 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
     try {
       await api.dischargePlan(bed.id, plannedDate, time || null);
       onDone();
-    } catch (e) { setError(toastErr(e)); setSaving(false); }
+    } catch (e) { setError(toastErr(e)); } finally { setSaving(false); }
   }
 
   return (
@@ -946,7 +948,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
       onChanged?.();
       onToast?.("Patient information updated ✓");
     } catch (e) {
-      onToast?.(e?.message || "Could not update patient information");
+      onToast?.(toastErr(e) || "Could not update patient information");
     } finally {
       setSavingPatientInfo(false);
     }
@@ -1097,6 +1099,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
 
   const savedSk = STATE_KEY(bed.physical_status, bed.reservation_status);
   const liveSk = STATE_KEY(physical, reservation);
+  const noChanges = savedSk === liveSk && !needsIp;
 
   // Full-page discharge view — "Discharge Details" navigates here, back returns to the bed.
   if (dischargeOpen) return (
@@ -1521,7 +1524,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
               Cancel
             </button>
             <button className="btn btn-primary" style={{ flex: 1.6, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }}
-              disabled={saving || (needsPayer && !payer) || (!showActionsRow && needsDestination && !destination) || (!showActionsRow && needsResNote && !resNote.trim()) || (needsIp && !ipValid) || (needsIp && !admissionType)}
+              disabled={saving || noChanges || (needsPayer && !payer) || (!showActionsRow && needsDestination && !destination) || (!showActionsRow && needsResNote && !resNote.trim()) || (needsIp && !ipValid) || (needsIp && !admissionType)}
               onClick={handleSave}>
               <Ic d={icons.save} s={16} /> {saving ? "Saving…" : "Update Status"}
             </button>
@@ -1670,6 +1673,12 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
           destination: stillOccRes ? (destination ?? b.destination) : null,
           reservation_note: stillVacRes ? (reservationNote ?? b.reservation_note) : null,
           ...(physicalStatus === "VACANT" ? { ip_last6: null, admission_type: null, consultant_name: null, department_name: null, doctor_id: null, department_id: null, discharge_tracking: null } : {}),
+          ...(ipLast6 ? { ip_last6: ipLast6 } : {}),
+          ...(admissionType ? { admission_type: admissionType } : {}),
+          ...(consultantName !== undefined ? { consultant_name: consultantName } : {}),
+          ...(departmentName !== undefined ? { department_name: departmentName } : {}),
+          ...(doctorId ? { doctor_id: doctorId } : {}),
+          ...(departmentId ? { department_id: departmentId } : {}),
         }
         : b);
     });
@@ -1855,6 +1864,12 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
               payer_type: physical === "VACANT" ? null : (payer ?? prev.payer_type),
               destination: stillOccRes ? (destination ?? prev.destination) : null,
               reservation_note: stillVacRes ? (reservationNote ?? prev.reservation_note) : null,
+              ...(ipLast6 ? { ip_last6: ipLast6 } : {}),
+              ...(admissionType ? { admission_type: admissionType } : {}),
+              ...(consultantName !== undefined ? { consultant_name: consultantName } : {}),
+              ...(departmentName !== undefined ? { department_name: departmentName } : {}),
+              ...(doctorId ? { doctor_id: doctorId } : {}),
+              ...(departmentId ? { department_id: departmentId } : {}),
             }));
             await changeStatus(bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId);
           }}

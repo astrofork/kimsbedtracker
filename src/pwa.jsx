@@ -64,9 +64,14 @@ export function UpdateToast({ registration }) {
     if (!registration) return;
     if (registration.waiting) { setShow(true); return; }
     const onUpdate = () => { if (registration.waiting) setShow(true); };
-    registration.addEventListener("updatefound", () => {
+    const onFound = () => {
       registration.installing?.addEventListener("statechange", onUpdate);
-    });
+    };
+    registration.addEventListener("updatefound", onFound);
+    return () => {
+      registration.removeEventListener("updatefound", onFound);
+      registration.installing?.removeEventListener("statechange", onUpdate);
+    };
   }, [registration]);
 
   const reload = () => {

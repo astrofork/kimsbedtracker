@@ -302,6 +302,8 @@ function ReopenModal({ admissionId, stepKeys, onClose, onSubmitted, showToast })
 
 export default function PharmacyApp({ user, onLogout }) {
   const [tab, setTab] = useState("beds");
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   const [data, setData] = useState(null);
   const [toast, setToast] = useState("");
   const [busyId, setBusyId] = useState(null);
@@ -349,7 +351,7 @@ export default function PharmacyApp({ user, onLogout }) {
     socket.on("discharge:update", refresh);
     socket.on("discharge:overstay", refresh);
     socket.on("bed:update", refresh);
-    socket.on("pharmacy:reopen-request", () => { loadRef.current(); setLiveKey(k => k + 1); if (tab === "requests") loadRequests(); });
+    socket.on("pharmacy:reopen-request", () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); });
     socket.on("connect", refresh);
     return () => { socket.disconnect(); };
   }, []);
