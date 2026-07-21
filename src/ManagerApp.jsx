@@ -4495,15 +4495,20 @@ function NurseAccessManager({ showToast, stationId }) {
 // Phases themselves are fixed (each maps to a discharge_tracking column), so
 // there's no add/delete here — only duration, display label and department.
 export function DischargePhaseManager({ showToast }) {
-  const [phases,  setPhases]  = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [busy,    setBusy]    = useState(false);
-  const [editId,  setEditId]  = useState(null);
-  const [draft,   setDraft]   = useState({ label: "", department: "", expected_minutes: 0 });
+  const [phases,     setPhases]     = useState([]);
+  const [payerSteps, setPayerSteps] = useState([]); // step-level payer overrides only
+  const [loading,    setLoading]    = useState(true);
+  const [busy,       setBusy]       = useState(false);
+  const [editId,     setEditId]     = useState(null);
+  const [draft,      setDraft]      = useState({ label: "", department: "", expected_minutes: 0 });
 
   const load = async () => {
     setLoading(true);
-    try { setPhases((await api.mgrDischargePhases()).phases || []); }
+    try {
+      const [phRes, tatRes] = await Promise.all([api.mgrDischargePhases(), api.mgrPayerTat()]);
+      setPhases(phRes.phases || []);
+      setPayerSteps((tatRes.rows || []).filter(r => r.phase_key !== null));
+    }
     catch (e) { showToast(toastErr(e)); }
     finally { setLoading(false); }
   };
@@ -4541,7 +4546,8 @@ export function DischargePhaseManager({ showToast }) {
     finally { setBusy(false); }
   };
 
-  const totalMins = phases.reduce((s, p) => s + (p.expected_minutes || 0), 0);
+  const visiblePhases = phases.filter(p => p.phase_key !== "DISCHARGE_INITIATION");
+  const totalMins = visiblePhases.reduce((s, p) => s + (p.expected_minutes || 0), 0);
   const rowStyle = { display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", borderBottom: "1px solid var(--line)" };
 
   return (
@@ -4573,13 +4579,13 @@ export function DischargePhaseManager({ showToast }) {
           <div className="dim" style={{ padding: 20, textAlign: "center", fontSize: 13 }}>Loading…</div>
         ) : phases.length === 0 ? (
           <div className="dim" style={{ padding: 20, textAlign: "center", fontSize: 13 }}>No phases configured.</div>
-        ) : phases.map((p, i) => (
+        ) : visiblePhases.map((p, i) => (
           <div key={p.id} style={rowStyle}>
             <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
               <button disabled={busy || i === 0} onClick={() => reorder(p, "up")}
                 style={{ background: "none", border: "none", cursor: i === 0 ? "default" : "pointer", color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▲</button>
-              <button disabled={busy || i === phases.length - 1} onClick={() => reorder(p, "down")}
-                style={{ background: "none", border: "none", cursor: i === phases.length - 1 ? "default" : "pointer", color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▼</button>
+              <button disabled={busy || i === visiblePhases.length - 1} onClick={() => reorder(p, "down")}
+                style={{ background: "none", border: "none", cursor: i === visiblePhases.length - 1 ? "default" : "pointer", color: "var(--ink-3)", padding: "1px 4px", fontSize: 11, lineHeight: 1 }}>▼</button>
             </div>
 
             {editId === p.id ? (
@@ -4605,24 +4611,48 @@ export function DischargePhaseManager({ showToast }) {
                     disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
                 </div>
               </div>
-            ) : (
-              <>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{p.label}</div>
-                  <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-                    {p.department || "No department set"}
+            ) : (() => {
+              const overrides = payerSteps.filter(r => r.phase_key === p.phase_key);
+              return (
+                <>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{p.label}</div>
+                    <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
+                      {p.department || "No department set"}
+                    </div>
+                    {overrides.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 6 }}>
+                        {overrides.map(ov => {
+                          const diff = ov.target_minutes - p.expected_minutes;
+                          const higher = diff > 0;
+                          return (
+                            <span key={ov.id} style={{
+                              display: "inline-flex", alignItems: "center", gap: 4,
+                              fontSize: 10.5, fontWeight: 700, padding: "2px 8px",
+                              borderRadius: 99, border: "1px solid var(--line)",
+                              background: "var(--panel-2)", color: "var(--ink-2)",
+                            }}>
+                              {ov.payer_type}
+                              <span style={{ color: higher ? "var(--amber)" : "var(--st-v)" }}>
+                                {ov.target_minutes} min
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-                <span style={{
-                  fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 99,
-                  background: "var(--blue-bg)", color: "var(--blue)", flexShrink: 0, whiteSpace: "nowrap",
-                }}>{p.expected_minutes} min</span>
-                <button title="Edit SLA" onClick={() => openEdit(p)} disabled={busy}
-                  style={{ background: "none", border: "none", cursor: busy ? "default" : "pointer", color: "var(--primary)", padding: 4, borderRadius: 6, display: "flex", flexShrink: 0 }}>
-                  <Ic d={icons.pencil} s={16} />
-                </button>
-              </>
-            )}
+                  <span style={{
+                    fontSize: 11, fontWeight: 800, padding: "3px 10px", borderRadius: 99,
+                    background: "var(--blue-bg)", color: "var(--blue)", flexShrink: 0, whiteSpace: "nowrap",
+                  }}>{p.expected_minutes} min</span>
+                  <button title="Edit SLA" onClick={() => openEdit(p)} disabled={busy}
+                    style={{ background: "none", border: "none", cursor: busy ? "default" : "pointer", color: "var(--primary)", padding: 4, borderRadius: 6, display: "flex", flexShrink: 0 }}>
+                    <Ic d={icons.pencil} s={16} />
+                  </button>
+                </>
+              );
+            })()}
           </div>
         ))}
       </div>
@@ -6580,7 +6610,7 @@ function DoctorEditor({ user, blocks, onClose, onSaved, showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const PHASE_STEP_LABELS = {
-  DISCHARGE_SUMMARY:        "Discharge Summary (DI)",
+  DISCHARGE_INITIATION:     "Discharge Initiation (DI)",
   DISCHARGE_DOC:            "Discharge Doc (DS)",
   DRUG_RETURN:              "Drug Return (DR)",
   PHARMACY_CLEARANCE:       "Pharmacy Clearance (PH)",
@@ -6619,7 +6649,7 @@ export function PayerTATManager({ showToast }) {
     try {
       const [tatRes, ptRes] = await Promise.all([api.mgrPayerTat(), api.mgrPayerTypes()]);
       setRows(tatRes.rows || []);
-      setPayerTypes((ptRes.payer_types || []).filter(p => p.active));
+      setPayerTypes((ptRes.payerTypes || []).filter(p => p.active));
     } catch (e) { showToast(toastErr(e)); }
     finally { setLoading(false); }
   };
@@ -6763,16 +6793,18 @@ export function PayerTATManager({ showToast }) {
               <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 140 }}>
                   <div className="label" style={{ marginBottom: 4 }}>Payer Type</div>
-                  {payerTypes.length > 0 ? (
-                    <select className="field" value={newPayer} onChange={e => setNewPayer(e.target.value)}
-                      style={{ padding: "7px 10px", fontSize: 13 }}>
-                      {payerTypes.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                    </select>
-                  ) : (
-                    <input className="field" value={newPayer} maxLength={100}
-                      placeholder="e.g. Corporate"
-                      style={{ padding: "7px 10px", fontSize: 13 }}
-                      onChange={e => setNewPayer(e.target.value)} />
+                  <select className="field" value={newPayer} disabled={payerTypes.length === 0}
+                    onChange={e => setNewPayer(e.target.value)}
+                    style={{ padding: "7px 10px", fontSize: 13 }}>
+                    {payerTypes.length === 0
+                      ? <option value="">No payer types configured</option>
+                      : payerTypes.map(p => <option key={p.id} value={p.name}>{p.name}</option>)
+                    }
+                  </select>
+                  {payerTypes.length === 0 && (
+                    <div style={{ fontSize: 11, color: "var(--amber)", marginTop: 4 }}>
+                      Add payer types in the Payer Types section first.
+                    </div>
                   )}
                 </div>
                 <div style={{ flex: 1, minWidth: 160 }}>
