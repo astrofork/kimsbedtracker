@@ -13,7 +13,7 @@ import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 // documentation only — the UI renders each group as its own card with no
 // heading, so the labels aren't carried in the data.
 const STEPS = [
-  { key: "DISCHARGE_SUMMARY", label: "Discharge Initiate", roles: ["DOCTOR", "CONSULTANT"], group: 1, hidden: true },
+  { key: "DISCHARGE_INITIATION", label: "Discharge Initiation", roles: ["DOCTOR", "CONSULTANT"], group: 1, hidden: true },
   { key: "DISCHARGE_DOC",     label: "Discharge Summary", roles: ["DOCTOR", "CONSULTANT"], group: 1 },
   { key: "DRUG_RETURN", label: "Drug Return", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2 },
   { key: "PHARMACY_CLEARANCE", label: "Pharmacy Clearance", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2, after: "DRUG_RETURN" },
