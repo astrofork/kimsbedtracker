@@ -1092,7 +1092,8 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
   const [viewBy, setViewBy] = useState("TOTAL");
   const [search, setSearch] = useState("");
   const [searchBy, setSearchBy] = useState("ward");
-  const [groupBy, setGroupBy] = useState("none");
+  const compact = scope === "consultant";
+  const [groupBy, setGroupBy] = useState(compact ? "room_type" : "none");
   const [snapBusy, setSnapBusy] = useState(null);
   const [snapToast, setSnapToast] = useState("");
   const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
@@ -1963,7 +1964,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
           <div className="dtg">
             <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
             <div className="seg-pill dt-desktop-only">
-              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }, { value: "payer_type", label: "Payer Type" }, { value: "department", label: "Department" }].map((opt) => (
+              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }, ...(!compact ? [{ value: "payer_type", label: "Payer Type" }, { value: "department", label: "Department" }] : [])].map((opt) => (
                 <button key={opt.value} className={searchBy === opt.value ? "on" : ""}
                   onClick={() => { setSearchBy(opt.value); setSearch(""); }}>{opt.label}</button>
               ))}
@@ -1972,8 +1973,8 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
               style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 0, width: "auto" }}>
               <option value="ward">Ward</option>
               <option value="room_type">Room Type</option>
-              <option value="payer_type">Payer Type</option>
-              <option value="department">Department</option>
+              {!compact && <option value="payer_type">Payer Type</option>}
+              {!compact && <option value="department">Department</option>}
             </select>
           </div>
 
@@ -2118,7 +2119,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
             { title: "Discharge Lounge", cards: loungeCards, accent: "#f59e0b" },
             { title: "Vacant Beds", cards: vacantBedsCards, accent: "#16a34a" },
             { title: "Patient Type", cards: patientTypeCards, accent: "#2563eb" },
-            { title: "By Payer", cards: payerCards, accent: "#8b5cf6" },
+            ...(!compact ? [{ title: "By Payer", cards: payerCards, accent: "#8b5cf6" }] : []),
           ].map((g) => g.cards.length > 0 && (
             <div key={g.title} className="cv-group">
               <div className="cv-group-head">
@@ -2191,15 +2192,15 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
 
       {/* Ward tables — this is what gets captured by Snapshot/Copy/Share */}
       <div id="nav-wards" ref={snapshotRef} style={{ scrollMarginTop: 72 }}>
-        {groupBy === "none" ? (
+        {groupBy === "none" || compact ? (
           <>
-            <WardStatusTable title="Census Beds" accent="var(--st-v)" accentBg="var(--st-v-bg)" rows={censusRows} totalLabel="TOTAL (CENSUS)" searchFilter={searchFilter} groupBySelect={
+            <WardStatusTable title="Census Beds" accent="var(--st-v)" accentBg="var(--st-v-bg)" rows={censusRows} totalLabel="TOTAL (CENSUS)" searchFilter={searchFilter} compact={compact} groupBy={compact && groupBy !== "none" ? groupBy : null} groupBySelect={
               <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
                 style={{ fontSize: 11, fontWeight: 600, height: 28, borderRadius: 7, paddingTop: 0, paddingBottom: 0, paddingLeft: 8, paddingRight: 8, width: "auto", minWidth: 0 }}>
                 {GROUP_BY_OPTIONS.map((o2) => <option key={o2.value} value={o2.value}>Group by: {o2.label}</option>)}
               </select>
             } />
-            <WardStatusTable title="Non-Census Beds" accent="var(--st-o)" accentBg="var(--st-o-bg)" rows={nonCensusRows} totalLabel="TOTAL (NON-CENSUS)" searchFilter={searchFilter} />
+            <WardStatusTable title="Non-Census Beds" accent="var(--st-o)" accentBg="var(--st-o-bg)" rows={nonCensusRows} totalLabel="TOTAL (NON-CENSUS)" searchFilter={searchFilter} compact={compact} groupBy={compact && groupBy !== "none" ? groupBy : null} />
           </>
         ) : (
           <UnifiedGroupedTable rows={wardTableRows} searchFilter={searchFilter} groupBy={groupBy} groupBySelect={
@@ -2457,7 +2458,7 @@ function shortRoomType(rt) {
   }).join(" ");
 }
 
-function renderWardRow(r, showBadge) {
+function renderWardRow(r, showBadge, compact = false) {
   const reported = r.vacant !== null && r.vacant !== undefined;
   const o = r.occupied || 0;
   const or_ = r.occupied_reserved || 0;
@@ -2493,17 +2494,17 @@ function renderWardRow(r, showBadge) {
       </td>
       <td style={wstC}>{r.total}</td>
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(occ)}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(o)}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-or)" }}>{d(or_)}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "#f59e0b" }}>{d(r.overstayCount || 0)}</td>
-      <td style={{ ...wstCW, fontWeight: 700, color: "#2563eb" }}>{d(at.IP || 0)}</td>
-      <td style={{ ...wstCW, fontWeight: 700, color: "#8b5cf6" }}>{d(at.OPD || 0)}</td>
-      <td style={{ ...wstCW, fontWeight: 700, color: "#0ea5b7" }}>{d(at.DAYCARE || 0)}</td>
+      {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(o)}</td>}
+      {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-or)" }}>{d(or_)}</td>}
+      {!compact && <td style={{ ...wstC, fontWeight: 700, color: "#f59e0b" }}>{d(r.overstayCount || 0)}</td>}
+      {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#2563eb" }}>{d(at.IP || 0)}</td>}
+      {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#8b5cf6" }}>{d(at.OPD || 0)}</td>}
+      {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#0ea5b7" }}>{d(at.DAYCARE || 0)}</td>}
       <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(vac)}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(v)}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "#0d9488" }}>{r.loungeCount || 0}</td>
-      <td style={wstC}>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>
+      {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(v)}</td>}
+      {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>}
+      {!compact && <td style={{ ...wstC, fontWeight: 700, color: "#0d9488" }}>{r.loungeCount || 0}</td>}
+      {!compact && <td style={wstC}>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>}
       <td><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
       <td style={{ ...wstC, fontSize: 11, fontWeight: 600 }}>{updatedByName || <span className="dim">–</span>}</td>
     </tr>
@@ -2528,8 +2529,12 @@ function groupAggregates(grpRows) {
 }
 
 // Flat table — shown when Group by = None
-function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilter, groupBySelect }) {
+function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilter, groupBySelect, compact = false, groupBy = null }) {
   const filtered = rows.filter(searchFilter);
+  const [expanded, setExpanded] = useState(new Set());
+  useEffect(() => { setExpanded(new Set()); }, [groupBy]);
+  const toggleSection = (key) =>
+    setExpanded(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
 
   const totBeds = wstSum(filtered, r => r.total);
   const totV = wstSum(filtered, r => r.vacant);
@@ -2544,6 +2549,20 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
   const totDaycare = wstSum(filtered, r => (r.admissionTypes || {}).DAYCARE || 0);
   const totLounge = wstSum(filtered, r => r.loungeCount || 0);
   const totUpdatedAt = filtered.reduce((max, r) => (r.updatedAt && r.updatedAt > (max || 0)) ? r.updatedAt : max, null);
+
+  const groups = groupBy ? (() => {
+    const map = new Map();
+    for (const r of filtered) {
+      const k = r[groupBy] || "—";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(r);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => String(a).localeCompare(String(b)))
+      .map(([k, grpRows]) => ({ key: k, grpRows }));
+  })() : null;
+
+  const colSpan = compact ? 6 : 16;
 
   return (
     <div className="card" style={{ marginBottom: 16, overflow: "hidden" }}>
@@ -2561,48 +2580,71 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
               <th>WARD</th>
               <th style={wstC}>TOTAL BEDS</th>
               <th style={{ ...wstC, color: "var(--st-o)" }}>TOTAL OCC</th>
-              <th style={{ ...wstC, color: "var(--st-o)" }}>ON BED</th>
-              <th style={{ ...wstC, color: "var(--st-or)" }}>OCC[RES]</th>
-              <th style={{ ...wstC, color: "#f59e0b" }}>OVERSTAY</th>
-              <th style={{ ...wstCW, color: "#2563eb" }}>IP</th>
-              <th style={{ ...wstCW, color: "#8b5cf6" }}>OP</th>
-              <th style={{ ...wstCW, color: "#0ea5b7" }}>DAY CARE</th>
+              {!compact && <th style={{ ...wstC, color: "var(--st-o)" }}>ON BED</th>}
+              {!compact && <th style={{ ...wstC, color: "var(--st-or)" }}>OCC[RES]</th>}
+              {!compact && <th style={{ ...wstC, color: "#f59e0b" }}>OVERSTAY</th>}
+              {!compact && <th style={{ ...wstCW, color: "#2563eb" }}>IP</th>}
+              {!compact && <th style={{ ...wstCW, color: "#8b5cf6" }}>OP</th>}
+              {!compact && <th style={{ ...wstCW, color: "#0ea5b7" }}>DAY CARE</th>}
               <th style={{ ...wstC, color: "var(--st-v)" }}>TOTAL VAC</th>
-              <th style={{ ...wstC, color: "var(--st-v)" }}>VACANT</th>
-              <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC[RES]</th>
-              <th style={{ ...wstC, color: "#0d9488" }}>DIS. LOUNGE</th>
-              <th style={wstC}>OCC %</th>
+              {!compact && <th style={{ ...wstC, color: "var(--st-v)" }}>VACANT</th>}
+              {!compact && <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC[RES]</th>}
+              {!compact && <th style={{ ...wstC, color: "#0d9488" }}>DIS. LOUNGE</th>}
+              {!compact && <th style={wstC}>OCC %</th>}
               <th style={wstC}>LAST UPDATED</th>
               <th style={wstC}>UPDATED BY</th>
             </tr>
           </thead>
           <tbody>
-            {/* Total row always shows — reflects the active filter, including the
-                zero-match case (all-zero totals rather than vanishing entirely). */}
             <tr className="tbl-total-row" style={{ background: accentBg, "--tbl-total-accent": accent }}>
               <td style={{ fontWeight: 800, fontSize: 13, color: accent, background: accentBg }}>{totalLabel}</td>
               <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{totOverstay}</td>
-              <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{totIp}</td>
-              <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{totOp}</td>
-              <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{totDaycare}</td>
+              {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>}
+              {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>}
+              {!compact && <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{totOverstay}</td>}
+              {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{totIp}</td>}
+              {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{totOp}</td>}
+              {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{totDaycare}</td>}
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totV}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{totLounge}</td>
-              <td style={wstC}><OccBar p={totPct} /></td>
+              {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totV}</td>}
+              {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>}
+              {!compact && <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{totLounge}</td>}
+              {!compact && <td style={wstC}><OccBar p={totPct} /></td>}
               <td><LastUpdatedCell ts={totUpdatedAt} /></td>
               <td></td>
             </tr>
             {filtered.length === 0 ? (
-              <tr><td colSpan={16} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
+              <tr><td colSpan={colSpan} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
                 No wards match the current filter.
               </td></tr>
+            ) : groups ? (
+              groups.map(({ key, grpRows }) => {
+                const isOpen = expanded.has(key);
+                const { gb, gocc, gvac, gUpdatedAt } = groupAggregates(grpRows);
+                return (
+                  <React.Fragment key={key}>
+                    <tr onClick={() => toggleSection(key)}
+                      style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
+                      <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: accent, padding: "8px 14px" }}>
+                        <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
+                        {key}
+                        <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
+                          {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""}
+                        </span>
+                      </td>
+                      <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>
+                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{gvac}</td>
+                      <td><LastUpdatedCell ts={gUpdatedAt} /></td>
+                      <td></td>
+                    </tr>
+                    {isOpen && grpRows.map(r => renderWardRow(r, false, compact))}
+                  </React.Fragment>
+                );
+              })
             ) : (
-              filtered.map(r => renderWardRow(r, false))
+              filtered.map(r => renderWardRow(r, false, compact))
             )}
           </tbody>
         </table>
@@ -2888,8 +2930,7 @@ function ActivityPage() {
     Promise.allSettled([api.cooPreActivity(), api.cooNurseActivity()]).then(([p, n]) => {
       if (p.status === "fulfilled") setPreData(p.value);
       if (n.status === "fulfilled") setNurseData(n.value);
-      setLoading(false);
-    });
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   if (loading) return (
