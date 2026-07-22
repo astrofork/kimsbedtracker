@@ -2119,7 +2119,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
             { title: "Discharge Lounge", cards: loungeCards, accent: "#f59e0b" },
             { title: "Vacant Beds", cards: vacantBedsCards, accent: "#16a34a" },
             { title: "Patient Type", cards: patientTypeCards, accent: "#2563eb" },
-            ...(!compact ? [{ title: "By Payer", cards: payerCards, accent: "#8b5cf6" }] : []),
+            { title: "By Payer", cards: payerCards, accent: "#8b5cf6" },
           ].map((g) => g.cards.length > 0 && (
             <div key={g.title} className="cv-group">
               <div className="cv-group-head">
