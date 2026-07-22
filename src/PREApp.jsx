@@ -1444,7 +1444,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
                   <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{bed.reservation_status === "RESERVED" ? "Reserved" : "None"}</span>
                 </button>
               )}
-              {cfg.role === "PRE" && bed.bed_type !== "Lounge" && (
+              {(cfg.role === "PRE" || cfg.role === "NURSE") && bed.bed_type !== "Lounge" && (
                 <button onClick={() => setTransferOpen(true)} style={{
                   display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
                   background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,

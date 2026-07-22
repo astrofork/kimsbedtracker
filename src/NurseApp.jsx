@@ -258,7 +258,7 @@ export default function NurseApp({ user, onLogout }) {
           ward={{ ...openWard.ward, ward: openWard.ward.name }}
           initialTab={openWard.tab}
           cfg={NURSE_CFG}
-          allWards={[]}
+          allWards={wards.map(w => ({ id: w.id, ward: w.name }))}
           onBack={() => { setOpenWard(null); load(); }}
         />
       ) : navTab === "wards" ? (<>
