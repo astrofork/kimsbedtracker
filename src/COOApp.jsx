@@ -507,9 +507,10 @@ function HeroTrendChart({ values, color, id }) {
   const area = `${line} L${w},${h} L0,${h} Z`;
   const gid = "spk-" + id;
   const [lastX, lastY] = pts[pts.length - 1];
-  const first = values[0], last = values[values.length - 1];
-  const delta = last - first;
-  const deltaPct = first !== 0 ? Math.round((delta / first) * 100) : (delta > 0 ? 100 : 0);
+  const last = values[values.length - 1];
+  const baseline = values.length > 24 ? values[values.length - 25] : values[0];
+  const delta = last - baseline;
+  const deltaPct = baseline !== 0 ? Math.round((delta / baseline) * 100) : (delta > 0 ? 100 : 0);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>

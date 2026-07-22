@@ -292,10 +292,11 @@ export function BlockAvatar({ code, size = 38 }) {
  *  2. Controlled component — render <ConfirmDialog ... /> yourself.
  */
 export function ConfirmDialog({
-  title, message,
+  title, message, badge,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   danger = false,
+  warning = false,
   onConfirm, onCancel,
 }) {
   useModal(onCancel);
@@ -316,11 +317,25 @@ export function ConfirmDialog({
           maxWidth: 380,
           width: "calc(100% - 32px)",
           margin: "auto",
-          padding: 20,
+          padding: warning ? "28px 24px 20px" : 20,
           boxShadow: "0 20px 50px rgba(0,0,0,.25)",
           border: "1px solid var(--line)",
+          textAlign: warning ? "center" : undefined,
         }}
       >
+        {warning && (
+          <div style={{
+            width: 48, height: 48, borderRadius: "50%",
+            background: "var(--red-bg, #FEE2E2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            margin: "0 auto 14px",
+          }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--red, #ef4444)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+        )}
         <div id="confirm-title" style={{
           fontWeight: 700, fontSize: 16, color: "var(--ink)",
           marginBottom: message ? 10 : 18, lineHeight: 1.3,
@@ -335,6 +350,34 @@ export function ConfirmDialog({
             {message}
           </div>
         )}
+        {badge && (
+          <div style={{ marginBottom: 18, textAlign: warning ? "center" : undefined }}>
+            <span style={{
+              display: "inline-block", fontSize: 11, fontWeight: 700,
+              color: "var(--red, #ef4444)", background: "var(--red-bg, #FEE2E2)",
+              padding: "4px 12px", borderRadius: 99,
+            }}>{badge}</span>
+          </div>
+        )}
+        {warning ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+            <button
+              ref={btnRef}
+              className="btn btn-primary"
+              style={{ padding: "11px 16px", fontWeight: 700, width: "100%", fontSize: 13.5 }}
+              onClick={onConfirm}
+            >
+              {confirmLabel}
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: "10px 16px", fontWeight: 600, width: "100%", fontSize: 13 }}
+              onClick={onCancel}
+            >
+              {cancelLabel}
+            </button>
+          </div>
+        ) : (
         <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
           <button
             className="btn btn-ghost"
@@ -355,6 +398,7 @@ export function ConfirmDialog({
             {confirmLabel}
           </button>
         </div>
+        )}
       </div>
     </div>
   );
@@ -377,9 +421,11 @@ export function useConfirm() {
     <ConfirmDialog
       title={state.title}
       message={state.message}
+      badge={state.badge}
       confirmLabel={state.confirmLabel}
       cancelLabel={state.cancelLabel}
       danger={state.danger}
+      warning={state.warning}
       onConfirm={() => close(true)}
       onCancel={() => close(false)}
     />,

@@ -141,6 +141,7 @@ export default function NurseApp({ user, onLogout }) {
   const [navTab, setNavTab] = useState("dash"); // "dash" | "wards" | "discharges"
   const [stationFilter, setStationFilter] = useState("all"); // "all" | station id
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
+  const [wardSearch, setWardSearch] = useState("");
   const [stationName, setStationName] = useState(user.nursing_station || "");
   const [stations,    setStations]    = useState([]); // [{id, name}] — every station this nurse covers
   const [liveKey,     setLiveKey]     = useState(0); // bumped on every live event — feeds the Home dashboard
@@ -264,15 +265,38 @@ export default function NurseApp({ user, onLogout }) {
       {/* Occupancy summary bar */}
       {wards.length > 0 && <NurseOccupancy wards={wards} />}
 
-      {/* Ward picker dropdown */}
-      {wards.length > 1 && (
-        <select className="field" aria-label="Filter by ward" value={wardFilter}
-          onChange={(e) => setWardFilter(e.target.value)}
-          style={{ marginBottom: 14, maxWidth: 380, fontWeight: 600 }}>
-          <option value="all">All wards ({wards.length})</option>
-          {wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
-        </select>
-      )}
+      {/* Search + ward picker */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+            <Ic d={icons.search} s={15} />
+          </span>
+          <input
+            className="field"
+            value={wardSearch}
+            placeholder="Search ward…"
+            style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
+            onChange={(e) => setWardSearch(e.target.value)}
+          />
+          {wardSearch && (
+            <button
+              onClick={() => setWardSearch("")}
+              aria-label="Clear search"
+              style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+            >
+              <Ic d={icons.x} s={14} />
+            </button>
+          )}
+        </div>
+        {wards.length > 1 && (
+          <select className="field" aria-label="Filter by ward" value={wardFilter}
+            onChange={(e) => setWardFilter(e.target.value)}
+            style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
+            <option value="all">All wards ({wards.length})</option>
+            {wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+          </select>
+        )}
+      </div>
 
       {wards.length === 0 ? (
         <div className="card empty" style={{ marginTop: 20 }}>
@@ -288,8 +312,10 @@ export default function NurseApp({ user, onLogout }) {
         stations
           .filter((st) => stationFilter === "all" || String(st.id) === stationFilter)
           .map((st) => {
+            const nq = wardSearch.trim().toLowerCase();
             const list = wards.filter((w) =>
-              w.station_id === st.id && (wardFilter === "all" || String(w.id) === wardFilter)
+              w.station_id === st.id && (wardFilter === "all" || String(w.id) === wardFilter) &&
+              (!nq || w.name.toLowerCase().includes(nq))
             );
             if (list.length === 0) return null;
             const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
@@ -313,7 +339,11 @@ export default function NurseApp({ user, onLogout }) {
       ) : (
         <div className="card-grid">
           {wards
-            .filter((w) => wardFilter === "all" || String(w.id) === wardFilter)
+            .filter((w) => {
+              const nq = wardSearch.trim().toLowerCase();
+              return (wardFilter === "all" || String(w.id) === wardFilter) &&
+                (!nq || w.name.toLowerCase().includes(nq));
+            })
             .map((ward, i) => (
               <WardCard key={ward.id} ward={ward} index={i}
                 onOpen={(w, tab) => setOpenWard({ ward: w, tab })} />
