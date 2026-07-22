@@ -32,7 +32,7 @@ const GROUPS = [...new Set(STEPS.map((s) => s.group))].map((id) => ({
 // Checkout (which runs after/parallel to it, not before). Mirrors the backend gate
 // in dischargeService.updateStep so the button reflects what the API will actually allow.
 const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !["SYSTEM_CHECKOUT", "PHYSICAL_CHECKOUT"].includes(s.key));
-const PRE_PHYSICAL_CHECKOUT_STEPS = STEPS.filter((s) => s.key !== "PHYSICAL_CHECKOUT");
+const PRE_PHYSICAL_CHECKOUT_STEPS = [];
 const PLAN_ROLES = ["PRE", "DOCTOR", "CONSULTANT"];
 
 const ROLE_SHORT = { PRE: "PRE", NURSE: "Nurse", DOCTOR: "Doctor", CONSULTANT: "Consultant", FC: "FC", MASTER_FC: "FC", PHARMACY: "Pharmacy", MASTER_PHARMACY: "Pharmacy" };
@@ -340,6 +340,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   const [error, setError] = useState("");
   const [section, setSection] = useState(null); // "plan" | "transfer" | "history" | null
   const [cancelReason, setCancelReason] = useState(null); // string | null (null = hidden)
+  const [expandTime, setExpandTime] = useState(false);
   // PRE only, for now — see the "Physical Checkout while System Checkout is still
   // pending" fork below. true while the choice popup is open.
 
@@ -458,17 +459,46 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
             )}
             {/* Once running, the planned date stops being useful — what everyone
                 needs is the live estimate and whether the flow is slipping. */}
-            {workflow?.eta != null && (
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
-                  Est. discharge
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.15 }}>{fmtClock(workflow.eta)}</div>
-                {tone && (
-                  <span style={{
-                    display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
-                    padding: "2px 7px", borderRadius: 99, background: tone.bg, color: tone.color,
-                  }}>{tone.label}</span>
+            {(workflow?.expectedTime != null || workflow?.eta != null) && (
+              <div style={{ display: "flex", gap: 16, alignItems: "flex-start", cursor: "pointer" }}
+                onClick={() => setExpandTime(v => !v)}>
+                {workflow.expectedTime != null && (() => {
+                  const now = Date.now();
+                  const overdue = now > workflow.expectedTime;
+                  const overdueMs = overdue ? now - workflow.expectedTime : 0;
+                  const overdueMins = Math.floor(overdueMs / 60000);
+                  return (
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
+                        Est. discharge
+                      </div>
+                      <div style={{ fontSize: expandTime ? 11.5 : 15, fontWeight: 800, lineHeight: 1.15, color: overdue ? "var(--red)" : "var(--ink)" }}>
+                        {expandTime ? fmtDateTime(workflow.expectedTime) : fmtClock(workflow.expectedTime)}
+                      </div>
+                      {overdue && (
+                        <span style={{
+                          display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
+                          padding: "2px 7px", borderRadius: 99, background: "var(--red-bg)", color: "var(--red)",
+                        }}>Delayed {fmtMins(overdueMins)}</span>
+                      )}
+                    </div>
+                  );
+                })()}
+                {workflow.eta != null && (
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
+                      Expected time
+                    </div>
+                    <div style={{ fontSize: expandTime ? 11.5 : 15, fontWeight: 800, lineHeight: 1.15 }}>
+                      {expandTime ? fmtDateTime(workflow.eta) : fmtClock(workflow.eta)}
+                    </div>
+                    {tone && (
+                      <span style={{
+                        display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
+                        padding: "2px 7px", borderRadius: 99, background: tone.bg, color: tone.color,
+                      }}>{tone.label}</span>
+                    )}
+                  </div>
                 )}
               </div>
             )}
