@@ -31,7 +31,7 @@ const GROUPS = [...new Set(STEPS.map((s) => s.group))].map((id) => ({
 // Every step System Checkout must wait on — everything except itself and Physical
 // Checkout (which runs after/parallel to it, not before). Mirrors the backend gate
 // in dischargeService.updateStep so the button reflects what the API will actually allow.
-const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !["SYSTEM_CHECKOUT", "PHYSICAL_CHECKOUT"].includes(s.key));
+const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !s.hidden && !["SYSTEM_CHECKOUT", "PHYSICAL_CHECKOUT"].includes(s.key));
 const PRE_PHYSICAL_CHECKOUT_STEPS = [];
 const PLAN_ROLES = ["PRE", "DOCTOR", "CONSULTANT"];
 
@@ -137,16 +137,31 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
               onClick={async () => {
                 if (systemCheckoutDone) {
                   const ok = await confirm({
-                    title: "Confirm Patient Left",
-                    message: "This bed will become vacant and the discharge will be completed.\n\nThis action cannot be undone — there is no way to reopen after this.",
-                    confirmLabel: "Yes, Patient Left",
+                    title: "Confirm Physical Checkout",
+                    message: "System Checkout is already completed. Marking Physical Checkout will make this bed vacant and complete the discharge.",
+                    badge: "This action cannot be undone",
+                    confirmLabel: "Yes, Complete Discharge",
                     cancelLabel: "Go Back",
-                    danger: true,
+                    danger: false,
+                    warning: true,
                   });
                   if (!ok) return;
+                  setPickingLeft(false);
+                  onSetStatus(step.key, "COMPLETED", { patientLeft: true });
+                } else {
+                  const choice = await confirm({
+                    title: "Patient Has Left",
+                    message: "System Checkout is still pending — billing/paperwork isn't complete yet.\n\nMove the patient to the Discharge Lounge to free up this bed?",
+                    confirmLabel: "Move to Discharge Lounge",
+                    cancelLabel: "Dismiss",
+                    danger: false,
+                    warning: true,
+                  });
+                  if (choice) {
+                    setPickingLeft(false);
+                    onSetStatus(step.key, "COMPLETED", { patientLeft: true, moveToLounge: true });
+                  }
                 }
-                setPickingLeft(false);
-                onSetStatus(step.key, "COMPLETED", { patientLeft: true });
               }}>Patient Left</button>
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
               onClick={() => setPickingLeft(false)}>Cancel</button>
@@ -389,12 +404,22 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
     finally { setBusy(false); }
   };
 
-  // Physical Checkout ("patient left: yes") completing while System Checkout is still
-  // pending needs a decision — the bed can't stay Occupied (nobody's in it) or go
-  // Vacant (paperwork isn't done). PRE only for now; every other role keeps the
-  // previous direct-complete behavior unchanged.
-  const onStepAction = (step, status, opts = {}) => {
+  const onStepAction = async (step, status, opts = {}) => {
+    if (step === "PHYSICAL_CHECKOUT" && status === "COMPLETED" && opts.moveToLounge) {
+      await setStep(step, status, opts);
+      await moveToLounge();
+      return;
+    }
     setStep(step, status, opts);
+  };
+
+  const moveToLounge = async () => {
+    setBusy(true); setError("");
+    try {
+      await api.dischargeMoveToLounge(tracking.admission_id);
+      await refresh();
+    } catch (e) { setError(toastErr(e)); }
+    finally { setBusy(false); }
   };
 
   const initiate = async () => {
@@ -608,6 +633,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
               </div>
 
 
+
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 {canPlan && (
                   <button className="btn btn-ghost" style={{ flex: 1, fontSize: 12, color: "var(--st-or)" }}
@@ -623,14 +649,26 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
 
           {tracking.status === "CANCELLED" && (
             <>
-              <div className="dim" style={{ fontSize: 13, marginBottom: 10 }}>This discharge is cancelled.</div>
+              <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "var(--st-or)", marginBottom: 6 }}>This discharge is cancelled.</div>
+                <div style={{ fontSize: 11.5, color: "var(--ink-2)", display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span>Cancelled on: <strong style={{ color: "var(--ink)" }}>{fmtDateTime(tracking.updated_at)}</strong></span>
+                  {tracking.planned_date && <span>Originally planned: <strong style={{ color: "var(--ink)" }}>{tracking.planned_date}{tracking.planned_time ? ` · ${tracking.planned_time}` : ""}</strong></span>}
+                  {tracking.initiated_at && <span>Was initiated: <strong style={{ color: "var(--ink)" }}>{fmtDateTime(tracking.initiated_at)}</strong></span>}
+                </div>
+              </div>
               {canPlan && (
                 section === "plan" ? (
                   <PlanSection bed={bed} existing={null} onClose={() => setSection(null)} onSaved={refresh} />
                 ) : (
-                  <button className="btn btn-primary btn-block" onClick={() => setSection("plan")}>
-                    <Ic d={icons.clipboard} s={14} /> Reschedule Discharge
-                  </button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setSection("plan")}>
+                      <Ic d={icons.clipboard} s={14} /> Reschedule Discharge
+                    </button>
+                    <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={initiate}>
+                      <Ic d={icons.check} s={14} /> Initiate Now
+                    </button>
+                  </div>
                 )
               )}
             </>

@@ -301,6 +301,7 @@ function Home({ data, setTab, alarmActive }) {
 function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
   const [openWard, setOpenWard] = useState(null); // { ward, tab } | null
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
+  const [wardSearch, setWardSearch] = useState("");
 
   // Full-page ward view — replaces the grid entirely (no popup stack).
   if (openWard) return (
@@ -329,18 +330,45 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
     <div>
       <OccupancyCards data={data} />
 
-      {/* Ward picker — jump straight to one ward when the list is long */}
-      {data.wards.length > 1 && (
-        <select className="field" aria-label="Filter by ward" value={wardFilter}
-          onChange={(e) => setWardFilter(e.target.value)}
-          style={{ marginBottom: 14, maxWidth: 380, fontWeight: 600 }}>
-          <option value="all">All wards ({data.wards.length})</option>
-          {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.ward}</option>)}
-        </select>
-      )}
+      {/* Search + ward picker */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+            <Ic d={icons.search} s={15} />
+          </span>
+          <input
+            className="field"
+            value={wardSearch}
+            placeholder="Search ward…"
+            style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
+            onChange={(e) => setWardSearch(e.target.value)}
+          />
+          {wardSearch && (
+            <button
+              onClick={() => setWardSearch("")}
+              aria-label="Clear search"
+              style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+            >
+              <Ic d={icons.x} s={14} />
+            </button>
+          )}
+        </div>
+        {data.wards.length > 1 && (
+          <select className="field" aria-label="Filter by ward" value={wardFilter}
+            onChange={(e) => setWardFilter(e.target.value)}
+            style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
+            <option value="all">All wards ({data.wards.length})</option>
+            {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.ward}</option>)}
+          </select>
+        )}
+      </div>
 
       {(data.blocks ?? [{ id: data.preBlockId, name: "", wards: data.wards }]).map((block, bi) => {
-        const visibleWards = block.wards.filter((w) => wardFilter === "all" || String(w.id) === wardFilter);
+        const wq = wardSearch.trim().toLowerCase();
+        const visibleWards = block.wards.filter((w) =>
+          (wardFilter === "all" || String(w.id) === wardFilter) &&
+          (!wq || w.ward.toLowerCase().includes(wq))
+        );
         if (visibleWards.length === 0) return null;
         return (
           <div key={block.id}>
@@ -1309,16 +1337,20 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
             </div>
           ) : (
             <div style={{ display: "flex", gap: 10 }}>
-              {[["VACANT", "var(--st-v)", "Vacant"], ["OCCUPIED", "var(--st-o)", "Occupied"]].map(([val, c, lbl]) => (
-                <button key={val} onClick={() => handleSetPhysical(val)} style={{
-                  flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
-                  border: `2px solid ${physical === val ? c : "var(--line)"}`,
-                  background: physical === val ? c : "var(--panel)",
-                  color: physical === val ? "#fff" : "var(--ink-2)",
-                  cursor: "pointer", transition: "all 0.15s",
-                }}><Ic d={icons.bed} s={16} /> {lbl}</button>
-              ))}
+              {[["VACANT", "var(--st-v)", "Vacant"], ["OCCUPIED", "var(--st-o)", "Occupied"]].map(([val, c, lbl]) => {
+                const vacantDisabled = val === "VACANT" && bed.physical_status === "OCCUPIED";
+                return (
+                  <button key={val} disabled={vacantDisabled} onClick={() => !vacantDisabled && handleSetPhysical(val)} style={{
+                    flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+                    border: `2px solid ${physical === val ? c : "var(--line)"}`,
+                    background: physical === val ? c : "var(--panel)",
+                    color: physical === val ? "#fff" : "var(--ink-2)",
+                    cursor: vacantDisabled ? "not-allowed" : "pointer", transition: "all 0.15s",
+                    opacity: vacantDisabled ? 0.4 : 1,
+                  }}><Ic d={icons.bed} s={16} /> {lbl}</button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1401,7 +1433,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
               Status
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              {!cfg.readOnly && (
+              {!cfg.readOnly && bed.bed_type !== "Lounge" && (
                 <button onClick={() => setReservationOpen(true)} style={{
                   display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
                   background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
@@ -1412,7 +1444,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
                   <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{bed.reservation_status === "RESERVED" ? "Reserved" : "None"}</span>
                 </button>
               )}
-              {cfg.role === "PRE" && (
+              {cfg.role === "PRE" && bed.bed_type !== "Lounge" && (
                 <button onClick={() => setTransferOpen(true)} style={{
                   display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
                   background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
@@ -1647,7 +1679,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
 
   const q = search.trim().toLowerCase();
   const displayed = sortedBeds.filter(b => {
-    if (q && !b.bed_name.toLowerCase().includes(q)) return false;
+    if (q && !b.bed_name.toLowerCase().includes(q) && !(b.ip_last6 && b.ip_last6.includes(q))) return false;
     if (filter === "KIMS") return b.unit_type === "KIMS";
     if (filter === "Renova") return b.unit_type?.includes("Renova");
     if (filter === "Op") return !!b.operational_status;
@@ -1734,7 +1766,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
         <input
           className="field"
           value={search}
-          placeholder="Search bed…"
+          placeholder="Search bed or IP…"
           style={{ paddingLeft: 36, paddingRight: search ? 36 : 13 }}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -1787,7 +1819,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
         <Ic d={icons.search} s={24} />
         <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>No beds match</div>
         <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
-          {q ? `Nothing named “${search.trim()}” in this filter.` : "No beds in this filter."}
+          {q ? `No bed or IP matching "${search.trim()}" in this filter.` : "No beds in this filter."}
         </div>
         {(q || filter !== "ALL") && (
           <button className="btn btn-ghost" style={{ marginTop: 12, fontSize: 12, padding: "8px 14px" }}

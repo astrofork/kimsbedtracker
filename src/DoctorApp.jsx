@@ -54,6 +54,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
 
   const [docsOpen, setDocsOpen] = useState(false); // doctors-list dropdown
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
+  const [wardSearch, setWardSearch] = useState("");
 
   // On phones, hide the app top bar while inside a block — the back button is the
   // way out, and the reclaimed space goes to the ward cards. (CSS: body.ward-focus)
@@ -137,17 +138,44 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
       ) : (
         <>
           <div className="floor-head">Wards</div>
-          {/* Ward picker — jump straight to one ward when the list is long */}
-          {data.wards.length > 1 && (
-            <select className="field" aria-label="Filter by ward" value={wardFilter}
-              onChange={(e) => setWardFilter(e.target.value)}
-              style={{ marginBottom: 14, maxWidth: 380, fontWeight: 600 }}>
-              <option value="all">All wards ({data.wards.length})</option>
-              {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
-            </select>
-          )}
+          {/* Search + ward picker */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+              <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+                <Ic d={icons.search} s={15} />
+              </span>
+              <input
+                className="field"
+                value={wardSearch}
+                placeholder="Search ward…"
+                style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
+                onChange={(e) => setWardSearch(e.target.value)}
+              />
+              {wardSearch && (
+                <button
+                  onClick={() => setWardSearch("")}
+                  aria-label="Clear search"
+                  style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+                >
+                  <Ic d={icons.x} s={14} />
+                </button>
+              )}
+            </div>
+            {data.wards.length > 1 && (
+              <select className="field" aria-label="Filter by ward" value={wardFilter}
+                onChange={(e) => setWardFilter(e.target.value)}
+                style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
+                <option value="all">All wards ({data.wards.length})</option>
+                {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+              </select>
+            )}
+          </div>
           <div className="card-grid">
-            {data.wards.filter((w) => wardFilter === "all" || String(w.id) === wardFilter).map((w, i) => {
+            {data.wards.filter((w) => {
+              const dq = wardSearch.trim().toLowerCase();
+              return (wardFilter === "all" || String(w.id) === wardFilter) &&
+                (!dq || w.name.toLowerCase().includes(dq));
+            }).map((w, i) => {
               const o = occOf(w);
               return (
                 <div key={w.id} className="doc-ward slide-up tap" style={{ animationDelay: i * 0.03 + "s" }}
