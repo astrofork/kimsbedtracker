@@ -22,7 +22,7 @@ const CONSULTANT_CFG = {
 };
 
 // ── My Patients page — flat bed grid with ward label on each card ────────────
-function MyPatientsPage() {
+function MyPatientsPage({ liveKey: parentLiveKey }) {
   const [patients, setPatients] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -48,16 +48,7 @@ function MyPatientsPage() {
     api.departments().then(r => setDepartments(r.departments || [])).catch(() => {});
   }, []);
 
-  const liveRef = useRef(load);
-  liveRef.current = load;
-  useEffect(() => {
-    const socket = createSocket();
-    socket.on("bed:update", () => liveRef.current());
-    socket.on("discharge:update", () => liveRef.current());
-    socket.on("discharge:overstay", () => liveRef.current());
-    socket.on("connect", () => liveRef.current());
-    return () => socket.disconnect();
-  }, []);
+  useEffect(() => { if (parentLiveKey > 0) load(); }, [parentLiveKey]);
 
   const openBed = async (p) => {
     setLoadingBed(true);
@@ -229,9 +220,11 @@ export default function ConsultantApp({ user, meta, onLogout }) {
   // Live reload trigger for dashboard
   useEffect(() => {
     const socket = createSocket();
-    socket.on("bed:update", () => setLiveKey((k) => k + 1));
-    socket.on("discharge:update", () => setLiveKey((k) => k + 1));
-    socket.on("discharge:overstay", () => setLiveKey((k) => k + 1));
+    const bump = () => setLiveKey((k) => k + 1);
+    socket.on("bed:update", bump);
+    socket.on("discharge:update", bump);
+    socket.on("discharge:overstay", bump);
+    socket.on("connect", bump);
     return () => socket.disconnect();
   }, []);
 
@@ -263,7 +256,7 @@ export default function ConsultantApp({ user, meta, onLogout }) {
             hideUnitFilter
           />
         )}
-        {tab === "mypatients" && <MyPatientsPage showToast={showToast} />}
+        {tab === "mypatients" && <MyPatientsPage showToast={showToast} liveKey={liveKey} />}
         {tab === "discharges" && <DischargesPage role="CONSULTANT" />}
         {tab === "profile" && <ProfilePage user={user} onLogout={onLogout} />}
 

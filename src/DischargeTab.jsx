@@ -13,15 +13,15 @@ import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 // documentation only — the UI renders each group as its own card with no
 // heading, so the labels aren't carried in the data.
 const STEPS = [
-  { key: "DISCHARGE_INITIATION", label: "Discharge Initiation", roles: ["DOCTOR", "CONSULTANT"], group: 1, hidden: true },
-  { key: "DISCHARGE_DOC",     label: "Discharge Summary", roles: ["DOCTOR", "CONSULTANT"], group: 1 },
+  { key: "DISCHARGE_INITIATION", label: "Discharge Initiation", roles: ["PRE", "DOCTOR", "CONSULTANT"], group: 1, hidden: true },
+  { key: "DISCHARGE_DOC",     label: "Discharge Summary", roles: ["PRE", "DOCTOR", "CONSULTANT"], group: 1 },
   { key: "DRUG_RETURN", label: "Drug Return", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2 },
   { key: "PHARMACY_CLEARANCE", label: "Pharmacy Clearance", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2, after: "DRUG_RETURN" },
   { key: "PROCEDURE_RECONCILIATION", label: "Procedure Reconciliation (OT / Cath Lab)", roles: ["PRE"], allowNA: true, group: 2, after: "DRUG_RETURN" },
-  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
+  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE", "FC", "MASTER_FC"], group: 3, afterAll: ["PHARMACY_CLEARANCE", "PROCEDURE_RECONCILIATION"] },
   { key: "AUDIT", label: "Audit", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
-  { key: "BILL_READY", label: "Bill Finalized", roles: ["FC", "MASTER_FC"], group: 3 },
-  { key: "PAYMENT", label: "Payment Status", roles: ["FC", "MASTER_FC"], group: 3 },
+  { key: "BILL_READY", label: "Bill Finalized", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
+  { key: "PAYMENT", label: "Payment Status", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
   { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE"], group: 4 },
   { key: "PHYSICAL_CHECKOUT", label: "Physical Checkout", roles: ["PRE", "NURSE"], needsPatientLeft: true, group: 5 },
 ];
@@ -35,6 +35,12 @@ const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !["SYSTEM_CHECKOUT", "PHYS
 const PRE_PHYSICAL_CHECKOUT_STEPS = STEPS.filter((s) => s.key !== "PHYSICAL_CHECKOUT");
 const PLAN_ROLES = ["PRE", "DOCTOR", "CONSULTANT"];
 
+const ROLE_SHORT = { PRE: "PRE", NURSE: "Nurse", DOCTOR: "Doctor", CONSULTANT: "Consultant", FC: "FC", MASTER_FC: "FC", PHARMACY: "Pharmacy", MASTER_PHARMACY: "Pharmacy" };
+function friendlyRoles(roles) {
+  const unique = [...new Set(roles.map(r => ROLE_SHORT[r] || r))];
+  return unique.join(" / ");
+}
+
 // --ink-2 rather than --ink-3 for the neutral states: --ink-3 (#9CA3AF light) is
 // only ~2.5:1 on the group-box surface, under the 4.5:1 AA floor.
 const STATUS_COLOR = {
@@ -47,13 +53,17 @@ function todayStr(offsetDays = 0) {
   return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
-function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone }) {
+function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking }) {
   const [pickingLeft, setPickingLeft] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
   const canAct = step.roles.includes(role);
   const isPharmacyStep = ["DRUG_RETURN", "PHARMACY_CLEARANCE"].includes(step.key);
   const isBillingStep = ["BILLING_STARTED", "AUDIT", "BILL_READY", "PAYMENT"].includes(step.key);
-  const canDirectReopen = !(role === "PHARMACY" && isPharmacyStep) && !(role === "FC" && isBillingStep);
+  const drugReturnReopenBlocked = step.key === "DRUG_RETURN" && status === "COMPLETED" && tracking && (
+    ["COMPLETED", "NOT_APPLICABLE"].includes(tracking.pharmacy_clearance_status) ||
+    ["COMPLETED", "NOT_APPLICABLE"].includes(tracking.procedure_reconciliation_status)
+  );
+  const canDirectReopen = !(role === "PHARMACY" && isPharmacyStep) && !(role === "FC" && isBillingStep) && !drugReturnReopenBlocked;
   const showPatientLeft = step.needsPatientLeft && status === "COMPLETED";
 
   // SLA line — all values come from the backend's `workflow.phases`; this only
@@ -116,54 +126,55 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
           </div>
         )}
       </div>
-      {locked ? (
-        <span title={lockedTitle} style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}>
-          <Ic d={icons.ban} s={12} /> After {lockedOn}
-        </span>
-      ) : !canAct ? (
-        <span className="dim" style={{ fontSize: 11, flexShrink: 0 }}>{step.roles.join("/")}-only</span>
-      ) : pickingLeft ? (
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-            onClick={async () => {
-              if (systemCheckoutDone) {
-                const ok = await confirm({
-                  title: "Confirm Patient Left",
-                  message: "This bed will become vacant and the discharge will be completed.\n\nThis action cannot be undone — there is no way to reopen after this.",
-                  confirmLabel: "Yes, Patient Left",
-                  cancelLabel: "Go Back",
-                  danger: true,
-                });
-                if (!ok) return;
-              }
-              setPickingLeft(false);
-              onSetStatus(step.key, "COMPLETED", { patientLeft: true });
-            }}>Patient Left</button>
-          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-            onClick={() => setPickingLeft(false)}>Cancel</button>
-        </div>
-      ) : (
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-          {status === "PENDING" && step.allowNA && (
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-              onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</button>
-          )}
-          {status !== "COMPLETED" && status !== "NOT_APPLICABLE" && (
+      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+        {locked ? (
+          <span title={lockedTitle} style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 4 }}>
+            <Ic d={icons.ban} s={12} /> After {lockedOn}
+          </span>
+        ) : canAct && pickingLeft ? (
+          <div style={{ display: "flex", gap: 6 }}>
             <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-              onClick={() => step.needsPatientLeft ? setPickingLeft(true) : onSetStatus(step.key, "COMPLETED")}>
-              Mark Completed
-            </button>
-          )}
-          {status !== "PENDING" && canDirectReopen && (
+              onClick={async () => {
+                if (systemCheckoutDone) {
+                  const ok = await confirm({
+                    title: "Confirm Patient Left",
+                    message: "This bed will become vacant and the discharge will be completed.\n\nThis action cannot be undone — there is no way to reopen after this.",
+                    confirmLabel: "Yes, Patient Left",
+                    cancelLabel: "Go Back",
+                    danger: true,
+                  });
+                  if (!ok) return;
+                }
+                setPickingLeft(false);
+                onSetStatus(step.key, "COMPLETED", { patientLeft: true });
+              }}>Patient Left</button>
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-              onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</button>
-          )}
-          {status === "COMPLETED" && !canDirectReopen && onRequestReopen && (
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px", color: "var(--amber)" }} disabled={busy}
-              onClick={() => onRequestReopen(step.key)}>Request Reopen</button>
-          )}
-        </div>
-      )}
+              onClick={() => setPickingLeft(false)}>Cancel</button>
+          </div>
+        ) : canAct ? (
+          <div style={{ display: "flex", gap: 6 }}>
+            {status === "PENDING" && step.allowNA && (
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+                onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</button>
+            )}
+            {status !== "COMPLETED" && status !== "NOT_APPLICABLE" && (
+              <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+                onClick={() => step.needsPatientLeft ? setPickingLeft(true) : onSetStatus(step.key, "COMPLETED")}>
+                Mark Completed
+              </button>
+            )}
+            {status !== "PENDING" && canDirectReopen && (
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+                onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</button>
+            )}
+            {status === "COMPLETED" && !canDirectReopen && onRequestReopen && (
+              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px", color: "var(--amber)" }} disabled={busy}
+                onClick={() => onRequestReopen(step.key)}>Request Reopen</button>
+            )}
+          </div>
+        ) : null}
+        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
+      </div>
       {confirmDialog}
     </div>
   );
@@ -528,16 +539,29 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                         : step.key === "PHYSICAL_CHECKOUT"
                         ? PRE_PHYSICAL_CHECKOUT_STEPS.filter((s) => !["COMPLETED", "NOT_APPLICABLE"].includes(tracking[s.key.toLowerCase() + "_status"]))
                         : [];
+                      const afterAllPending = step.afterAll
+                        ? step.afterAll
+                            .map(k => STEPS.find(s => s.key === k))
+                            .filter(s => s && !["COMPLETED", "NOT_APPLICABLE"].includes(tracking[s.key.toLowerCase() + "_status"]))
+                        : [];
                       const locked = (step.key === "SYSTEM_CHECKOUT" || step.key === "PHYSICAL_CHECKOUT")
                         ? status === "PENDING" && pendingBefore.length > 0
+                        : step.afterAll
+                        ? status === "PENDING" && afterAllPending.length > 0
                         : status === "PENDING" && !!depStep && !["COMPLETED", "NOT_APPLICABLE"].includes(depStatus);
                       const lockedOn = (step.key === "SYSTEM_CHECKOUT" || step.key === "PHYSICAL_CHECKOUT")
                         ? (pendingBefore.length === 1
                             ? pendingBefore[0].label
                             : `${pendingBefore.length} steps`)
+                        : step.afterAll
+                        ? (afterAllPending.length === 1
+                            ? afterAllPending[0].label
+                            : `${afterAllPending.length} steps`)
                         : (locked ? depStep.label : null);
                       const lockedTitle = (step.key === "SYSTEM_CHECKOUT" || step.key === "PHYSICAL_CHECKOUT") && pendingBefore.length > 1
                         ? pendingBefore.map((s) => s.label).join(", ")
+                        : step.afterAll && afterAllPending.length > 1
+                        ? afterAllPending.map(s => s.label).join(", ")
                         : undefined;
                       return (
                         <StepRow key={step.key} step={step} role={role} busy={busy} status={status}
@@ -545,7 +569,8 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                           onSetStatus={onStepAction} onRequestReopen={onRequestReopen ? (stepKey) => onRequestReopen(bed.admission_id, stepKey) : null}
                           patientLeft={tracking.patient_left}
                           systemCheckoutDone={tracking.system_checkout_status === "COMPLETED"}
-                          phase={phaseByKey.get(step.key)} isLast={i === g.steps.length - 1} />
+                          phase={phaseByKey.get(step.key)} isLast={i === g.steps.length - 1}
+                          tracking={tracking} />
                       );
                     })}
                   </div>
