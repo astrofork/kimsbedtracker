@@ -21,11 +21,11 @@ const FC_CFG = {
 };
 
 const SECTIONS = [
-  { key: "SYSTEM_CHECKOUT", label: "System Checkout Pending", color: "#0f766e", bg: "#ccfbf1", emptyIcon: icons.logout, emptyMsg: "No discharges awaiting System Checkout." },
   { key: "BILLING_STARTED", label: "Bill Prep Pending", color: "#d97706", bg: "#fef3c7", emptyIcon: icons.fileText, emptyMsg: "No bills awaiting prep." },
   { key: "AUDIT", label: "Bill Audit Pending", color: "#2563eb", bg: "#dbeafe", emptyIcon: icons.clipboard, emptyMsg: "No bills awaiting audit." },
   { key: "BILL_READY", label: "Bill Finalization Pending", color: "#7c3aed", bg: "#ede9fe", emptyIcon: icons.fileText, emptyMsg: "No bills awaiting finalization." },
   { key: "PAYMENT", label: "Payment / Approval Pending", color: "#16a34a", bg: "#dcfce7", emptyIcon: icons.banknote, emptyMsg: "No payments pending." },
+  { key: "SYSTEM_CHECKOUT", label: "System Checkout Pending", color: "#0f766e", bg: "#ccfbf1", emptyIcon: icons.logout, emptyMsg: "No discharges awaiting System Checkout." },
 ];
 
 const STEP_LABEL = { SYSTEM_CHECKOUT: "System Checkout", BILLING_STARTED: "Bill Prep", AUDIT: "Audit", BILL_READY: "Bill Finalized", PAYMENT: "Payment" };
@@ -381,11 +381,11 @@ export default function FCApp({ user, onLogout }) {
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{totalPending}</div><div className="l">TOTAL BILLING</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.SYSTEM_CHECKOUT?.length || 0}</div><div className="l">CHECKOUT</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILLING_STARTED?.length || 0}</div><div className="l">PREP</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.AUDIT?.length || 0}</div><div className="l">AUDIT</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILL_READY?.length || 0}</div><div className="l">FINALIZE</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.PAYMENT?.length || 0}</div><div className="l">PAYMENT</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.SYSTEM_CHECKOUT?.length || 0}</div><div className="l">CHECKOUT</div></div>
             <div className="stat">
               <div className="n" style={{ fontSize: 18 }}>{lastSync ? lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</div>
               <div className="l">LAST UPDATE</div>

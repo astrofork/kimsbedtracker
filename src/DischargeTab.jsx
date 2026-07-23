@@ -22,7 +22,7 @@ const STEPS = [
   { key: "AUDIT", label: "Audit", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
   { key: "BILL_READY", label: "Bill Finalized", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
   { key: "PAYMENT", label: "Payment Status", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
-  { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE"], group: 4 },
+  { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE", "FC", "MASTER_FC"], group: 4 },
   { key: "PHYSICAL_CHECKOUT", label: "Physical Checkout", roles: ["PRE", "NURSE"], needsPatientLeft: true, group: 5 },
 ];
 const GROUPS = [...new Set(STEPS.map((s) => s.group))].map((id) => ({
