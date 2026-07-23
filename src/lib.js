@@ -296,6 +296,7 @@ export const api = {
   dischargesInitiatedToday: () => req("/discharge/initiated-today"),
   dischargesCompletedToday: () => req("/discharge/completed-today"),
   dischargesPatientLeft: () => req("/discharge/patient-left"),
+  transferWards: () => req("/discharge/transfer/wards"),
   transferCandidates: (wardId) => req(`/discharge/transfer/candidates?wardId=${wardId}`),
   transferBed: (fromBedId, toWardId, toBedId, reason) =>
     req("/discharge/transfer", { method: "POST", body: JSON.stringify({ fromBedId, toWardId, toBedId, reason }) }),
@@ -368,6 +369,20 @@ export const api = {
   fcPayerTypes: () => req("/fc/payer-types"),
   fcSnapshots: () => req("/fc/snapshots"),
   fcOverstay: () => req("/fc/overstay"),
+  // ── FC — Bed Entry (hospital-wide, operational wards only) ───────────────
+  fcWards: () => req("/fc/wards"),
+  fcDestinations: () => req("/fc/destinations"),
+  fcBeds: (wardId, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
+    const qs = params.toString();
+    return req(`/fc/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
+  },
+  fcUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
+    req(`/fc/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
+  fcUpdateAdmission: (bedId, { ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, payerType }) =>
+    req(`/fc/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, payer_type: payerType }) }),
   // ── Simple logins (FC, Pharmacy) — admin management ───────────────────────
   mgrSimpleLogins: (role) => req(`/manager/simple-logins?role=${role}`),
   mgrCreateSimpleLogin: (role, username, password, name) =>

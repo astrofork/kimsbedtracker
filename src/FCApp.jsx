@@ -5,21 +5,37 @@ import { Ic, icons } from "./ui.jsx";
 import { fmtIpLast6 } from "./bedUtils.js";
 import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
+import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
+import { WardCard } from "./NurseApp.jsx";
+
+// FC's Bed Entry: hospital-wide, operational-wards-only write access (admit,
+// edit patient info, transfer). No reviewWard — Review/Submit-round are a
+// PRE-specific round-compliance workflow FC's Bed Entry does not have.
+const FC_CFG = {
+  role: "FC",
+  listBeds: (wardId, opts) => api.fcBeds(wardId, opts),
+  updateBedStatus: (...a) => api.fcUpdateBedStatus(...a),
+  payerTypes: () => api.fcPayerTypes(),
+  destinations: () => api.fcDestinations(),
+  updateAdmission: (bedId, patch) => api.fcUpdateAdmission(bedId, patch),
+};
 
 const SECTIONS = [
+  { key: "SYSTEM_CHECKOUT", label: "System Checkout Pending", color: "#0f766e", bg: "#ccfbf1", emptyIcon: icons.logout, emptyMsg: "No discharges awaiting System Checkout." },
   { key: "BILLING_STARTED", label: "Bill Prep Pending", color: "#d97706", bg: "#fef3c7", emptyIcon: icons.fileText, emptyMsg: "No bills awaiting prep." },
   { key: "AUDIT", label: "Bill Audit Pending", color: "#2563eb", bg: "#dbeafe", emptyIcon: icons.clipboard, emptyMsg: "No bills awaiting audit." },
   { key: "BILL_READY", label: "Bill Finalization Pending", color: "#7c3aed", bg: "#ede9fe", emptyIcon: icons.fileText, emptyMsg: "No bills awaiting finalization." },
   { key: "PAYMENT", label: "Payment / Approval Pending", color: "#16a34a", bg: "#dcfce7", emptyIcon: icons.banknote, emptyMsg: "No payments pending." },
 ];
 
-const STEP_LABEL = { BILLING_STARTED: "Bill Prep", AUDIT: "Audit", BILL_READY: "Bill Finalized", PAYMENT: "Payment" };
+const STEP_LABEL = { SYSTEM_CHECKOUT: "System Checkout", BILLING_STARTED: "Bill Prep", AUDIT: "Audit", BILL_READY: "Bill Finalized", PAYMENT: "Payment" };
 
 const BILLING_STEPS_ORDER = [
   { key: "BILLING_STARTED", col: "billing_started_status" },
   { key: "AUDIT", col: "audit_status" },
   { key: "BILL_READY", col: "bill_ready_status" },
   { key: "PAYMENT", col: "payment_status" },
+  { key: "SYSTEM_CHECKOUT", col: "system_checkout_status" },
 ];
 
 function completedBillingSteps(row) {
@@ -244,10 +260,28 @@ export default function FCApp({ user, onLogout }) {
   const [reopenRequests, setReopenRequests] = useState([]);
   const [reopenModal, setReopenModal] = useState(null);
   const [liveKey, setLiveKey] = useState(0);
+  const [txnFilter, setTxnFilter] = useState("ALL"); // My Transactions ribbon filter
   const loadRef = useRef(() => {});
   const isMaster = user.role === "MASTER_FC";
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
+
+  // ── Bed Entry (hospital-wide, operational wards only) ──────────────────────
+  const [wards, setWards] = useState(null);
+  const [openWard, setOpenWard] = useState(null); // { ward, tab } | null
+  const [wardFilter, setWardFilter] = useState("all");
+  const [wardSearch, setWardSearch] = useState("");
+  const loadWardsRef = useRef(() => {});
+
+  const loadWards = useCallback(async () => {
+    try {
+      const r = await api.fcWards();
+      setWards(r.wards || []);
+    } catch (e) { showToast(toastErr(e)); }
+  }, [showToast]);
+  loadWardsRef.current = loadWards;
+
+  useEffect(() => { loadWards(); }, [loadWards]);
 
   const load = useCallback(async () => {
     try {
@@ -277,7 +311,7 @@ export default function FCApp({ user, onLogout }) {
 
   useEffect(() => {
     const socket = createSocket();
-    const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
+    const refresh = () => { loadRef.current(); loadWardsRef.current(); setLiveKey(k => k + 1); };
     socket.on("discharge:update", refresh);
     socket.on("discharge:overstay", refresh);
     socket.on("bed:update", refresh);
@@ -286,7 +320,7 @@ export default function FCApp({ user, onLogout }) {
     return () => { socket.disconnect(); };
   }, []);
 
-  const STEP_TOAST = { BILLING_STARTED: "Bill Prep done", AUDIT: "Audit done", BILL_READY: "Bill finalized", PAYMENT: "Payment complete" };
+  const STEP_TOAST = { SYSTEM_CHECKOUT: "System Checkout complete", BILLING_STARTED: "Bill Prep done", AUDIT: "Audit done", BILL_READY: "Bill finalized", PAYMENT: "Payment complete" };
   const completeStep = async (admissionId, stepKey) => {
     setBusyId(admissionId);
     const label = STEP_TOAST[stepKey] || "Step completed";
@@ -326,17 +360,19 @@ export default function FCApp({ user, onLogout }) {
   const menu = [
     { key: "beds", icon: icons.home, label: "Dashboard" },
     { key: "dashboard", icon: icons.bed, label: "My Transactions" },
+    { key: "entry", icon: icons.grid, label: "Bed Entry" },
     { key: "overstay", icon: icons.alert, label: "Overstay" },
     { key: "discharges", icon: icons.list, label: "Discharges" },
     { key: "requests", icon: icons.clipboard, label: "Reopen Requests", dot: isMaster && reopenPending > 0 },
   ];
 
   return (
+    <div className="preui">
     <AppShell
       menu={menu}
       active={tab}
-      onSelect={setTab}
-      title={isMaster ? "Master FC" : "Finance Coordinator"}
+      onSelect={(k) => { setTab(k); setOpenWard(null); }}
+      title={openWard ? "Bed Entry" : (isMaster ? "Master FC" : "Finance Coordinator")}
       user={{ name: user.name || user.username || "FC", role: isMaster ? "MASTER FC" : "FC" }}
       onLogout={onLogout}
       topExtra={null}
@@ -345,6 +381,7 @@ export default function FCApp({ user, onLogout }) {
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{totalPending}</div><div className="l">TOTAL BILLING</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.SYSTEM_CHECKOUT?.length || 0}</div><div className="l">CHECKOUT</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILLING_STARTED?.length || 0}</div><div className="l">PREP</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.AUDIT?.length || 0}</div><div className="l">AUDIT</div></div>
             <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILL_READY?.length || 0}</div><div className="l">FINALIZE</div></div>
@@ -370,7 +407,23 @@ export default function FCApp({ user, onLogout }) {
             </div>
           )}
 
-          {SECTIONS.map((sec) => (
+          {/* Ribbon — horizontally scrollable filter chips, jumps between step sections */}
+          <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 14, flexWrap: "nowrap" }}>
+            <button className={"fchip" + (txnFilter === "ALL" ? " on" : "")}
+              style={{ padding: "8px 16px", fontSize: 13, flexShrink: 0 }}
+              onClick={() => setTxnFilter("ALL")}>
+              All ({totalPending})
+            </button>
+            {SECTIONS.map((sec) => (
+              <button key={sec.key} className={"fchip" + (txnFilter === sec.key ? " on" : "")}
+                style={{ padding: "8px 16px", fontSize: 13, flexShrink: 0, whiteSpace: "nowrap" }}
+                onClick={() => setTxnFilter(sec.key)}>
+                {STEP_LABEL[sec.key]} ({data[sec.key]?.length || 0})
+              </button>
+            ))}
+          </div>
+
+          {SECTIONS.filter((sec) => txnFilter === "ALL" || txnFilter === sec.key).map((sec) => (
             <CollapsibleSection key={sec.key} section={sec} rows={data[sec.key] || []}
               onComplete={(admissionId) => completeStep(admissionId, sec.key)} busyId={busyId}
               onRequestReopen={!isMaster ? handleRequestReopen : null} isMaster={isMaster} />
@@ -380,6 +433,80 @@ export default function FCApp({ user, onLogout }) {
 
       {tab === "beds" && (
         <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "FC"} scope="fc" />
+      )}
+
+      {tab === "entry" && (
+        openWard ? (
+          <WardPage
+            ward={{ ...openWard.ward, ward: openWard.ward.ward }}
+            initialTab={openWard.tab}
+            cfg={FC_CFG}
+            allWards={(wards || []).map(w => ({ id: w.id, ward: w.ward, is_discharge_lounge: w.is_discharge_lounge }))}
+            onBack={() => { setOpenWard(null); loadWards(); }}
+          />
+        ) : wards === null ? (
+          <div className="empty" style={{ paddingTop: 80 }}>
+            <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+            <div className="dim" style={{ marginTop: 12, fontSize: 13 }}>Loading…</div>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+                <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+                  <Ic d={icons.search} s={15} />
+                </span>
+                <input
+                  className="field"
+                  value={wardSearch}
+                  placeholder="Search ward…"
+                  style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
+                  onChange={(e) => setWardSearch(e.target.value)}
+                />
+                {wardSearch && (
+                  <button
+                    onClick={() => setWardSearch("")}
+                    aria-label="Clear search"
+                    style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+                  >
+                    <Ic d={icons.x} s={14} />
+                  </button>
+                )}
+              </div>
+              {wards.length > 1 && (
+                <select className="field" aria-label="Filter by ward" value={wardFilter}
+                  onChange={(e) => setWardFilter(e.target.value)}
+                  style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
+                  <option value="all">All wards ({wards.length})</option>
+                  {wards.map((w) => <option key={w.id} value={String(w.id)}>{w.ward}</option>)}
+                </select>
+              )}
+            </div>
+
+            {wards.length === 0 ? (
+              <div className="card empty" style={{ marginTop: 20 }}>
+                <Ic d={icons.grid} s={32} />
+                <div style={{ marginTop: 10, fontWeight: 600 }}>No operational wards</div>
+                <div style={{ fontSize: 12, marginTop: 4, color: "var(--ink-3)" }}>
+                  Ask the Manager to mark wards operational.
+                </div>
+              </div>
+            ) : (
+              <div className="card-grid">
+                {wards
+                  .filter((w) => {
+                    const nq = wardSearch.trim().toLowerCase();
+                    return (wardFilter === "all" || String(w.id) === wardFilter) &&
+                      (!nq || w.ward.toLowerCase().includes(nq));
+                  })
+                  .map((ward, i) => (
+                    <WardCard key={ward.id} ward={{ ...ward, name: ward.ward, total_beds: ward.total }} index={i}
+                      onOpen={(w, t) => setOpenWard({ ward: { ...w, ward: w.name }, tab: t })} />
+                  ))}
+              </div>
+            )}
+          </>
+        )
       )}
 
       {tab === "overstay" && (
@@ -423,5 +550,6 @@ export default function FCApp({ user, onLogout }) {
 
       {toast && <div className="toast">{toast}</div>}
     </AppShell>
+    </div>
   );
 }

@@ -42,7 +42,7 @@ function NurseOccupancy({ wards }) {
 }
 
 // ── Ward summary card (PRE Entry style) ──────────────────────────────────────
-function WardCard({ ward, index, onOpen }) {
+export function WardCard({ ward, index, onOpen }) {
   const v  = ward.vacant   ?? 0;
   const r  = ward.reserved ?? 0;
   const o  = ward.occupied ?? 0;
