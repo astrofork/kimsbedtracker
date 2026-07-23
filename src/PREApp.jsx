@@ -182,7 +182,7 @@ export default function PREApp({ user, meta, onLogout }) {
           </>
         )}
         {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} />}
-        {tab === "discharges" && <DischargesPage role="PRE" wards={data.wards.map(w => ({ id: w.id, name: w.ward }))} />}
+        {tab === "discharges" && <DischargesPage role="PRE" />}
         {tab === "overstay" && <OverstayPanel loadFn={api.preOverstay} />}
 
         <ProfileThemeRow />
@@ -749,7 +749,7 @@ function ReservationPopup({ bed, destinations, onClose, onSave }) {
 // Bed Transfer, for an already-Occupied bed — PRE only. Now a top-level Actions
 // row item instead of a step nested inside the Discharge flow, so it's available
 // any time a bed is Occupied, not only once a discharge has been initiated.
-function TransferPopup({ bed, wards, onClose, onSaved }) {
+function TransferPopup({ bed, onClose, onSaved }) {
   useModal(onClose);
   return (
     <div className="overlay" onClick={onClose}>
@@ -758,7 +758,7 @@ function TransferPopup({ bed, wards, onClose, onSaved }) {
         <div style={{ padding: "18px 20px" }}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Bed Transfer</div>
           <div className="dim" style={{ fontSize: 12, marginBottom: 4 }}>Move this patient to a different bed.</div>
-          <TransferSection bed={bed} wards={wards} onClose={onClose} onSaved={onSaved} />
+          <TransferSection bed={bed} onClose={onClose} onSaved={onSaved} />
         </div>
       </div>
     </div>
@@ -865,7 +865,7 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
 }
 
 // ── Bed status dialog — centered popup ────────────────────────────────────────
-export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = PRE_CFG, onToast, onTransferred, payerTypes = [], destinations = [], departments = [] }) {
+export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG, onToast, onTransferred, payerTypes = [], destinations = [], departments = [] }) {
   const [physical, setPhysical] = useState(bed.physical_status);
   const [reservation, setReservation] = useState(bed.reservation_status);
   const [payer, setPayer] = useState(bed.payer_type || "");
@@ -1143,7 +1143,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
       </div>
 
       <div className="card" style={{ padding: "16px 18px" }}>
-        <DischargeTab bed={bed} wards={wards} role={cfg.role} onChanged={onChanged} />
+        <DischargeTab bed={bed} role={cfg.role} onChanged={onChanged} />
       </div>
     </div>
   );
@@ -1444,7 +1444,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
                   <span className="dim" style={{ fontSize: 11, marginLeft: "auto" }}>{bed.reservation_status === "RESERVED" ? "Reserved" : "None"}</span>
                 </button>
               )}
-              {(cfg.role === "PRE" || cfg.role === "NURSE") && bed.bed_type !== "Lounge" && (
+              {(cfg.role === "PRE" || cfg.role === "NURSE" || cfg.role === "FC") && bed.bed_type !== "Lounge" && (
                 <button onClick={() => setTransferOpen(true)} style={{
                   display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
                   background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
@@ -1525,7 +1525,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
         document.body
       )}
       {transferOpen && createPortal(
-        <TransferPopup bed={bed} wards={wards} onClose={() => setTransferOpen(false)}
+        <TransferPopup bed={bed} onClose={() => setTransferOpen(false)}
           onSaved={(r) => {
             setTransferOpen(false);
             // Pass the current bed's already-loaded patient data (payer, department,
@@ -1570,7 +1570,7 @@ export function BedDetailSheet({ bed, onSave, onClose, wards, onChanged, cfg = P
 // ══════════════════════════════════════════════════════════════════════════════
 //  WARD PAGE — full-page ward view (View / Manage / Discharge tabs, no popup)
 // ══════════════════════════════════════════════════════════════════════════════
-export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, focusBedId }) {
+export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId }) {
   const [tab, setTab] = useState(initialTab || "manage");
   const [beds, setBeds] = useState([]);
   const [filter, setFilter] = useState("ALL");
@@ -1887,7 +1887,6 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
           payerTypes={payerTypes}
           destinations={destinations}
           departments={departments}
-          wards={(allWards || []).map(w => ({ id: w.id, name: w.ward }))}
           onSave={async (bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) => {
             const stillOccRes = physical === "OCCUPIED" && reservation === "RESERVED";
             const stillVacRes = physical === "VACANT" && reservation === "RESERVED";
@@ -1988,10 +1987,7 @@ export function WardPage({ ward, initialTab, onBack, allWards, cfg = PRE_CFG, fo
       {/* Tab content — Discharges reuses the same full page as the left-nav "Discharges"
           tab, just scoped to this ward, so both places show identical planned/in-progress data. */}
       {tab === "discharge" ? (
-        <DischargesPage
-          role={cfg.role} wardId={ward.id}
-          wards={(allWards || []).map(w => ({ id: w.id, name: w.ward }))}
-        />
+        <DischargesPage role={cfg.role} wardId={ward.id} />
       ) : (
         <>
           {!loading && beds.length > 0 && searchBar}

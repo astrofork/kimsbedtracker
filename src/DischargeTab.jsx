@@ -243,15 +243,28 @@ function PlanSection({ bed, existing, onClose, onSaved }) {
   );
 }
 
-// Exported — reused by BedDetailSheet's top-level "Bed Transfer" action (PRE only),
-// which replaced the old in-flow Transfer Bed button here.
-export function TransferSection({ bed, wards, onClose, onSaved }) {
+// Exported — reused by BedDetailSheet's top-level "Bed Transfer" action.
+// The destination ward list is fetched here (hospital-wide, operational wards
+// only, Discharge Lounge excluded — see GET /discharge/transfer/wards) rather
+// than passed in as a prop, so every transfer-capable role (PRE/Nurse/FC) sees
+// the same full set of valid destinations, not just their own block/station.
+// Each ward carries inMyScope: wards outside the caller's own usual assignment
+// are still selectable, but flagged with a warning before confirming.
+export function TransferSection({ bed, onClose, onSaved }) {
+  const [wards, setWards] = useState(null);
+  const [wardsError, setWardsError] = useState("");
   const [toWardId, setToWardId] = useState(bed.ward_id);
   const [candidates, setCandidates] = useState(null);
   const [toBedId, setToBedId] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.transferWards()
+      .then((r) => setWards(r.wards || []))
+      .catch((e) => setWardsError(toastErr(e)));
+  }, []);
 
   useEffect(() => {
     if (!toWardId) return;
@@ -271,12 +284,31 @@ export function TransferSection({ bed, wards, onClose, onSaved }) {
     finally { setSaving(false); }
   }
 
+  const selectedWard = (wards || []).find((w) => w.id === toWardId);
+  const outOfScope = selectedWard && !selectedWard.inMyScope;
+
   return (
     <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: 14, marginTop: 10 }}>
       <label className="label">Destination Ward</label>
-      <select className="field" value={toWardId} onChange={(e) => setToWardId(Number(e.target.value))} style={{ marginBottom: 10 }}>
-        {(wards || []).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-      </select>
+      {wardsError ? (
+        <div style={{ fontSize: 12, color: "var(--red)", padding: "6px 0", marginBottom: 10 }}>{wardsError}</div>
+      ) : wards === null ? (
+        <div className="dim" style={{ fontSize: 12, padding: "6px 0", marginBottom: 10 }}>Loading wards…</div>
+      ) : (
+        <select className="field" value={toWardId} onChange={(e) => setToWardId(Number(e.target.value))} style={{ marginBottom: 10 }}>
+          {wards.map((w) => <option key={w.id} value={w.id}>{w.ward}</option>)}
+        </select>
+      )}
+      {outOfScope && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12, fontWeight: 600,
+          color: "var(--amber, #b45309)", background: "var(--warn-bg, #fff3cd)", borderRadius: 8,
+          padding: "8px 10px", marginBottom: 10,
+        }}>
+          <Ic d={icons.alert} s={14} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>This ward is outside your usual assignment — double-check before transferring here.</span>
+        </div>
+      )}
       <label className="label">Destination Bed</label>
       {candidates === null ? (
         <div className="dim" style={{ fontSize: 12, padding: "6px 0" }}>Loading…</div>
