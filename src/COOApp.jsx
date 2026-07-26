@@ -2202,7 +2202,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
 
       <div className="cv-join" />
 
-      {transactionCards.length > 0 && (() => {
+      {false && transactionCards.length > 0 && (() => {
         const divIdx = transactionCards.findIndex((k) => k.divider);
         const sets = divIdx === -1
           ? [{ heading: null, cards: transactionCards }]
