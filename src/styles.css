@@ -1089,7 +1089,9 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .cv-snap-val{font-size:20px;font-weight:900;letter-spacing:-.03em;color:var(--ink);line-height:1;}
 .cv-snap-tile .kc-spark{margin:6px -11px 0;width:calc(100% + 22px);height:26px;}
 
-/* Hero stat — Total Patients */
+/* Hero stat row — Total Patients + Total Occupancy side by side */
+.cv-hero-row{display:flex;gap:12px;margin-bottom:12px;}
+.cv-hero-row .cv-hero{flex:1;min-width:0;margin-bottom:0;}
 .cv-hero{
   display:flex;align-items:center;gap:14px;padding:12px 16px;
   background:var(--panel-2);border:1px solid var(--line);border-radius:14px;
@@ -1241,12 +1243,14 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   .cv-payer-label{font-size:10px;}
   .cv-payer-card .kc-spark{height:18px;margin:auto -9px 0;width:calc(100% + 18px);}
   .cv-panel{padding:10px 12px;margin:0 0 8px;border-radius:13px;}
-  .cv-hero{padding:10px 12px;gap:10px;border-radius:11px;margin-bottom:8px;flex-wrap:wrap;}
+  .cv-hero-row{flex-direction:column;gap:8px;margin-bottom:8px;}
+  .cv-hero-row .cv-hero{min-height:64px;}
+  .cv-hero{padding:10px 12px;gap:10px;border-radius:11px;margin-bottom:8px;flex-wrap:nowrap;}
   .cv-hero-icon{width:30px;height:30px;border-radius:8px;}
   .cv-hero-val{font-size:20px;}
   .cv-hero-label{font-size:10px;}
   .cv-hero-spark .kc-spark{height:24px;}
-  .cv-hero-spark-rich{flex-basis:100%;max-width:none;margin-left:0;margin-top:6px;}
+  .cv-hero-spark-rich{display:none;}
   .cv-txn-grid{gap:0 10px;}
   .cv-panel-head{margin-bottom:10px;}
   .cv-panel-title{font-size:12px;}

@@ -10,7 +10,7 @@ import {
   HistoryViewer, actionLabel,
   HierarchyManager, PreBlockManager, PreManager,
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
-  DoctorBlockManager, DoctorManager,
+  DoctorBlockManager, DoctorManager, ConsultantManager,
   DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager, PayerTATManager,
   SimpleLoginManager,
 } from "./ManagerApp.jsx";
@@ -34,6 +34,14 @@ const KPI_DEFAULT_ORDER = [
   "Total Occupied", "Census Occupied", "On Bed", "OCC + RES",
   "Non-Census Occupied", "Total Vacant", "Vacant", "VAC + RES",
 ];
+
+function dashboardUnitKey(unitType) {
+  const raw = (unitType || "").trim();
+  if (!raw) return null;
+  if (raw.includes("Renova")) return "Renova";
+  if (raw === "KIMS") return "KIMS";
+  return raw;
+}
 
 function fmtReminderLabel(hhmm) {
   const [h] = hhmm.split(":").map(Number);
@@ -184,6 +192,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "pres", icon: icons.user, label: "PRE Users" },
         { key: "nurses", icon: icons.user, label: "Nurse Users" },
         { key: "doctors", icon: icons.stethoscope, label: "Doctor Users" },
+        { key: "consultants", icon: icons.stethoscope, label: "Consultant Users" },
         { key: "fcpharmacy", icon: icons.list, label: "FC & Pharmacy" },
       ]
     },
@@ -195,7 +204,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "stations", icon: icons.bed, label: "Stations" },
         { key: "payers", icon: icons.list, label: "Payer Types" },
         { key: "destinations", icon: icons.list, label: "Destinations" },
-        { key: "deptdoctors", icon: icons.stethoscope, label: "Departments & Doctors" },
+        { key: "deptdoctors", icon: icons.layers, label: "Departments & Groups" },
         { key: "lounge", icon: icons.bed, label: "Discharge Lounge" },
         { key: "dischargephases", icon: icons.clock, label: "Discharge Phase SLAs" },
         { key: "payertat", icon: icons.list, label: "Payer TAT Config" },
@@ -287,6 +296,7 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "pres" && <PreManager showToast={showToast} />}
       {tab === "nurses" && <NurseManager showToast={showToast} />}
       {tab === "doctors" && <DoctorManager showToast={showToast} />}
+      {tab === "consultants" && <ConsultantManager showToast={showToast} />}
       {tab === "fcpharmacy" && <SimpleLoginManager showToast={showToast} />}
 
       {/* Setup */}
@@ -576,80 +586,80 @@ function DischargeListModal({ entry, onClose }) {
     setRows(null); setError("");
     let req;
     if (entry.step === "ADMITTED_TODAY") {
-      req = api.dischargesAdmittedToday().then((r) => r.admissions || []);
+      req = api.dischargesAdmittedToday(entry.hospitalWide, entry.unit).then((r) => r.admissions || []);
     } else if (entry.step === "PLANNED") {
       const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         d.status === "PLANNED" && d.planned_date === todayStr));
     } else if (entry.step === "INITIATED") {
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) => d.status === "DISCHARGE_INITIATED"));
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.status === "DISCHARGE_INITIATED"));
     } else if (entry.step === "PENDING_INPROGRESS") {
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         d.status === "DISCHARGE_INITIATED" || d.status === "IN_PROGRESS"));
     } else if (entry.step === "OVERDUE_PLANNED") {
       const today = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         d.status === "PLANNED" && d.planned_date < today));
     } else if (entry.step === "INITIATED_TODAY") {
-      req = api.dischargesInitiatedToday().then((r) => r.discharges || []);
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => r.discharges || []);
     } else if (entry.step === "UNPLANNED_TODAY") {
       const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
       const todayStartMs = new Date(todayStr + "T00:00:00+05:30").getTime();
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         d.planned_date === todayStr && d.created_at >= todayStartMs));
     } else if (entry.step === "AWAITING_PATIENT_LEAVE") {
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         (d.status === "DISCHARGE_INITIATED" || d.status === "IN_PROGRESS") &&
         d.system_checkout_status === "COMPLETED" && d.physical_checkout_status !== "COMPLETED"));
     } else if (entry.step === "COMPLETED_TODAY") {
-      req = api.dischargesCompletedToday().then((r) => r.discharges || []);
+      req = api.dischargesCompletedToday(entry.hospitalWide, entry.unit).then((r) => r.discharges || []);
     } else if (entry.step === "IN_DISCHARGE_LOUNGE") {
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         (d.status === "DISCHARGE_INITIATED" || d.status === "IN_PROGRESS") &&
         d.physical_checkout_status === "COMPLETED" && d.system_checkout_status !== "COMPLETED"));
     } else if (entry.step === "ALL_PENDING") {
       const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         (d.status === "DISCHARGE_INITIATED" || d.status === "IN_PROGRESS") ||
         (d.status === "PLANNED" && d.planned_date === todayStr)));
     } else if (entry.step === "SCHEDULED_TODAY") {
       const todayStr = new Date(Date.now() + 5.5 * 3600000).toISOString().slice(0, 10);
-      req = api.dischargesActive().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesActive(undefined, entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         d.planned_date === todayStr && (
           d.status === "PLANNED" ||
           d.status === "DISCHARGE_INITIATED" ||
           d.status === "IN_PROGRESS"
         )));
     } else if (entry.step === "CANCELLED_TODAY") {
-      req = api.dischargesCancelledToday().then((r) => r.discharges || []);
+      req = api.dischargesCancelledToday(entry.hospitalWide, entry.unit).then((r) => r.discharges || []);
     } else if (entry.step === "PATIENT_LEFT") {
-      req = api.dischargesPatientLeft().then((r) => r.discharges || []);
+      req = api.dischargesPatientLeft(entry.hospitalWide, entry.unit).then((r) => r.discharges || []);
     } else if (entry.step === "DRUG_RETURN_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.drug_return_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.drug_return_status === "COMPLETED"));
     } else if (entry.step === "PHARMACY_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.pharmacy_clearance_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.pharmacy_clearance_status === "COMPLETED"));
     } else if (entry.step === "PROCEDURE_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) =>
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) =>
         d.procedure_reconciliation_status === "COMPLETED" || d.procedure_reconciliation_status === "NOT_APPLICABLE"));
     } else if (entry.step === "BILLING_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.billing_started_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.billing_started_status === "COMPLETED"));
     } else if (entry.step === "AUDIT_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.audit_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.audit_status === "COMPLETED"));
     } else if (entry.step === "BILL_READY_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.bill_ready_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.bill_ready_status === "COMPLETED"));
     } else if (entry.step === "PAYMENT_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.payment_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.payment_status === "COMPLETED"));
     } else if (entry.step === "SC_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.system_checkout_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.system_checkout_status === "COMPLETED"));
     } else if (entry.step === "PC_DONE") {
-      req = api.dischargesInitiatedToday().then((r) => (r.discharges || []).filter((d) => d.physical_checkout_status === "COMPLETED"));
+      req = api.dischargesInitiatedToday(entry.hospitalWide, entry.unit).then((r) => (r.discharges || []).filter((d) => d.physical_checkout_status === "COMPLETED"));
     } else {
-      req = api.dischargesPendingStep(entry.step).then((r) => r.discharges || []);
+      req = api.dischargesPendingStep(entry.step, entry.hospitalWide, entry.unit).then((r) => r.discharges || []);
     }
     req.then((data) => { if (!cancelled) setRows(data); })
       .catch((e) => { if (!cancelled) setError(toastErr(e)); });
     return () => { cancelled = true; };
-  }, [entry.step]);
+  }, [entry.step, entry.hospitalWide, entry.unit]);
 
   const [dlSearch, setDlSearch] = useState("");
   const [dlSearchBy, setDlSearchBy] = useState("ward");
@@ -676,7 +686,7 @@ function DischargeListModal({ entry, onClose }) {
               <div className="dim" style={{ fontSize: 12.5 }}>
                 {rows === null ? "Loading…"
                   : filtered.length === rows.length ? `${rows.length} admission${rows.length === 1 ? "" : "s"}`
-                  : `${filtered.length} of ${rows.length} admissions`}
+                    : `${filtered.length} of ${rows.length} admissions`}
               </div>
             </div>
           </div>
@@ -761,8 +771,8 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
   const q = search.trim().toLowerCase();
   const consultants = !q ? allConsultants
     : searchBy === "payer_type" ? allConsultants.filter(c => Object.keys(c.payers || {}).some(p => p.toLowerCase().includes(q)))
-    : searchBy === "department" ? allConsultants.filter(c => Object.keys(c.departments || {}).some(d => d.toLowerCase().includes(q)))
-    : allConsultants;
+      : searchBy === "department" ? allConsultants.filter(c => Object.keys(c.departments || {}).some(d => d.toLowerCase().includes(q)))
+        : allConsultants;
   const grandTotal = consultants.reduce((s, c) => s + c.total, 0);
 
   // One stable color per payer type (same hash palette as payer cards)
@@ -863,22 +873,22 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
 
 // ── Section Navigator ──────────────────────────────────────────────────────────
 const NAV_SECTIONS_DEF = [
-  { id: "nav-filters",     label: "Search & Filters",  icon: "filter"  },
-  { id: "nav-snapshot",    label: "Hospital Snapshot", icon: "home"    },
-  { id: "nav-occupancy",   label: "Occupancy Board",   icon: "chart"   },
-  { id: "nav-txn",         label: "Transactions",      icon: "refresh" },
-  { id: "nav-wards",       label: "Bed Matrix",        icon: "grid"    },
-  { id: "nav-consultants", label: "Consultants",       icon: "user"    },
+  { id: "nav-filters", label: "Search & Filters", icon: "filter" },
+  { id: "nav-snapshot", label: "Hospital Snapshot", icon: "home" },
+  { id: "nav-occupancy", label: "Occupancy Board", icon: "chart" },
+  { id: "nav-txn", label: "Transactions", icon: "refresh" },
+  { id: "nav-wards", label: "Bed Matrix", icon: "grid" },
+  { id: "nav-consultants", label: "Consultants", icon: "user" },
 ];
 
 function SectionNavigator({ scanKey }) {
-  const [activeId, setActiveId]     = useState(null);
-  const [sections, setSections]     = useState([]);
-  const [hovered, setHovered]       = useState(false);
+  const [activeId, setActiveId] = useState(null);
+  const [sections, setSections] = useState([]);
+  const [hovered, setHovered] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const ratiosRef   = useRef({});
-  const leaveTimer  = useRef(null);
-  const obsRef      = useRef(null);
+  const ratiosRef = useRef({});
+  const leaveTimer = useRef(null);
+  const obsRef = useRef(null);
 
   // (Re-)discover sections whenever scanKey changes
   useEffect(() => {
@@ -1123,6 +1133,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
 
   // ── Sticky filter bar: only tracks whether the card is currently "stuck"
   // at the top so we can apply the glass visual. Movement is handled entirely
+  //
   // by CSS position:sticky — no JS animation needed.
   const [filterStuck, setFilterStuck] = useState(false);
   const filterSentinelRef = useRef(null);
@@ -1134,12 +1145,30 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
     setBedExplorer({ label, color, payer });
   }, []);
 
+  // Also must be before the early return below — null-safe so it works before
+  // liveData has loaded. Mirrors the activeUnit/unitOptions computed again
+  // (identically) further down once liveData is guaranteed non-null; kept
+  // separate only so these can be used unconditionally this early (both by
+  // the fetch effect further down and by openDischargeList right below).
+  const earlyUnitOptions = ["TOTAL", ...Array.from(
+    new Set((liveData?.wards || []).filter((w) => !w.is_discharge_lounge).map((w) => dashboardUnitKey(w.unit_type)).filter(Boolean))
+  ).sort()];
+  const earlyActiveUnit = earlyUnitOptions.includes(viewBy) ? viewBy : "TOTAL";
+
   // ── Transaction Board cards → Discharge List (admission-based, not a bed
   // status filter, so it's a separate small modal from BedExplorerModal).
-  const [dischargeList, setDischargeList] = useState(null); // null | { step, label }
+  const [dischargeList, setDischargeList] = useState(null); // null | { step, label, hospitalWide, unit }
+  // Must use earlyActiveUnit, not activeUnit — this hook (like every hook)
+  // has to run before the `if (!liveData) return` guard further down, but
+  // `activeUnit` is only declared after that guard (it needs liveData to be
+  // non-null). earlyActiveUnit is the same value, computed null-safely for
+  // exactly this reason (see its own comment above). earlyActiveUnit IS a
+  // required dep here: without it, switching the Unit toolbar filter (which
+  // doesn't change `hospitalWide`) would keep reusing a stale, memoized
+  // closure from whichever unit was active when this callback last changed.
   const openDischargeList = useCallback((step, label) => {
-    setDischargeList({ step, label });
-  }, []);
+    setDischargeList({ step, label, hospitalWide, unit: earlyActiveUnit });
+  }, [hospitalWide, earlyActiveUnit]);
 
   // ── KPI card layout customization — frontend/localStorage only, never touches
   // the backend. Locked by default on every load; an admin can unlock, drag
@@ -1502,14 +1531,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
     return r.ward.toLowerCase().includes(q);
   }, [search, searchBy]);
 
-  // Also must be before the early return below — null-safe so it works before
-  // liveData has loaded. Mirrors the activeUnit/unitOptions computed again
-  // (identically) further down once liveData is guaranteed non-null; kept
-  // separate only so these two fetches can run on every render unconditionally.
-  const earlyUnitOptions = ["TOTAL", ...Array.from(
-    new Set((liveData?.wards || []).map((w) => (w.unit_type || "").trim()).filter(Boolean))
-  ).sort()];
-  const earlyActiveUnit = earlyUnitOptions.includes(viewBy) ? viewBy : "TOTAL";
   // Re-fetches whenever the Unit toolbar filter changes — Hospital Snapshot /
   // Occupancy Board / Transaction Board now scope to the same wards as the
   // ward tables and By Payer cards below (see adminDashboard()'s unitType param).
@@ -1556,12 +1577,21 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
   }));
 
   // Unit options are derived from the live data, so new unit types appear
-  // automatically — no code change needed. "TOTAL" = all.
+  // automatically — no code change needed. "TOTAL" = all. The Discharge Lounge
+  // ward is excluded here regardless of whatever unit_type it's been given —
+  // it's a shared virtual holding ward, not a real unit, and its patients are
+  // already attributed to their origin ward's unit everywhere on this board.
   const unitOptions = ["TOTAL", ...Array.from(
-    new Set(allRows.map((r) => (r.unit_type || "").trim()).filter(Boolean))
+    new Set(allRows.filter((r) => !r.is_discharge_lounge).map((r) => dashboardUnitKey(r.unit_type)).filter(Boolean))
   ).sort()];
   const activeUnit = unitOptions.includes(viewBy) ? viewBy : "TOTAL";
-  const rows = allRows.filter((r) => activeUnit === "TOTAL" || (r.unit_type || "").trim() === activeUnit);
+  // The Discharge Lounge ward has no unit_type of its own (it's shared across
+  // units — a patient's unit is determined by where they came FROM, same as
+  // the backend's origin-scoped lounge counts in bedService.ts), so it would
+  // otherwise vanish from `rows` under dashboardUnitKey(null) !== activeUnit
+  // whenever a specific unit is selected. Always keep it in scope here.
+  const rows = allRows.filter((r) =>
+    activeUnit === "TOTAL" || r.is_discharge_lounge || dashboardUnitKey(r.unit_type) === activeUnit);
 
   // The Discharge Lounge is a virtual holding ward (set up in Setup → Discharge
   // Lounge, outside the floor hierarchy) — it stays in `rows` so the Bed Explorer
@@ -1653,18 +1683,20 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
   }]));
 
   // One card per active payer type (dynamic — auto-adjusts if Setup → Payer
-  // Types changes). Value = live occupied count for that payer over the
-  // current Unit + Search filter; sparkline = that payer's real hourly trend
-  // from occupancy_snapshots.payer_snapshot (sparse until enough points accrue).
-  // Deliberately NOT excluding the Discharge Lounge here (unlike the bed-
-  // capacity cards, e.g. Vacant/Census Occupancy) — a patient sitting in the
-  // lounge is still a real patient under a real payer type, same reasoning as
-  // "Total Patients" (onbed + overstay + loungePatients) intentionally
-  // including lounge patients. Capacity cards exclude Lounge because it isn't
-  // real ward capacity; census/payer cards count real people, lounge or not.
+  // Types changes). Value = occ.payerType from adminCards (GET /coo/admin-dashboard),
+  // scoped server-side to the active Unit filter exactly like Patient Type —
+  // Discharge Lounge patients only count toward a unit if that's where they
+  // actually came from (origin-scoped), not wherever the Lounge ward itself
+  // happens to sit. Previously this summed `shownRows[].payersLive` directly,
+  // which always included 100% of the Discharge Lounge ward's payer mix
+  // regardless of the active unit (the ward stays in `rows` unconditionally,
+  // see the `r.is_discharge_lounge ||` filter above) — inflating "By Payer"
+  // above the correctly-scoped "Patient Type" total whenever a unit was
+  // selected. Deliberately still includes lounge patients (like Total
+  // Patients does) — just origin-scoped now instead of unconditionally.
   const payerOccBase = totalOcc || 1;
   const payerTypeCards = (payerTypes || []).map((pt, i) => {
-    const val = shownRows.reduce((a, r) => a + ((r.payersLive || {})[pt.name] || 0), 0);
+    const val = (adminCards?.occupancy?.payerType || {})[pt.name] || 0;
     return {
       label: pt.name,
       val,
@@ -1755,7 +1787,9 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
   // "Total Patients" card, then five sub-groups (Census Occupancy / Non Census
   // Occupancy / Discharge Lounge / Vacant Beds / Patient Type).
   const totalPatientsCard = !occ ? null :
-    { label: "Total Patients", val: occ.totalPatients, sub: "[On bed + Overstay + Discharge lounge]", color: "#dc2626", icon: icons.chart, series: S.occupied, explorerKey: "admin:Total Patients" };
+    { label: "Total Patients", val: occ.totalPatients, sub: "[On bed + Reserved + Overstay + Discharge lounge]", color: "#dc2626", icon: icons.chart, series: S.occupied, explorerKey: "admin:Total Patients" };
+  const totalOccupancyCard = !occ ? null :
+    { label: "Total Occupancy", val: occ.totalOccupancy, sub: "[On bed + Overstay + Reserved]", color: "#0d9488", icon: icons.bed, series: S.occupied, explorerKey: "admin:Total Occupancy" };
 
   const censusOccCards = !occ ? [] : [
     { label: "Total", val: occ.census.totalOcc, sub: null, color: "#ea580c", icon: icons.chart, series: S.occupied, explorerKey: "admin:Total Occ Census" },
@@ -2096,21 +2130,43 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
         <div className="cv-panel-head">
           <div className="cv-panel-title">Occupancy Board</div>
         </div>
-        {totalPatientsCard && (
-          <div className="cv-hero" role="button" tabIndex={0}
-            aria-label={`Total Patients — ${totalPatientsCard.val}. Press Enter to see these beds.`}
-            onClick={() => openBedExplorer(totalPatientsCard.explorerKey, totalPatientsCard.color)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(totalPatientsCard.explorerKey, totalPatientsCard.color); } }}>
-            <div className="cv-hero-icon" style={{ color: totalPatientsCard.color, background: `${totalPatientsCard.color}1a` }}>
-              <Ic d={totalPatientsCard.icon} s={18} />
-            </div>
-            <div>
-              <div className="cv-hero-val">{totalPatientsCard.val}</div>
-              <div className="cv-hero-label">Total Patients · {totalPatientsCard.sub}</div>
-            </div>
-            <div className="cv-hero-spark cv-hero-spark-rich">
-              <HeroTrendChart values={sparkSeries(totalPatientsCard.series, totalPatientsCard.val)} color={totalPatientsCard.color} id="cvHeroTot" />
-            </div>
+        {(totalPatientsCard || totalOccupancyCard) && (
+          <div className="cv-hero-row">
+            {totalPatientsCard && (
+              <div className="cv-hero" role="button" tabIndex={0}
+                aria-label={`Total Patients — ${totalPatientsCard.val}. Press Enter to see these beds.`}
+                onClick={() => openBedExplorer(totalPatientsCard.explorerKey, totalPatientsCard.color)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(totalPatientsCard.explorerKey, totalPatientsCard.color); } }}>
+                <div className="cv-hero-icon" style={{ color: totalPatientsCard.color, background: `${totalPatientsCard.color}1a` }}>
+                  <Ic d={totalPatientsCard.icon} s={18} />
+                </div>
+                <div>
+                  <div className="cv-hero-val">{totalPatientsCard.val}</div>
+                  <div className="cv-hero-label">Total Patients · {totalPatientsCard.sub}</div>
+                </div>
+                <div className="cv-hero-spark cv-hero-spark-rich">
+                  <HeroTrendChart values={sparkSeries(totalPatientsCard.series, totalPatientsCard.val)} color={totalPatientsCard.color} id="cvHeroTot" />
+                </div>
+              </div>
+            )}
+            {totalOccupancyCard && (
+              <div className="cv-hero" role="button" tabIndex={0}
+                aria-label={`Total Occupancy — ${totalOccupancyCard.val}. Press Enter to see these beds.`}
+                onClick={() => openBedExplorer(totalOccupancyCard.explorerKey, totalOccupancyCard.color)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(totalOccupancyCard.explorerKey, totalOccupancyCard.color); } }}>
+                <div className="cv-hero-icon" style={{ color: totalOccupancyCard.color, background: `${totalOccupancyCard.color}1a` }}>
+                  <Ic d={totalOccupancyCard.icon} s={18} />
+                </div>
+                <div>
+                  <div className="cv-hero-val">{totalOccupancyCard.val}</div>
+                  <div className="cv-hero-label">Current Occupancy</div>
+                  <div className="cv-hero-label">{totalOccupancyCard.sub}</div>
+                </div>
+                <div className="cv-hero-spark cv-hero-spark-rich">
+                  <HeroTrendChart values={sparkSeries(totalOccupancyCard.series, totalOccupancyCard.val)} color={totalOccupancyCard.color} id="cvHeroOcc" />
+                </div>
+              </div>
+            )}
           </div>
         )}
         <div className="cv-groups">
@@ -2151,9 +2207,9 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
         const sets = divIdx === -1
           ? [{ heading: null, cards: transactionCards }]
           : [
-              { heading: null, cards: transactionCards.slice(0, divIdx) },
-              { heading: transactionCards[divIdx].heading, cards: transactionCards.slice(divIdx + 1) },
-            ];
+            { heading: null, cards: transactionCards.slice(0, divIdx) },
+            { heading: transactionCards[divIdx].heading, cards: transactionCards.slice(divIdx + 1) },
+          ];
         const renderCard = (k) => (
           <div key={k.label} className="cv-txn-card"
             role={k.step ? "button" : undefined}
@@ -2931,7 +2987,7 @@ function ActivityPage() {
     Promise.allSettled([api.cooPreActivity(), api.cooNurseActivity()]).then(([p, n]) => {
       if (p.status === "fulfilled") setPreData(p.value);
       if (n.status === "fulfilled") setNurseData(n.value);
-    }).catch(() => {}).finally(() => setLoading(false));
+    }).catch(() => { }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return (
@@ -5182,8 +5238,8 @@ function tatColor(mins) {
 
 function tatColorVsBenchmark(mins, benchmark) {
   if (mins == null || benchmark == null) return "var(--ink-3)";
-  if (mins <= benchmark)        return "var(--green)";
-  if (mins <= benchmark * 1.2)  return "#d97706";
+  if (mins <= benchmark) return "var(--green)";
+  if (mins <= benchmark * 1.2) return "#d97706";
   return "var(--red)";
 }
 
@@ -5231,7 +5287,7 @@ function TATLeaderboard() {
       {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
       {!tat && !err && (
         <div className={view === "payer" ? "card-grid" : "card-grid"}>
-          {(view === "payer" ? [0,1,2,3,4] : [0,1,2,3]).map(i => (
+          {(view === "payer" ? [0, 1, 2, 3, 4] : [0, 1, 2, 3]).map(i => (
             <div key={i} className="preui-sk preui-sk-card" />
           ))}
         </div>
@@ -5316,14 +5372,18 @@ function TATLeaderboard() {
                 return (
                   <button key={payerType} onClick={() => setPayerDrill(payerType)}
                     className="card slide-up"
-                    style={{ padding: 16, textAlign: "left", cursor: "pointer", width: "100%",
-                      borderColor: col, display: "flex", flexDirection: "column", gap: 10 }}>
+                    style={{
+                      padding: 16, textAlign: "left", cursor: "pointer", width: "100%",
+                      borderColor: col, display: "flex", flexDirection: "column", gap: 10
+                    }}>
                     <div className="row between" style={{ alignItems: "flex-start" }}>
                       <div style={{ fontWeight: 700, fontSize: 13 }}>{payerType}</div>
                       {hasData && bench != null && (
-                        <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 99,
+                        <span style={{
+                          fontSize: 11, fontWeight: 800, padding: "2px 8px", borderRadius: 99,
                           background: ok ? "var(--st-v-bg)" : "var(--red-bg)",
-                          color: ok ? "var(--st-v)" : "var(--red)" }}>
+                          color: ok ? "var(--st-v)" : "var(--red)"
+                        }}>
                           {ok ? "On target" : "Over"}
                         </span>
                       )}
@@ -5422,9 +5482,11 @@ function PayerDrillModal({ payer, range, onClose }) {
           )}
 
           {bench != null && (
-            <div className="card" style={{ padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10,
+            <div className="card" style={{
+              padding: "10px 14px", marginBottom: 14, display: "flex", alignItems: "center", gap: 10,
               background: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v-bg)" : "var(--red-bg)",
-              borderColor: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v)" : "var(--red)" }}>
+              borderColor: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v)" : "var(--red)"
+            }}>
               <Ic d={icons.clock} s={16} style={{ color: (data?.summary?.avg_min ?? 999) <= bench ? "var(--st-v)" : "var(--red)" }} />
               <span style={{ fontSize: 13, fontWeight: 700 }}>
                 Benchmark: {fmtTatMins(bench)} &nbsp;
@@ -5640,7 +5702,7 @@ function CommandCenter({ discharge }) {
   const [liveData, setLiveData] = useState(null);
 
   const fetchLive = useCallback(() => {
-    api.cooLiveWards().then(d => setLiveData(d)).catch(() => {});
+    api.cooLiveWards().then(d => setLiveData(d)).catch(() => { });
   }, []);
   useEffect(() => { fetchLive(); }, [fetchLive]);
 
@@ -5664,8 +5726,8 @@ function CommandCenter({ discharge }) {
   }, [tvMode]);
 
   const totals = liveData?.totals;
-  const wards  = liveData?.wards || [];
-  const occ    = totals ? (totals.o ?? 0) + (totals.or ?? 0) : null;
+  const wards = liveData?.wards || [];
+  const occ = totals ? (totals.o ?? 0) + (totals.or ?? 0) : null;
   const occPct = totals && totals.total > 0 ? Math.round((occ / totals.total) * 100) : null;
 
   const KPIs = [
@@ -5745,13 +5807,13 @@ function CommandCenter({ discharge }) {
       {panel === 0 && totals && (
         <div className="card-grid">
           {[
-            ["TOTAL BEDS",     totals.total,                          "var(--ink)"],
-            ["VACANT",         totals.v,                              "var(--green)"],
-            ["VAC + RES",      totals.r,                              "var(--ink-2)"],
-            ["OCCUPIED",       totals.o,                              "var(--primary)"],
-            ["OCC + RES",      totals.or,                             "var(--ink-2)"],
-            ["TOTAL OCCUPIED", occ,                                   "var(--primary)"],
-            ["OCC %",          occPct != null ? `${occPct}%` : "—",   occPct >= 90 ? "var(--red)" : occPct >= 75 ? "#d97706" : "var(--green)"],
+            ["TOTAL BEDS", totals.total, "var(--ink)"],
+            ["VACANT", totals.v, "var(--green)"],
+            ["VAC + RES", totals.r, "var(--ink-2)"],
+            ["OCCUPIED", totals.o, "var(--primary)"],
+            ["OCC + RES", totals.or, "var(--ink-2)"],
+            ["TOTAL OCCUPIED", occ, "var(--primary)"],
+            ["OCC %", occPct != null ? `${occPct}%` : "—", occPct >= 90 ? "var(--red)" : occPct >= 75 ? "#d97706" : "var(--green)"],
           ].map(([l, v, c]) => (
             <div key={l} className="stat" style={{ padding: tvMode ? "20px 16px" : undefined }}>
               <div className="n" style={{ fontSize: tvMode ? 38 : 22, color: c, fontWeight: 900 }}>{v ?? "—"}</div>
@@ -5768,14 +5830,14 @@ function CommandCenter({ discharge }) {
       {panel === 1 && (
         <div className="card-grid">
           {[
-            ["PLANNED TODAY",       discharge?.plannedToday,          "var(--primary)"],
-            ["INITIATED",           discharge?.initiated,             "var(--blue)"],
-            ["IN PROGRESS",         discharge?.pending,               "var(--blue)"],
-            ["COMPLETED TODAY",     discharge?.completedToday,        "var(--green)"],
-            ["AWAITING PAYMENT",    discharge?.paymentPending,        "var(--ink)"],
-            ["SYS CHECKOUT DONE",   discharge?.systemCheckoutCompleted, "var(--ink)"],
-            ["PHYS CHECKOUT DONE",  discharge?.physicalCheckoutCompleted, "var(--ink)"],
-            ["OVERDUE PLANNED",     discharge?.overduePlanned,        discharge?.overduePlanned ? "var(--red)" : "var(--green)"],
+            ["PLANNED TODAY", discharge?.plannedToday, "var(--primary)"],
+            ["INITIATED", discharge?.initiated, "var(--blue)"],
+            ["IN PROGRESS", discharge?.pending, "var(--blue)"],
+            ["COMPLETED TODAY", discharge?.completedToday, "var(--green)"],
+            ["AWAITING PAYMENT", discharge?.paymentPending, "var(--ink)"],
+            ["SYS CHECKOUT DONE", discharge?.systemCheckoutCompleted, "var(--ink)"],
+            ["PHYS CHECKOUT DONE", discharge?.physicalCheckoutCompleted, "var(--ink)"],
+            ["OVERDUE PLANNED", discharge?.overduePlanned, discharge?.overduePlanned ? "var(--red)" : "var(--green)"],
           ].map(([l, v, c]) => (
             <div key={l} className="stat" style={{ padding: tvMode ? "20px 16px" : undefined }}>
               <div className="n" style={{ fontSize: tvMode ? 38 : 22, color: c, fontWeight: 900 }}>{v ?? "—"}</div>

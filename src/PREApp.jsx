@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, createSocket } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle, useModal } from "./ui.jsx";
+import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 import { OverstayPanel } from "./COOApp.jsx";
 import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus } from "./bedUtils.js";
@@ -26,6 +26,9 @@ export const PRE_CFG = {
   // edit affordance on Patient Information only renders for PRE.
   updateAdmission: (bedId, patch) => api.preUpdateAdmission(bedId, patch),
   reviewWard: (wardId) => api.preReviewWard(wardId),
+  // Bulk hospital-wide bed list (already fetched for the Home dashboard) — reused
+  // client-side for IP search instead of a dedicated network call per search.
+  bedDetails: () => api.preBedDetails(),
 };
 
 export default function PREApp({ user, meta, onLogout }) {
@@ -299,15 +302,46 @@ function Home({ data, setTab, alarmActive }) {
 //  ENTRY TAB — ward cards with live counts + View/Manage beds
 // ══════════════════════════════════════════════════════════════════════════════
 function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
-  const [openWard, setOpenWard] = useState(null); // { ward, tab } | null
+  const [openWard, setOpenWard] = useState(null); // { ward, tab, search? } | null
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [wardSearch, setWardSearch] = useState("");
+  const [ipMatch, setIpMatch] = useState(null); // { wardId } | null — resolved IP lookup
+  const [ipNotFound, setIpNotFound] = useState(false);
+  // Hospital-wide bed list — same data the Home dashboard already fetches —
+  // pulled once, lazily, the first time it's needed, then cached for the rest
+  // of this page visit. Every IP search after that is a pure client-side scan,
+  // no network call at all.
+  const [bedDetails, setBedDetails] = useState(null);
+  const bedDetailsLoadingRef = useRef(false);
+
+  // A 6-digit search value is treated as an IP lookup instead of a ward-name
+  // filter — narrows the ward grid down to the one matching ward's card (same
+  // as today's ward-name search narrowing to matching cards), but does NOT
+  // navigate in automatically — the user still clicks the card themselves,
+  // same as any other ward. WardPage's search box is pre-seeded with the IP
+  // once opened, so it shows just that one bed.
+  useEffect(() => {
+    const ip = wardSearch.trim();
+    setIpNotFound(false);
+    if (!/^\d{6}$/.test(ip)) { setIpMatch(null); return; }
+    if (bedDetails === null) {
+      if (!bedDetailsLoadingRef.current) {
+        bedDetailsLoadingRef.current = true;
+        PRE_CFG.bedDetails().then((r) => setBedDetails(r || [])).catch(() => setIpNotFound(true));
+      }
+      return; // effect re-runs once bedDetails lands
+    }
+    const bed = bedDetails.find((b) => b.ip_last6 === ip);
+    if (bed) setIpMatch({ wardId: bed.ward_id });
+    else { setIpMatch(null); setIpNotFound(true); }
+  }, [wardSearch, bedDetails]);
 
   // Full-page ward view — replaces the grid entirely (no popup stack).
   if (openWard) return (
     <WardPage
       ward={openWard.ward}
       initialTab={openWard.tab}
+      initialSearch={openWard.search}
       allWards={data.wards}
       onBack={() => { setOpenWard(null); onRefresh(); }}
     />
@@ -339,7 +373,7 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
           <input
             className="field"
             value={wardSearch}
-            placeholder="Search ward…"
+            placeholder="Search ward / IP…"
             style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
             onChange={(e) => setWardSearch(e.target.value)}
           />
@@ -363,11 +397,18 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
         )}
       </div>
 
+      {ipNotFound && (
+        <div className="dim" style={{ fontSize: 13, padding: "10px 2px", marginBottom: 8 }}>
+          No patient found with that IP in your wards.
+        </div>
+      )}
+
       {(data.blocks ?? [{ id: data.preBlockId, name: "", wards: data.wards }]).map((block, bi) => {
         const wq = wardSearch.trim().toLowerCase();
+        const isIpSearch = /^\d{6}$/.test(wq);
         const visibleWards = block.wards.filter((w) =>
           (wardFilter === "all" || String(w.id) === wardFilter) &&
-          (!wq || w.ward.toLowerCase().includes(wq))
+          (isIpSearch ? ipMatch?.wardId === w.id : (!wq || w.ward.toLowerCase().includes(wq)))
         );
         if (visibleWards.length === 0) return null;
         return (
@@ -447,11 +488,11 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
                     {!nonOp && (
                       <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
                         <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
-                          onClick={() => setOpenWard({ ward: w, tab: "manage" })}>
+                          onClick={() => setOpenWard({ ward: w, tab: "manage", search: isIpSearch ? wardSearch.trim() : undefined })}>
                           <Ic d={icons.bed} s={13} /> Manage Beds
                         </button>
                         <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
-                          onClick={() => setOpenWard({ ward: w, tab: "discharge" })}>
+                          onClick={() => setOpenWard({ ward: w, tab: "discharge", search: isIpSearch ? wardSearch.trim() : undefined })}>
                           <Ic d={icons.clipboard} s={13} /> Discharges
                         </button>
                       </div>
@@ -612,7 +653,8 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
   const hasRows = !!(
     (occupied && (bed.payer_type || bed.ip_last6 || bed.admission_type || (!hideDoctorDept && (bed.consultant_name || bed.department_name)))) || dischargeStarted ||
     (occupied && bed.reservation_status === "RESERVED" && bed.destination) ||
-    (!occupied && bed.reservation_status === "RESERVED" && bed.reservation_note)
+    (!occupied && bed.reservation_status === "RESERVED" && bed.reservation_note) ||
+    (occupied && bed.bed_type === "Lounge" && (bed.origin_ward_name || bed.origin_bed_name))
   );
 
   return (
@@ -643,6 +685,14 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
           planned — see dischargeStarted below). */}
       {occupied && bed.ip_last6 && (
         <div className="pbed-kv"><span className="pk">IP</span><span className="pv" title={bed.ip_last6}>{bed.ip_last6}</span></div>
+      )}
+      {/* Discharge Lounge only — where the patient physically came from, since
+          this card's own ward is always just "Discharge Lounge". */}
+      {occupied && bed.bed_type === "Lounge" && bed.origin_ward_name && (
+        <div className="pbed-kv"><span className="pk">From Ward</span><span className="pv" title={bed.origin_ward_name}>{bed.origin_ward_name}</span></div>
+      )}
+      {occupied && bed.bed_type === "Lounge" && bed.origin_bed_name && (
+        <div className="pbed-kv"><span className="pk">From Bed</span><span className="pv" title={bed.origin_bed_name}>{bed.origin_bed_name}</span></div>
       )}
       {!hideDoctorDept && occupied && bed.consultant_name && (
         <div className="pbed-kv"><span className="pk">Dr</span><span className="pv" title={bed.consultant_name}>{bed.consultant_name}</span></div>
@@ -765,6 +815,32 @@ function TransferPopup({ bed, onClose, onSaved }) {
   );
 }
 
+// Readmit — moves a patient out of the Discharge Lounge back onto a real bed.
+// Reuses TransferSection's ward/bed/reason UI, pointed at the readmit endpoint
+// instead of the ordinary transfer one, so it's logged distinctly (is_readmit).
+function ReadmitPopup({ bed, onClose, onSaved }) {
+  useModal(onClose);
+  const admissionId = bed.admission_id ?? bed.discharge_tracking?.admission_id;
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div style={{ padding: "18px 20px" }}>
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Readmit</div>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 4 }}>Move this patient from the Discharge Lounge back onto a real bed.</div>
+          <TransferSection
+            bed={bed}
+            onClose={onClose}
+            onSaved={onSaved}
+            submitLabel="Confirm Readmit"
+            submit={(toWardId, toBedId, reason) => api.readmitFromLounge(admissionId, toWardId, toBedId, reason)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function planPopupTodayStr(offsetDays = 0) {
   return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
@@ -878,8 +954,14 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   const [departmentName, setDepartmentName] = useState("");
   const [allDoctors, setAllDoctors] = useState([]);
   const [doctors, setDoctors] = useState([]);
+  // Consultant Groups (e.g. "Vijay / Kumari") — an admission owner is either one
+  // doctor OR one group, never both; selectedDoctorId/selectedGroupId are kept
+  // mutually exclusive throughout (picking one clears the other).
+  const [allGroups, setAllGroups] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [selectedDeptId, setSelectedDeptId] = useState(null);
   const [selectedDoctorId, setSelectedDoctorId] = useState(null);
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
   const [deptSearch, setDeptSearch] = useState("");
   const [doctorSearch, setDoctorSearch] = useState("");
   const [deptOpen, setDeptOpen] = useState(false);
@@ -887,6 +969,9 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   const [dischargeOpen, setDischargeOpen] = useState(false);
   const [reservationOpen, setReservationOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [readmitOpen, setReadmitOpen] = useState(false);
+  const [dischargeImmediateSaving, setDischargeImmediateSaving] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   const [dischargePlanOpen, setDischargePlanOpen] = useState(false);
   // Editing Patient Information (IP/consultant/dept) on an already-Occupied bed —
   // separate from needsIp, which only covers the Vacant→Occupied admission moment.
@@ -898,39 +983,35 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   // instead of resending every field (including untouched ones) on every save.
   const patientInfoSnapshotRef = useRef(null);
 
-  // When opening the edit form we seed selectedDeptId AND selectedDoctorId together
-  // (from the bed's current admission) — this flag stops the effect below from
-  // wiping the seeded doctor the moment selectedDeptId changes, which it otherwise
-  // does on every normal "user picked a different department" change.
-  const skipDoctorResetRef = useRef(false);
-  const prevDeptIdRef = useRef(selectedDeptId);
   useEffect(() => {
     api.doctors().then(r => setAllDoctors(r.doctors || [])).catch(() => { });
+    api.consultantGroups().then(r => setAllGroups(r.groups || [])).catch(() => { });
   }, []);
+  // Bidirectional filtering: picking a department narrows the consultant/group
+  // list to those with that department (below); picking a consultant/group
+  // narrows the department list the same way (see availableDepartments in
+  // renderDeptDoctorPicker). Because both directions filter their options to
+  // stay mutually compatible, an incompatible combo can never be reached via
+  // the UI — so neither selection needs to reset the other when the other
+  // changes; each dropdown just always offers a valid choice.
   useEffect(() => {
     if (selectedDeptId) {
       setDoctors(allDoctors.filter(d => d.departments?.some(dep => dep.id === selectedDeptId)));
+      setGroups(allGroups.filter(g => g.departments?.some(dep => dep.id === selectedDeptId)));
     } else {
       setDoctors(allDoctors);
+      setGroups(allGroups);
     }
-    const deptChanged = prevDeptIdRef.current !== selectedDeptId;
-    prevDeptIdRef.current = selectedDeptId;
-    if (!deptChanged) return;
-    if (skipDoctorResetRef.current) {
-      skipDoctorResetRef.current = false;
-    } else {
-      setSelectedDoctorId(null);
-      setDoctorSearch("");
-    }
-  }, [selectedDeptId, allDoctors]);
+  }, [selectedDeptId, allDoctors, allGroups]);
 
   function openEditPatientInfo() {
-    skipDoctorResetRef.current = true;
     const ipLast6Init = bed.ip_last6 || "";
     const admissionTypeInit = bed.admission_type || "";
     const consultantNameInit = bed.consultant_name || "";
     const departmentNameInit = bed.department_name || "";
-    const doctorIdInit = bed.doctor_id || null;
+    const isGroupOwned = bed.owner_type === "GROUP";
+    const doctorIdInit = isGroupOwned ? null : (bed.doctor_id || null);
+    const groupIdInit = isGroupOwned ? (bed.consultant_group_id || null) : null;
     const deptIdInit = bed.department_id || null;
     const payerInit = bed.payer_type || "";
     setIpLast6(ipLast6Init);
@@ -938,19 +1019,20 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     setConsultantName(consultantNameInit);
     setDepartmentName(departmentNameInit);
     setSelectedDoctorId(doctorIdInit);
+    setSelectedGroupId(groupIdInit);
     setSelectedDeptId(deptIdInit);
     setEditPayer(payerInit);
     patientInfoSnapshotRef.current = {
       ipLast6: ipLast6Init, admissionType: admissionTypeInit,
       consultantName: consultantNameInit, departmentName: departmentNameInit,
-      doctorId: doctorIdInit, departmentId: deptIdInit, payer: payerInit,
+      doctorId: doctorIdInit, groupId: groupIdInit, departmentId: deptIdInit, payer: payerInit,
     };
     setEditingPatientInfo(true);
   }
 
   async function savePatientInfo() {
     if (!/^\d{6}$/.test(ipLast6)) return;
-    if (!admissionType || !selectedDeptId || !selectedDoctorId) return;
+    if (!admissionType || !selectedDeptId || (!selectedDoctorId && !selectedGroupId)) return;
 
     // Only send fields that actually changed from the snapshot taken when the
     // edit form opened — avoids resending untouched fields on every save.
@@ -960,7 +1042,13 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     if (admissionType !== snap.admissionType) patch.admissionType = admissionType;
     if (consultantName !== snap.consultantName) patch.consultantName = consultantName;
     if (departmentName !== snap.departmentName) patch.departmentName = departmentName;
-    if (selectedDoctorId !== snap.doctorId) patch.doctorId = selectedDoctorId;
+    // doctorId/consultantGroupId are sent together whenever the owner changed —
+    // the backend requires both explicitly (even null) so it can tell "unchanged"
+    // apart from "switched to the other kind of owner".
+    if (selectedDoctorId !== snap.doctorId || selectedGroupId !== snap.groupId) {
+      patch.doctorId = selectedDoctorId;
+      patch.consultantGroupId = selectedGroupId;
+    }
     if (selectedDeptId !== snap.departmentId) patch.departmentId = selectedDeptId;
     if ((editPayer || null) !== (snap.payer || null)) patch.payerType = editPayer || null;
 
@@ -986,6 +1074,19 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   // form — same state (departments/doctors/selectedDeptId/etc.), same UI, kept in
   // one place so a change here doesn't need to be made twice.
   function renderDeptDoctorPicker() {
+    // Bidirectional filtering counterpart: once a consultant/group is selected,
+    // the department list narrows to only their departments — same idea as
+    // `doctors`/`groups` state already narrowing to the selected department.
+    const selectedOwner = selectedGroupId
+      ? (allGroups.find(g => g.id === selectedGroupId))
+      : selectedDoctorId
+        ? (allDoctors.find(d => d.id === selectedDoctorId))
+        : null;
+    const availableDepartments = selectedOwner
+      ? departments.filter(d => selectedOwner.departments?.some(dep => dep.id === d.id))
+      : departments;
+    const deptResults = availableDepartments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase()));
+
     return (
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         {/* Department dropdown */}
@@ -1001,7 +1102,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
           )}
           {deptOpen && (
             <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
-              {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).map(d => (
+              {deptResults.map(d => (
                 <div key={d.id} onClick={() => { setSelectedDeptId(d.id); setDepartmentName(d.name); setDeptOpen(false); setDeptSearch(""); }}
                   style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
                   onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
@@ -1009,45 +1110,62 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
                   {d.name}
                 </div>
               ))}
-              {departments.filter(d => !deptSearch || d.name.toLowerCase().includes(deptSearch.toLowerCase())).length === 0 && (
-                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No departments found</div>
+              {deptResults.length === 0 && (
+                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>
+                  {selectedOwner ? `No departments assigned to ${selectedOwner.name}` : "No departments found"}
+                </div>
               )}
             </div>
           )}
         </div>
-        {/* Doctor dropdown — always enabled, filtered by department if one is selected */}
+        {/* Consultant dropdown — individual doctors and Consultant Groups (e.g.
+              "Vijay / Kumari") in one combined, searchable list. Picking either
+              sets exactly one of selectedDoctorId/selectedGroupId, clearing the
+              other — an admission is owned by one or the other, never both. */}
         <div ref={doctorRef} style={{ flex: "1 1 160px", position: "relative" }}>
-          <input className="field" style={{ width: "100%", borderColor: !selectedDoctorId ? "var(--red)" : undefined }}
-            placeholder="Select consultant"
-            value={doctorOpen ? doctorSearch : (doctors.find(d => d.id === selectedDoctorId)?.name || allDoctors.find(d => d.id === selectedDoctorId)?.name || "")}
+          <input className="field" style={{ width: "100%", borderColor: (!selectedDoctorId && !selectedGroupId) ? "var(--red)" : undefined }}
+            placeholder="Select consultant or group"
+            value={doctorOpen ? doctorSearch : (
+              selectedGroupId
+                ? (groups.find(g => g.id === selectedGroupId)?.name || allGroups.find(g => g.id === selectedGroupId)?.name || "")
+                : (doctors.find(d => d.id === selectedDoctorId)?.name || allDoctors.find(d => d.id === selectedDoctorId)?.name || "")
+            )}
             onFocus={() => { setDoctorOpen(true); setDoctorSearch(""); }}
             onChange={(e) => setDoctorSearch(e.target.value)} />
-          {selectedDoctorId && !doctorOpen && (
-            <span onClick={() => { setSelectedDoctorId(null); setDoctorSearch(""); setConsultantName(""); }}
+          {(selectedDoctorId || selectedGroupId) && !doctorOpen && (
+            <span onClick={() => { setSelectedDoctorId(null); setSelectedGroupId(null); setDoctorSearch(""); setConsultantName(""); }}
               style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", cursor: "pointer", color: "var(--ink-3)", fontSize: 16, lineHeight: 1 }}>&times;</span>
           )}
-          {doctorOpen && (
-            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 180, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
-              {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).map(d => (
-                <div key={d.id} onClick={() => {
-                  setSelectedDoctorId(d.id); setConsultantName(d.name); setDoctorOpen(false); setDoctorSearch("");
-                  if (!selectedDeptId && d.departments?.length === 1) {
-                    skipDoctorResetRef.current = true;
-                    setSelectedDeptId(d.departments[0].id);
-                    setDepartmentName(d.departments[0].name);
-                  }
-                }}
-                  style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)" }}
-                  onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  {d.name}
-                </div>
-              ))}
-              {doctors.filter(d => !doctorSearch || d.name.toLowerCase().includes(doctorSearch.toLowerCase())).length === 0 && (
-                <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No consultants found</div>
-              )}
-            </div>
-          )}
+          {doctorOpen && (() => {
+            const q = doctorSearch.toLowerCase();
+            const doctorOptions = doctors.filter(d => !q || d.name.toLowerCase().includes(q)).map(d => ({ ...d, _kind: "DOCTOR" }));
+            const groupOptions = groups.filter(g => !q || g.name.toLowerCase().includes(q)).map(g => ({ ...g, _kind: "GROUP" }));
+            const options = [...doctorOptions, ...groupOptions];
+            return (
+              <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 99, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 8, maxHeight: 220, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,.12)" }}>
+                {options.map(o => (
+                  <div key={`${o._kind}-${o.id}`} onClick={() => {
+                    if (o._kind === "GROUP") { setSelectedGroupId(o.id); setSelectedDoctorId(null); }
+                    else { setSelectedDoctorId(o.id); setSelectedGroupId(null); }
+                    setConsultantName(o.name); setDoctorOpen(false); setDoctorSearch("");
+                    if (!selectedDeptId && o.departments?.length === 1) {
+                      setSelectedDeptId(o.departments[0].id);
+                      setDepartmentName(o.departments[0].name);
+                    }
+                  }}
+                    style={{ padding: "10px 14px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}
+                    onMouseEnter={e => e.currentTarget.style.background = "var(--bg)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    {o._kind === "GROUP" && <Ic d={icons.users} s={13} style={{ color: "var(--ink-3)", flexShrink: 0 }} />}
+                    {o.name}
+                  </div>
+                ))}
+                {options.length === 0 && (
+                  <div style={{ padding: "10px 14px", fontSize: 12, color: "var(--ink-3)" }}>No consultants found</div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
@@ -1097,6 +1215,30 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   // Reservation popup in the Actions row, only after the bed is already Occupied.
   const showReservationInline = physical === "VACANT";
 
+  const admissionId = bed.admission_id ?? bed.discharge_tracking?.admission_id;
+
+  async function handleDischargeImmediate() {
+    const ok = await confirm({
+      title: "Discharge Immediate?",
+      message: "This marks every remaining discharge step complete and frees this Discharge Lounge bed right away.\n\nThis cannot be undone.",
+      confirmLabel: "Yes, discharge now",
+      cancelLabel: "Go Back",
+      danger: true,
+      warning: true,
+    });
+    if (!ok) return;
+    setDischargeImmediateSaving(true);
+    try {
+      await api.dischargeForceComplete(admissionId);
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      onToast?.(toastErr(e));
+    } finally {
+      setDischargeImmediateSaving(false);
+    }
+  }
+
   async function handleSave() {
     if (needsPayer && !payer) return;
     if (!showActionsRow && needsDestination && !destination) return;
@@ -1104,7 +1246,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     if (needsIp && !ipValid) return;
     if (needsIp && !admissionType) return;
     if (needsIp && !selectedDeptId) return;
-    if (needsIp && !selectedDoctorId) return;
+    if (needsIp && !selectedDoctorId && !selectedGroupId) return;
     setSaving(true);
     const payerArg = physical === "VACANT" ? null : needsIp ? (payer || null) : undefined;
     const destinationArg = (physical === "OCCUPIED" && reservation === "RESERVED") ? (destination || bed.destination || undefined) : undefined;
@@ -1115,8 +1257,9 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     const departmentArg = needsIp ? (departmentName.trim() || null) : undefined;
     const doctorIdArg = needsIp ? (selectedDoctorId || null) : undefined;
     const departmentIdArg = needsIp ? (selectedDeptId || null) : undefined;
+    const consultantGroupIdArg = needsIp ? (selectedGroupId || null) : undefined;
     try {
-      await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg, ipArg, admissionTypeArg, consultantArg, departmentArg, doctorIdArg, departmentIdArg);
+      await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg, ipArg, admissionTypeArg, consultantArg, departmentArg, doctorIdArg, departmentIdArg, consultantGroupIdArg);
       onToast?.("Status updated ✓");
     } catch {
       // error already shown as a toast by changeStatus in WardPage
@@ -1202,6 +1345,20 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
           <span className="k row" style={{ gap: 10 }}><Ic d={icons.target} s={16} /> Current Status</span>
           <span className="v">{bedCurrentStatus(bed)}</span>
         </div>
+        {/* Discharge Lounge only — which real ward/bed the patient physically
+              left before landing here. */}
+        {bed.bed_type === "Lounge" && bed.physical_status === "OCCUPIED" && bed.origin_ward_name && (
+          <div className="pdlg-row" style={{ padding: "10px 0" }}>
+            <span className="k row" style={{ gap: 10 }}><Ic d={icons.grid} s={16} /> From Ward</span>
+            <span className="v">{bed.origin_ward_name}</span>
+          </div>
+        )}
+        {bed.bed_type === "Lounge" && bed.physical_status === "OCCUPIED" && bed.origin_bed_name && (
+          <div className="pdlg-row" style={{ padding: "10px 0" }}>
+            <span className="k row" style={{ gap: 10 }}><Ic d={icons.bed} s={16} /> From Bed</span>
+            <span className="v">{bed.origin_bed_name}</span>
+          </div>
+        )}
         {bed.physical_status === "OCCUPIED" && editingPatientInfo ? (
           <div style={{ padding: "10px 0" }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
@@ -1248,7 +1405,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
               <button className="btn btn-ghost" style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13 }}
                 disabled={savingPatientInfo} onClick={() => setEditingPatientInfo(false)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13 }}
-                disabled={savingPatientInfo || !/^\d{6}$/.test(ipLast6) || !admissionType || !selectedDeptId || !selectedDoctorId}
+                disabled={savingPatientInfo || !/^\d{6}$/.test(ipLast6) || !admissionType || !selectedDeptId || (!selectedDoctorId && !selectedGroupId)}
                 onClick={savePatientInfo}>{savingPatientInfo ? "Saving…" : "Save"}</button>
             </div>
           </div>
@@ -1275,7 +1432,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             {bed.physical_status === "OCCUPIED" && (bed.consultant_name || bed.department_name) && (
               <div className="pdlg-row" style={{ padding: "10px 0" }}>
                 <span className="k row" style={{ gap: 10 }}><Ic d={icons.building} s={16} /> Consultant / Dept</span>
-                <span className="v">{[bed.consultant_name, bed.department_name].filter(Boolean).join(" / ")}</span>
+                <span className="v">{bed.consultant_name}{bed.department_name ? `${bed.consultant_name ? " " : ""}[${bed.department_name}]` : ""}</span>
               </div>
             )}
           </>
@@ -1396,7 +1553,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             {!selectedDeptId && (
               <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a department.</div>
             )}
-            {selectedDeptId && !selectedDoctorId && (
+            {selectedDeptId && !selectedDoctorId && !selectedGroupId && (
               <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Select a consultant.</div>
             )}
           </div>
@@ -1452,6 +1609,26 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
                 }}>
                   <Ic d={icons.exchange} s={15} style={{ color: "var(--primary)" }} />
                   Bed Transfer
+                </button>
+              )}
+              {(cfg.role === "PRE" || cfg.role === "NURSE" || cfg.role === "FC") && bed.bed_type === "Lounge" && (
+                <button onClick={() => setReadmitOpen(true)} style={{
+                  display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
+                  background: "var(--panel-2)", border: "1px solid var(--line)", borderRadius: 12,
+                  padding: "12px 14px", fontSize: 13, fontWeight: 600, color: "var(--ink)", cursor: "pointer",
+                }}>
+                  <Ic d={icons.exchange} s={15} style={{ color: "var(--primary)" }} />
+                  Readmit
+                </button>
+              )}
+              {cfg.role === "PRE" && bed.bed_type === "Lounge" && (
+                <button onClick={handleDischargeImmediate} disabled={dischargeImmediateSaving} style={{
+                  display: "flex", alignItems: "center", gap: 8, flex: "1 1 140px",
+                  background: "var(--red-bg, #FEE2E2)", border: "1px solid var(--red, #ef4444)", borderRadius: 12,
+                  padding: "12px 14px", fontSize: 13, fontWeight: 600, color: "var(--red, #ef4444)", cursor: "pointer",
+                }}>
+                  <Ic d={icons.alert} s={15} style={{ color: "var(--red, #ef4444)" }} />
+                  {dischargeImmediateSaving ? "Working…" : "Discharge Immediate"}
                 </button>
               )}
               <button onClick={() => {
@@ -1543,6 +1720,16 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
           onDone={() => { setDischargePlanOpen(false); onChanged?.(); setDischargeOpen(true); }} />,
         document.body
       )}
+      {readmitOpen && createPortal(
+        <ReadmitPopup bed={bed} onClose={() => setReadmitOpen(false)}
+          onSaved={(r) => {
+            setReadmitOpen(false);
+            if (onTransferred) onTransferred(r, bed);
+            else { onChanged?.(); onClose(); }
+          }} />,
+        document.body
+      )}
+      {confirmDialog}
 
       {/* Footer actions */}
       <div style={{ display: "flex", gap: 10, marginTop: 22, paddingTop: 18, borderTop: "1px solid var(--line)" }}>
@@ -1570,11 +1757,11 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
 // ══════════════════════════════════════════════════════════════════════════════
 //  WARD PAGE — full-page ward view (View / Manage / Discharge tabs, no popup)
 // ══════════════════════════════════════════════════════════════════════════════
-export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId }) {
+export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, initialSearch }) {
   const [tab, setTab] = useState(initialTab || "manage");
   const [beds, setBeds] = useState([]);
   const [filter, setFilter] = useState("ALL");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch || "");
   const [editingBed, setEditingBed] = useState(null);  // bed object | null
   const [loading, setLoading] = useState(false);
   const [loadedAt, setLoadedAt] = useState(null);
@@ -1691,7 +1878,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId }
   });
 
   // Optimistic update — snapshot restored on failure; unit_type preserved via spread
-  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) => {
+  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) => {
     if (!cfg.updateBedStatus) return;  // read-only cfg (CONSULTANT) — nothing to save
     let snapshot;
     const stillOccRes = physicalStatus === "OCCUPIED" && reservationStatus === "RESERVED";
@@ -1711,11 +1898,13 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId }
           ...(departmentName !== undefined ? { department_name: departmentName } : {}),
           ...(doctorId ? { doctor_id: doctorId } : {}),
           ...(departmentId ? { department_id: departmentId } : {}),
+          ...(consultantGroupId ? { consultant_group_id: consultantGroupId, owner_type: "GROUP" } : {}),
+          ...(doctorId ? { owner_type: "DOCTOR" } : {}),
         }
         : b);
     });
     try {
-      await cfg.updateBedStatus(bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId);
+      await cfg.updateBedStatus(bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId);
     } catch (e) {
       setBeds(snapshot);
       showToast(toastErr(e));
@@ -1887,7 +2076,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId }
           payerTypes={payerTypes}
           destinations={destinations}
           departments={departments}
-          onSave={async (bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) => {
+          onSave={async (bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) => {
             const stillOccRes = physical === "OCCUPIED" && reservation === "RESERVED";
             const stillVacRes = physical === "VACANT" && reservation === "RESERVED";
             setEditingBed(prev => ({
@@ -1901,8 +2090,10 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId }
               ...(departmentName !== undefined ? { department_name: departmentName } : {}),
               ...(doctorId ? { doctor_id: doctorId } : {}),
               ...(departmentId ? { department_id: departmentId } : {}),
+              ...(consultantGroupId ? { consultant_group_id: consultantGroupId, owner_type: "GROUP" } : {}),
+              ...(doctorId ? { owner_type: "DOCTOR" } : {}),
             }));
-            await changeStatus(bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId);
+            await changeStatus(bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId);
           }}
           onClose={() => setEditingBed(null)}
           onChanged={load}

@@ -14,6 +14,7 @@ const NURSE_CFG = {
   payerTypes: () => api.nursePayerTypes(),
   destinations: () => api.nurseDestinations(),
   reviewWard: (wardId) => api.nurseReviewWard(wardId),
+  bedDetails: () => api.nurseBedDetails(),
 };
 
 // ── Occupancy summary bar (mirrors PRE Entry OccupancyCards) ─────────────────
@@ -142,6 +143,13 @@ export default function NurseApp({ user, onLogout }) {
   const [stationFilter, setStationFilter] = useState("all"); // "all" | station id
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [wardSearch, setWardSearch] = useState("");
+  const [ipMatch, setIpMatch] = useState(null); // { wardId } | null — resolved IP lookup
+  const [ipNotFound, setIpNotFound] = useState(false);
+  // Hospital-wide bed list — same data the Home dashboard already fetches —
+  // pulled once, lazily, the first time it's needed, then cached for the rest
+  // of this page visit. Every IP search after that is a pure client-side scan.
+  const [bedDetails, setBedDetails] = useState(null);
+  const bedDetailsLoadingRef = useRef(false);
   const [stationName, setStationName] = useState(user.nursing_station || "");
   const [stations,    setStations]    = useState([]); // [{id, name}] — every station this nurse covers
   const [liveKey,     setLiveKey]     = useState(0); // bumped on every live event — feeds the Home dashboard
@@ -205,6 +213,27 @@ export default function NurseApp({ user, onLogout }) {
     return () => { socket.disconnect(); };
   }, []); // socket created once per mount; loadRef keeps the callback fresh
 
+  // A 6-digit search value is treated as an IP lookup instead of a ward-name
+  // filter — narrows the ward grid to the one matching ward's card (same as
+  // ward-name search narrowing), but doesn't navigate in automatically; the
+  // user still clicks the card. WardPage's search box is pre-seeded with the
+  // IP once opened, so it shows just that one bed.
+  useEffect(() => {
+    const ip = wardSearch.trim();
+    setIpNotFound(false);
+    if (!/^\d{6}$/.test(ip)) { setIpMatch(null); return; }
+    if (bedDetails === null) {
+      if (!bedDetailsLoadingRef.current) {
+        bedDetailsLoadingRef.current = true;
+        NURSE_CFG.bedDetails().then((r) => setBedDetails(r || [])).catch(() => setIpNotFound(true));
+      }
+      return; // effect re-runs once bedDetails lands
+    }
+    const bed = bedDetails.find((b) => b.ip_last6 === ip);
+    if (bed) setIpMatch({ wardId: bed.ward_id });
+    else { setIpMatch(null); setIpNotFound(true); }
+  }, [wardSearch, bedDetails]);
+
   if (wards === null) return (
     <div className="preui">
     <div className="empty" style={{ paddingTop: 120 }}>
@@ -257,6 +286,7 @@ export default function NurseApp({ user, onLogout }) {
         <WardPage
           ward={{ ...openWard.ward, ward: openWard.ward.name }}
           initialTab={openWard.tab}
+          initialSearch={openWard.search}
           cfg={NURSE_CFG}
           allWards={wards.map(w => ({ id: w.id, ward: w.name }))}
           onBack={() => { setOpenWard(null); load(); }}
@@ -264,6 +294,12 @@ export default function NurseApp({ user, onLogout }) {
       ) : navTab === "wards" ? (<>
       {/* Occupancy summary bar */}
       {wards.length > 0 && <NurseOccupancy wards={wards} />}
+
+      {ipNotFound && (
+        <div className="dim" style={{ fontSize: 13, padding: "10px 2px", marginBottom: 8 }}>
+          No patient found with that IP in your wards.
+        </div>
+      )}
 
       {/* Search + ward picker */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
@@ -274,7 +310,7 @@ export default function NurseApp({ user, onLogout }) {
           <input
             className="field"
             value={wardSearch}
-            placeholder="Search ward…"
+            placeholder="Search ward / IP…"
             style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
             onChange={(e) => setWardSearch(e.target.value)}
           />
@@ -313,9 +349,10 @@ export default function NurseApp({ user, onLogout }) {
           .filter((st) => stationFilter === "all" || String(st.id) === stationFilter)
           .map((st) => {
             const nq = wardSearch.trim().toLowerCase();
+            const isIpSearch = /^\d{6}$/.test(nq);
             const list = wards.filter((w) =>
               w.station_id === st.id && (wardFilter === "all" || String(w.id) === wardFilter) &&
-              (!nq || w.name.toLowerCase().includes(nq))
+              (isIpSearch ? ipMatch?.wardId === w.id : (!nq || w.name.toLowerCase().includes(nq)))
             );
             if (list.length === 0) return null;
             const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
@@ -330,7 +367,7 @@ export default function NurseApp({ user, onLogout }) {
                 <div className="card-grid">
                   {list.map((ward, i) => (
                     <WardCard key={ward.id} ward={ward} index={i}
-                      onOpen={(w, tab) => setOpenWard({ ward: w, tab })} />
+                      onOpen={(w, tab) => setOpenWard({ ward: w, tab, search: isIpSearch ? nq : undefined })} />
                   ))}
                 </div>
               </div>
@@ -341,12 +378,13 @@ export default function NurseApp({ user, onLogout }) {
           {wards
             .filter((w) => {
               const nq = wardSearch.trim().toLowerCase();
+              const isIpSearch = /^\d{6}$/.test(nq);
               return (wardFilter === "all" || String(w.id) === wardFilter) &&
-                (!nq || w.name.toLowerCase().includes(nq));
+                (isIpSearch ? ipMatch?.wardId === w.id : (!nq || w.name.toLowerCase().includes(nq)));
             })
             .map((ward, i) => (
               <WardCard key={ward.id} ward={ward} index={i}
-                onOpen={(w, tab) => setOpenWard({ ward: w, tab })} />
+                onOpen={(w, tab) => setOpenWard({ ward: w, tab, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined })} />
             ))}
         </div>
       )}
