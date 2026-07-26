@@ -18,6 +18,15 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY);
 }
 
+// Shared by every discharge-list fetcher below that supports the Transaction
+// Board drilldown's hospitalWide + unit params — first=? or & depending on
+// whether the caller already has a "?step=..." etc. ahead of it.
+function hwQuery(hospitalWide, unit, first = "?") {
+  if (!hospitalWide) return "";
+  const u = unit && unit !== "TOTAL" ? `&unit=${encodeURIComponent(unit)}` : "";
+  return `${first}hospitalWide=true${u}`;
+}
+
 async function req(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...(opts.headers || {}) };
   const t = getToken();
@@ -50,6 +59,7 @@ export const api = {
   meta: () => req("/meta"),
   departments: () => req("/departments"),
   doctors: (departmentId) => req("/doctors" + (departmentId ? `?department_id=${departmentId}` : "")),
+  consultantGroups: () => req("/consultant-groups"),
   login: (username, password) =>
     req("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   preMe: () => req("/pre/me"),
@@ -166,8 +176,8 @@ export const api = {
   },
   doctorPayerTypes: () => req("/doctor/payer-types"),
   doctorDestinations: () => req("/doctor/destinations"),
-  doctorUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
-    req(`/doctor/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
+  doctorUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
+    req(`/doctor/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   doctorReview: (blockId) => req(`/doctor/blocks/${blockId}/review`, { method: "POST" }),
   doctorReviewWard: (wardId) => req(`/doctor/wards/${wardId}/review`, { method: "POST" }),
   doctorActivity: () => req("/doctor/activity"),
@@ -212,12 +222,16 @@ export const api = {
   preAdminDashboardHistory: (unit) => req(`/pre/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   preConsultants: () => req("/pre/consultants"),
   preSnapshots: () => req("/pre/snapshots"),
-  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
-    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
+  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
+    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   // Corrects a data-entry mistake on an already-active admission (IP/type/consultant/dept)
   // — never changes physical/reservation status.
-  preUpdateAdmission: (bedId, { ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, payerType }) =>
-    req(`/pre/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, payer_type: payerType }) }),
+  // doctorId/consultantGroupId are passed through as-is (not `?? undefined`) —
+  // when the owner is switched to a Consultant Group, doctorId is explicitly
+  // `null`, and `?? undefined` would wrongly coerce that to "omitted", breaking
+  // the backend's "both fields sent together" contract.
+  preUpdateAdmission: (bedId, { ipLast6, admissionType, departmentName, doctorId, departmentId, consultantGroupId, payerType }) =>
+    req(`/pre/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId, payer_type: payerType }) }),
   // ── Nurse — bed management ───────────────────────────────────────────────────
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
@@ -240,8 +254,8 @@ export const api = {
   nurseHospitalAdminDashboardHistory: (unit) => req(`/nurse/hospital/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   nurseHospitalConsultants: () => req("/nurse/hospital/consultants"),
   nurseHospitalSnapshots: () => req("/nurse/hospital/snapshots"),
-  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
-    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
+  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
+    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
   mgrPayerTypes: () => req("/manager/payer-types"),
@@ -260,10 +274,17 @@ export const api = {
   mgrUpdateDepartment: (id, data) => req(`/manager/departments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrDeleteDepartment: (id) => req(`/manager/departments/${id}`, { method: "DELETE" }),
   // ── manager — Doctors / Consultants (master data) ────────────────────────────
+  // Read-only — still used by the Consultant Groups member picker. Doctors are
+  // now created/edited/deleted only via mgrCreateConsultant/mgrUpdateConsultant/
+  // mgrDeleteConsultant (a doctor never exists without its consultant login).
   mgrDoctorsMaster: () => req("/manager/doctors-master"),
-  mgrCreateDoctorMaster: (name, departmentIds) => req("/manager/doctors-master", { method: "POST", body: JSON.stringify({ name, department_ids: departmentIds }) }),
-  mgrUpdateDoctorMaster: (id, { name, active, departmentIds } = {}) => req(`/manager/doctors-master/${id}`, { method: "PUT", body: JSON.stringify({ name, active, department_ids: departmentIds }) }),
-  mgrDeleteDoctorMaster: (id) => req(`/manager/doctors-master/${id}`, { method: "DELETE" }),
+
+  mgrConsultantGroups: () => req("/manager/consultant-groups"),
+  mgrCreateConsultantGroup: (name, doctorIds, departmentIds) =>
+    req("/manager/consultant-groups", { method: "POST", body: JSON.stringify({ name, doctor_ids: doctorIds, department_ids: departmentIds }) }),
+  mgrUpdateConsultantGroup: (id, { name, active, doctorIds, departmentIds } = {}) =>
+    req(`/manager/consultant-groups/${id}`, { method: "PUT", body: JSON.stringify({ name, active, doctor_ids: doctorIds, department_ids: departmentIds }) }),
+  mgrDeleteConsultantGroup: (id) => req(`/manager/consultant-groups/${id}`, { method: "DELETE" }),
   // ── manager — Discharge Lounge (virtual holding ward, outside the floor hierarchy) ──
   mgrDischargeLounge: () => req("/manager/discharge-lounge"),
   mgrSetupDischargeLounge: (name, initialBeds) => req("/manager/discharge-lounge", { method: "POST", body: JSON.stringify({ name, initial_beds: initialBeds }) }),
@@ -288,27 +309,39 @@ export const api = {
   dischargeDashboard: () => req("/discharge/dashboard"),
   dischargeHistory: (admissionId) => req(`/discharge/history/${admissionId}`),
   dischargesForWard: (wardId) => req(`/discharge/ward/${wardId}`),
-  dischargesActive: (wardId) => req("/discharge/active" + (wardId ? `?wardId=${wardId}` : "")),
-  dischargesPendingStep: (step) => req(`/discharge/pending?step=${step}`),
+  // hospitalWide: only ever passed by the Transaction Board's drilldown modal
+  // (DischargeListModal), to match the hospital-wide scope its card counts
+  // already use — every other caller (each role's own scoped Discharges
+  // worklist page) never passes it, so their behavior is unchanged.
+  // unit: also only from that same modal — the Unit toolbar's current
+  // selection (TOTAL/KIMS/Renova/... or any future one), further narrowing
+  // hospitalWide down to just that unit's wards, same as the card counts
+  // (GET /coo/admin-dashboard?unit=) already do. Ignored unless hospitalWide
+  // is also true, and omitted entirely for "TOTAL" (hospital-wide already
+  // means everything).
+  dischargesActive: (wardId, hospitalWide, unit) => req("/discharge/active" + (wardId ? `?wardId=${wardId}` : hwQuery(hospitalWide, unit))),
+  dischargesPendingStep: (step, hospitalWide, unit) => req(`/discharge/pending?step=${step}` + hwQuery(hospitalWide, unit, "&")),
   dischargeBillingPipeline: () => req("/discharge/billing-pipeline"),
-  dischargesAdmittedToday: () => req("/discharge/admitted-today"),
-  dischargesCancelledToday: () => req("/discharge/cancelled-today"),
-  dischargesInitiatedToday: () => req("/discharge/initiated-today"),
-  dischargesCompletedToday: () => req("/discharge/completed-today"),
-  dischargesPatientLeft: () => req("/discharge/patient-left"),
+  dischargesAdmittedToday: (hospitalWide, unit) => req("/discharge/admitted-today" + hwQuery(hospitalWide, unit)),
+  dischargesCancelledToday: (hospitalWide, unit) => req("/discharge/cancelled-today" + hwQuery(hospitalWide, unit)),
+  dischargesInitiatedToday: (hospitalWide, unit) => req("/discharge/initiated-today" + hwQuery(hospitalWide, unit)),
+  dischargesCompletedToday: (hospitalWide, unit) => req("/discharge/completed-today" + hwQuery(hospitalWide, unit)),
+  dischargesPatientLeft: (hospitalWide, unit) => req("/discharge/patient-left" + hwQuery(hospitalWide, unit)),
   transferWards: () => req("/discharge/transfer/wards"),
   transferCandidates: (wardId) => req(`/discharge/transfer/candidates?wardId=${wardId}`),
   transferBed: (fromBedId, toWardId, toBedId, reason) =>
     req("/discharge/transfer", { method: "POST", body: JSON.stringify({ fromBedId, toWardId, toBedId, reason }) }),
   dischargeMoveToLounge: (admissionId) => req(`/discharge/${admissionId}/move-to-lounge`, { method: "POST", body: JSON.stringify({}) }),
-  // ── Consultant login management (COO creates/manages) ───────────────────────
-  mgrConsultantLogins: () => req("/manager/consultant-logins"),
-  mgrSetConsultantLogin: (doctorMasterId, username, password) =>
-    req("/manager/consultant-logins", { method: "POST", body: JSON.stringify({ doctor_master_id: doctorMasterId, username, password }) }),
-  mgrUpdateConsultantLogin: (id, data) =>
-    req(`/manager/consultant-logins/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  mgrDeleteConsultantLogin: (id) =>
-    req(`/manager/consultant-logins/${id}`, { method: "DELETE" }),
+  readmitFromLounge: (admissionId, toWardId, toBedId, reason) =>
+    req(`/discharge/${admissionId}/readmit`, { method: "POST", body: JSON.stringify({ toWardId, toBedId, reason }) }),
+  dischargeForceComplete: (admissionId) =>
+    req(`/discharge/${admissionId}/force-complete`, { method: "POST", body: JSON.stringify({}) }),
+  // ── Consultant users (COO creates/manages, login + doctor identity as one unit) ─
+  mgrConsultants: () => req("/manager/consultants"),
+  mgrCreateConsultant: (data) => req("/manager/consultants", { method: "POST", body: JSON.stringify(data) }),
+  mgrUpdateConsultant: (id, { name, username, password, active, departmentIds } = {}) =>
+    req(`/manager/consultants/${id}`, { method: "PUT", body: JSON.stringify({ name, username, password, active, department_ids: departmentIds }) }),
+  mgrDeleteConsultant: (id) => req(`/manager/consultants/${id}`, { method: "DELETE" }),
   // ── Consultant portal (CONSULTANT role) ─────────────────────────────────────
   consultantLiveWards: () => req("/consultant/live-wards"),
   consultantBedDetails: () => req("/consultant/bed-details"),
@@ -379,10 +412,10 @@ export const api = {
     const qs = params.toString();
     return req(`/fc/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  fcUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId) =>
-    req(`/fc/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined }) }),
-  fcUpdateAdmission: (bedId, { ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, payerType }) =>
-    req(`/fc/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, consultant_name: consultantName ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, payer_type: payerType }) }),
+  fcUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
+    req(`/fc/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
+  fcUpdateAdmission: (bedId, { ipLast6, admissionType, departmentName, doctorId, departmentId, consultantGroupId, payerType }) =>
+    req(`/fc/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId, payer_type: payerType }) }),
   // ── Simple logins (FC, Pharmacy) — admin management ───────────────────────
   mgrSimpleLogins: (role) => req(`/manager/simple-logins?role=${role}`),
   mgrCreateSimpleLogin: (role, username, password, name) =>

@@ -22,7 +22,14 @@ const CONSULTANT_CFG = {
 };
 
 // ── My Patients page — flat bed grid with ward label on each card ────────────
-function MyPatientsPage({ liveKey: parentLiveKey }) {
+// Real-time: this page stays mounted for the whole ConsultantApp session (see
+// the always-rendered/CSS-hidden wrapper in ConsultantApp below) and keeps its
+// own dedicated socket listener for "consultant:patient-update" — a targeted,
+// ownership-scoped event (never broadcast to "overview"). Every patient/discharge
+// action anywhere in the app that touches one of this consultant's admissions
+// patches the in-memory `patients` array directly; the only REST call is the
+// one-time initial load. No polling, no refetch-on-every-event, no page reload.
+function MyPatientsPage() {
   const [patients, setPatients] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -48,7 +55,29 @@ function MyPatientsPage({ liveKey: parentLiveKey }) {
     api.departments().then(r => setDepartments(r.departments || [])).catch(() => {});
   }, []);
 
-  useEffect(() => { if (parentLiveKey > 0) load(); }, [parentLiveKey]);
+  // Dedicated socket, separate from ConsultantApp's dashboard-refresh socket —
+  // this one only ever receives events this consultant actually owns (room-scoped
+  // server-side), so every event here is guaranteed relevant, no filtering needed.
+  useEffect(() => {
+    const socket = createSocket();
+    socket.on("consultant:patient-update", (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      const { action, admission_id } = payload;
+      setPatients((prev) => {
+        if (!prev) return prev;
+        if (action === "REMOVE") {
+          return prev.filter((p) => p.admission_id !== admission_id);
+        }
+        // UPSERT — replace the matching row if present, otherwise add it.
+        const idx = prev.findIndex((p) => p.admission_id === admission_id);
+        if (idx === -1) return [...prev, payload];
+        const next = prev.slice();
+        next[idx] = payload;
+        return next;
+      });
+    });
+    return () => socket.disconnect();
+  }, []);
 
   const openBed = async (p) => {
     setLoadingBed(true);
@@ -69,8 +98,11 @@ function MyPatientsPage({ liveKey: parentLiveKey }) {
       <BedDetailSheet
         bed={selectedBed}
         cfg={CONSULTANT_CFG}
-        onClose={() => { setSelectedBed(null); load(); }}
-        onChanged={() => load()}
+        // No load() here — every discharge action a CONSULTANT can take (plan,
+        // reschedule, initiate, step updates) already emits a targeted
+        // consultant:patient-update event that patches `patients` directly.
+        onClose={() => setSelectedBed(null)}
+        onChanged={() => {}}
         onToast={showToast}
         payerTypes={payerTypes}
         destinations={destinations}
@@ -256,7 +288,13 @@ export default function ConsultantApp({ user, meta, onLogout }) {
             hideUnitFilter
           />
         )}
-        {tab === "mypatients" && <MyPatientsPage showToast={showToast} liveKey={liveKey} />}
+        {/* Stays mounted across tab switches (CSS-hidden, not unmounted) — its
+              patient list is kept live via its own dedicated socket listener, so
+              unmounting/remounting here would force a full refetch and defeat
+              the incremental real-time patching entirely. */}
+        <div style={{ display: tab === "mypatients" ? "block" : "none" }}>
+          <MyPatientsPage showToast={showToast} />
+        </div>
         {tab === "discharges" && <DischargesPage role="CONSULTANT" />}
         {tab === "profile" && <ProfilePage user={user} onLogout={onLogout} />}
 

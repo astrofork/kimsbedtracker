@@ -15,6 +15,7 @@ const DOCTOR_CFG = {
   payerTypes: () => api.doctorPayerTypes(),
   destinations: () => api.doctorDestinations(),
   reviewWard: (wardId) => api.doctorReviewWard(wardId),
+  bedDetails: () => api.doctorBedDetails(),
 };
 import DischargeMiniWidget from "./DischargeMiniWidget.jsx";
 
@@ -55,6 +56,35 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
   const [docsOpen, setDocsOpen] = useState(false); // doctors-list dropdown
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [wardSearch, setWardSearch] = useState("");
+  const [ipMatch, setIpMatch] = useState(null); // { wardId } | null — resolved IP lookup
+  const [ipNotFound, setIpNotFound] = useState(false);
+  // Hospital-wide bed list — same data the Home dashboard already fetches —
+  // pulled once, lazily, the first time it's needed, then cached for the rest
+  // of this page visit. Every IP search after that is a pure client-side scan.
+  const [bedDetails, setBedDetails] = useState(null);
+  const bedDetailsLoadingRef = useRef(false);
+
+  // A 6-digit search value is treated as an IP lookup instead of a ward-name
+  // filter — hospital-wide across every block this doctor can access, not just
+  // the currently open one. If the match is a ward inside THIS block, narrow the
+  // grid to that one card (user still clicks it, same as any other ward). If the
+  // match is in a different block (no card to click here), jump straight there.
+  useEffect(() => {
+    const ip = wardSearch.trim();
+    setIpNotFound(false);
+    if (!/^\d{6}$/.test(ip)) { setIpMatch(null); return; }
+    if (bedDetails === null) {
+      if (!bedDetailsLoadingRef.current) {
+        bedDetailsLoadingRef.current = true;
+        DOCTOR_CFG.bedDetails().then((r) => setBedDetails(r || [])).catch(() => setIpNotFound(true));
+      }
+      return; // effect re-runs once bedDetails lands
+    }
+    const bed = bedDetails.find((b) => b.ip_last6 === ip);
+    if (!bed) { setIpMatch(null); setIpNotFound(true); return; }
+    if (data?.wards?.some((w) => w.id === bed.ward_id)) setIpMatch({ wardId: bed.ward_id });
+    else onOpenWard({ id: bed.ward_id, name: bed.ward, _search: ip });
+  }, [wardSearch, onOpenWard, data, bedDetails]);
 
   // On phones, hide the app top bar while inside a block — the back button is the
   // way out, and the reclaimed space goes to the ward cards. (CSS: body.ward-focus)
@@ -138,6 +168,11 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
       ) : (
         <>
           <div className="floor-head">Wards</div>
+          {ipNotFound && (
+            <div className="dim" style={{ fontSize: 13, padding: "10px 2px", marginBottom: 8 }}>
+              No patient found with that IP in your wards.
+            </div>
+          )}
           {/* Search + ward picker */}
           <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
             <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
@@ -147,7 +182,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
               <input
                 className="field"
                 value={wardSearch}
-                placeholder="Search ward…"
+                placeholder="Search ward / IP…"
                 style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
                 onChange={(e) => setWardSearch(e.target.value)}
               />
@@ -173,15 +208,18 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
           <div className="card-grid">
             {data.wards.filter((w) => {
               const dq = wardSearch.trim().toLowerCase();
+              const isIpSearch = /^\d{6}$/.test(dq);
               return (wardFilter === "all" || String(w.id) === wardFilter) &&
-                (!dq || w.name.toLowerCase().includes(dq));
+                (isIpSearch ? ipMatch?.wardId === w.id : (!dq || w.name.toLowerCase().includes(dq)));
             }).map((w, i) => {
               const o = occOf(w);
+              const dq = wardSearch.trim();
+              const openThis = () => onOpenWard(/^\d{6}$/.test(dq) ? { ...w, _search: dq } : w);
               return (
                 <div key={w.id} className="doc-ward slide-up tap" style={{ animationDelay: i * 0.03 + "s" }}
                   role="button" tabIndex={0}
-                  onClick={() => w.operational !== false && onOpenWard(w)}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && w.operational !== false && onOpenWard(w)}>
+                  onClick={() => w.operational !== false && openThis()}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && w.operational !== false && openThis()}>
                   <div className="row between" style={{ alignItems: "flex-start" }}>
                     <div style={{ minWidth: 0 }}>
                       {(w.block_name || w.floor_name) && <div className="doc-ward-loc">{[w.block_name, w.floor_name].filter(Boolean).join(" · ")}</div>}
@@ -207,7 +245,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey }) {
 
                   <div className="row" style={{ gap: 8, marginTop: 14 }}>
                     <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", fontSize: 13 }} disabled={w.operational === false}
-                      onClick={(e) => { e.stopPropagation(); onOpenWard(w); }}>
+                      onClick={(e) => { e.stopPropagation(); openThis(); }}>
                       <Ic d={icons.bed} s={14} /> {w.operational === false ? "Non-operational" : "View / Update Beds"}
                     </button>
                   </div>
@@ -412,6 +450,7 @@ export default function DoctorApp({ user, onLogout }) {
         <WardPage
           ward={{ ...ward, ward: ward.name }}
           initialTab="manage"
+          initialSearch={ward._search}
           cfg={DOCTOR_CFG}
           allWards={[]}
           onBack={() => setWard(null)}

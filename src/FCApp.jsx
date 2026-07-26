@@ -18,6 +18,7 @@ const FC_CFG = {
   payerTypes: () => api.fcPayerTypes(),
   destinations: () => api.fcDestinations(),
   updateAdmission: (bedId, patch) => api.fcUpdateAdmission(bedId, patch),
+  bedDetails: () => api.fcBedDetails(),
 };
 
 const SECTIONS = [
@@ -271,7 +272,34 @@ export default function FCApp({ user, onLogout }) {
   const [openWard, setOpenWard] = useState(null); // { ward, tab } | null
   const [wardFilter, setWardFilter] = useState("all");
   const [wardSearch, setWardSearch] = useState("");
+  const [ipMatch, setIpMatch] = useState(null); // { wardId } | null — resolved IP lookup
+  const [ipNotFound, setIpNotFound] = useState(false);
+  // Hospital-wide bed list — same data the Home dashboard already fetches —
+  // pulled once, lazily, the first time it's needed, then cached for the rest
+  // of this page visit. Every IP search after that is a pure client-side scan.
+  const [bedDetails, setBedDetails] = useState(null);
+  const bedDetailsLoadingRef = useRef(false);
   const loadWardsRef = useRef(() => {});
+
+  // A 6-digit search value is treated as an IP lookup instead of a ward-name
+  // filter — FC is hospital-wide, so this can match any ward. Narrows the grid
+  // to the one matching ward's card; the user still clicks it, same as any
+  // other ward — WardPage's search box is pre-seeded with the IP once opened.
+  useEffect(() => {
+    const ip = wardSearch.trim();
+    setIpNotFound(false);
+    if (!/^\d{6}$/.test(ip)) { setIpMatch(null); return; }
+    if (bedDetails === null) {
+      if (!bedDetailsLoadingRef.current) {
+        bedDetailsLoadingRef.current = true;
+        FC_CFG.bedDetails().then((r) => setBedDetails(r || [])).catch(() => setIpNotFound(true));
+      }
+      return; // effect re-runs once bedDetails lands
+    }
+    const bed = bedDetails.find((b) => b.ip_last6 === ip);
+    if (bed) setIpMatch({ wardId: bed.ward_id });
+    else { setIpMatch(null); setIpNotFound(true); }
+  }, [wardSearch, bedDetails]);
 
   const loadWards = useCallback(async () => {
     try {
@@ -440,6 +468,7 @@ export default function FCApp({ user, onLogout }) {
           <WardPage
             ward={{ ...openWard.ward, ward: openWard.ward.ward }}
             initialTab={openWard.tab}
+            initialSearch={openWard.search}
             cfg={FC_CFG}
             allWards={(wards || []).map(w => ({ id: w.id, ward: w.ward, is_discharge_lounge: w.is_discharge_lounge }))}
             onBack={() => { setOpenWard(null); loadWards(); }}
@@ -451,6 +480,11 @@ export default function FCApp({ user, onLogout }) {
           </div>
         ) : (
           <>
+            {ipNotFound && (
+              <div className="dim" style={{ fontSize: 13, padding: "10px 2px", marginBottom: 8 }}>
+                No patient found with that IP.
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
               <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
                 <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
@@ -459,7 +493,7 @@ export default function FCApp({ user, onLogout }) {
                 <input
                   className="field"
                   value={wardSearch}
-                  placeholder="Search ward…"
+                  placeholder="Search ward / IP…"
                   style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
                   onChange={(e) => setWardSearch(e.target.value)}
                 />
@@ -496,12 +530,13 @@ export default function FCApp({ user, onLogout }) {
                 {wards
                   .filter((w) => {
                     const nq = wardSearch.trim().toLowerCase();
+                    const isIpSearch = /^\d{6}$/.test(nq);
                     return (wardFilter === "all" || String(w.id) === wardFilter) &&
-                      (!nq || w.ward.toLowerCase().includes(nq));
+                      (isIpSearch ? ipMatch?.wardId === w.id : (!nq || w.ward.toLowerCase().includes(nq)));
                   })
                   .map((ward, i) => (
                     <WardCard key={ward.id} ward={{ ...ward, name: ward.ward, total_beds: ward.total }} index={i}
-                      onOpen={(w, t) => setOpenWard({ ward: { ...w, ward: w.name }, tab: t })} />
+                      onOpen={(w, t) => setOpenWard({ ward: { ...w, ward: w.name }, tab: t, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined })} />
                   ))}
               </div>
             )}

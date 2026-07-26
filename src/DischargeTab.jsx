@@ -243,14 +243,19 @@ function PlanSection({ bed, existing, onClose, onSaved }) {
   );
 }
 
-// Exported — reused by BedDetailSheet's top-level "Bed Transfer" action.
-// The destination ward list is fetched here (hospital-wide, operational wards
-// only, Discharge Lounge excluded — see GET /discharge/transfer/wards) rather
+// Exported — reused by BedDetailSheet's top-level "Bed Transfer" action, and by
+// the Discharge Lounge's "Readmit" action (via `submit`/`submitLabel` props).
+// The destination ward list is fetched here (hospital-wide, operational wards,
+// including the Discharge Lounge — see GET /discharge/transfer/wards) rather
 // than passed in as a prop, so every transfer-capable role (PRE/Nurse/FC) sees
 // the same full set of valid destinations, not just their own block/station.
 // Each ward carries inMyScope: wards outside the caller's own usual assignment
 // are still selectable, but flagged with a warning before confirming.
-export function TransferSection({ bed, onClose, onSaved }) {
+//
+// `submit` lets a caller point this at a different backend action (Readmit uses
+// api.readmitFromLounge instead of api.transferBed) while reusing the exact same
+// ward/bed/reason UI. Defaults to the ordinary transfer.
+export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "Confirm Transfer" }) {
   const [wards, setWards] = useState(null);
   const [wardsError, setWardsError] = useState("");
   const [toWardId, setToWardId] = useState(bed.ward_id);
@@ -259,6 +264,7 @@ export function TransferSection({ bed, onClose, onSaved }) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [confirm, confirmDialog] = useConfirm();
 
   useEffect(() => {
     api.transferWards()
@@ -274,18 +280,38 @@ export function TransferSection({ bed, onClose, onSaved }) {
       .catch((e) => setError(toastErr(e)));
   }, [toWardId, bed.id]);
 
-  async function confirm() {
-    if (!toBedId || !reason.trim()) return;
+  const selectedWardEarly = (wards || []).find((w) => w.id === toWardId);
+  const dischargeStatus = bed.discharge_tracking?.status;
+  const loungeMarksPhysicalCheckout =
+    selectedWardEarly?.is_discharge_lounge &&
+    (dischargeStatus === "DISCHARGE_INITIATED" || dischargeStatus === "IN_PROGRESS");
+
+  async function doSubmit() {
     setSaving(true); setError("");
     try {
-      const r = await api.transferBed(bed.id, Number(toWardId), Number(toBedId), reason.trim());
+      const r = submit
+        ? await submit(Number(toWardId), Number(toBedId), reason.trim())
+        : await api.transferBed(bed.id, Number(toWardId), Number(toBedId), reason.trim());
       onSaved(r);
     } catch (e) { setError(toastErr(e)); }
     finally { setSaving(false); }
   }
 
-  const selectedWard = (wards || []).find((w) => w.id === toWardId);
-  const outOfScope = selectedWard && !selectedWard.inMyScope;
+  async function handleConfirmClick() {
+    if (!toBedId || !reason.trim()) return;
+    if (loungeMarksPhysicalCheckout) {
+      const ok = await confirm({
+        title: "Discharge already in progress",
+        message: "This discharge is already in progress. Moving this bed to the Discharge Lounge will mark Physical Checkout as complete (patient left = yes).\n\nContinue?",
+        confirmLabel: "Yes, move to lounge",
+        cancelLabel: "Go Back",
+      });
+      if (!ok) return;
+    }
+    await doSubmit();
+  }
+
+  const outOfScope = selectedWardEarly && !selectedWardEarly.inMyScope;
 
   return (
     <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: 14, marginTop: 10 }}>
@@ -326,10 +352,11 @@ export function TransferSection({ bed, onClose, onSaved }) {
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 8 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 14px" }} onClick={onClose}>Back</button>
-        <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={saving || !toBedId || !reason.trim()} onClick={confirm}>
-          {saving ? "Transferring…" : "Confirm Transfer"}
+        <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={saving || !toBedId || !reason.trim()} onClick={handleConfirmClick}>
+          {saving ? "Saving…" : submitLabel}
         </button>
       </div>
+      {confirmDialog}
     </div>
   );
 }

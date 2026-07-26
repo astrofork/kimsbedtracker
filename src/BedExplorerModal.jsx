@@ -41,7 +41,8 @@ const OPERATIONAL_STATUSES = ["VACANT", "ON_BED", "OCC_RES", "VAC_RES"];
 // Note: classify() doesn't distinguish Lounge beds or "overstay" (System
 // Checkout done, Physical pending) from a plain Occupied bed — so "On Bed"
 // here already includes both, same as the admin dashboard's "Total Patients"
-// (onbed + overstay + lounge) — no separate status needed for that card.
+// (onbed + reserved + overstay + lounge) — OCC_RES covers reserved, no
+// separate status needed for overstay/lounge on that card.
 const ENTRY_PRESETS = {
   "Vacant":              { statuses: ["VACANT"] },
   "On Bed":              { statuses: ["ON_BED"] },
@@ -61,7 +62,8 @@ const ENTRY_PRESETS = {
   "admin:Operational Beds":     { statuses: OPERATIONAL_STATUSES, excludeBedType: "Lounge" },
   "admin:Census Beds":          { statuses: ALL_STATUSES, bedType: "Census" },
   "admin:Non-Census Beds":      { statuses: ALL_STATUSES, bedType: "Non-Census" },
-  "admin:Total Patients":       { statuses: ["ON_BED"] },
+  "admin:Total Patients":       { statuses: ["ON_BED", "OCC_RES"] },
+  "admin:Total Occupancy":      { statuses: ["ON_BED", "OCC_RES"], excludeBedType: "Lounge" },
   "admin:Total Occ Census":     { statuses: ["ON_BED", "OCC_RES"], bedType: "Census" },
   "admin:Total Occ Non-Census": { statuses: ["ON_BED", "OCC_RES"], bedType: "Non-Census" },
   "admin:In Discharge Lounge":  { statuses: ["ON_BED", "OCC_RES"], bedType: "Lounge" },
@@ -124,7 +126,15 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
   const matchedBeds = useMemo(() => {
     if (!allBeds) return [];
     return allBeds.filter((b) => {
-      if (!wardIdSet.has(b.ward_id)) return false;
+      // A Discharge Lounge bed's own ward_id is always kept in wardIds by the
+      // caller (COOApp's `rows` filter) regardless of the active Unit filter —
+      // it has to be, so the Lounge card/table still work when a unit is
+      // selected. But that means checking b.ward_id here would show EVERY
+      // lounge patient (any origin) under every unit filter. Scope lounge beds
+      // by where the patient actually came FROM instead — same convention as
+      // the dashboard cards themselves (bedService.ts's loungeOriginBreakdown).
+      const scopeWardId = b.bed_type === "Lounge" ? b.origin_ward_id : b.ward_id;
+      if (!wardIdSet.has(scopeWardId)) return false;
       if (!filter.statuses.has(classify(b))) return false;
       if (filter.bedType && (b.bed_type || "Census") !== filter.bedType) return false;
       if (filter.excludeBedType && (b.bed_type || "Census") === filter.excludeBedType) return false;
@@ -239,7 +249,12 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
                       {g.recordedCount} of {g.meta.total} beds in this ward have an individual record (Setup → Bed Master) — the rest are counted but can't be shown individually.
                     </div>
                   )}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(152px, 1fr))", gap: 8 }}>
+                  {/* Discharge Lounge cards carry two extra rows (From Ward/From
+                        Bed) with longer text ("1F Day Care - Renova") that
+                        truncates at the normal card width — widen just this
+                        group's columns instead of shrinking every card in the
+                        board to fit the rare long name. */}
+                  <div style={{ display: "grid", gridTemplateColumns: `repeat(auto-fill, minmax(${g.beds.some((b) => b.origin_ward_name || b.origin_bed_name) ? 210 : 152}px, 1fr))`, gap: 8 }}>
                     {g.beds.map((b) => <BedCard key={b.id} bed={b} />)}
                   </div>
                 </div>
@@ -252,10 +267,16 @@ export default function BedExplorerModal({ entry, wardIds, wardMeta, onClose, fe
   );
 }
 
-const KV = ({ label, value, title }) => (
-  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
+// wrap=true lets the value break onto a second line instead of silently
+// ellipsis-truncating — used for origin ward/bed names, which run longer than
+// a single card row can fit even at the widened Discharge Lounge card size.
+const KV = ({ label, value, title, wrap }) => (
+  <div style={{ display: "flex", alignItems: wrap ? "flex-start" : "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
     <span style={{ color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 }}>{label}</span>
-    <span style={{ fontWeight: 700, color: "var(--ink)", textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={title}>
+    <span style={{
+      fontWeight: 700, color: "var(--ink)", textAlign: "right", minWidth: 0,
+      ...(wrap ? { wordBreak: "break-word" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }),
+    }} title={title}>
       {value}
     </span>
   </div>
@@ -281,6 +302,12 @@ function BedCard({ bed }) {
       </div>
       <KV label="IP" value={bed.ip_last6 || "—"} />
       <KV label="Ward" value={bed.ward || "—"} title={bed.ward} />
+      {/* Origin ward/bed — only ever set for a Discharge Lounge bed (see
+            allBedDetailsLive's LATERAL join to bed_transfer_history); this shows
+            where the patient actually came from, since "Ward" above just says
+            "Discharge Lounge" for every one of these cards. */}
+      {bed.origin_ward_name && <KV label="From Ward" value={bed.origin_ward_name} title={bed.origin_ward_name} wrap />}
+      {bed.origin_bed_name && <KV label="From Bed" value={bed.origin_bed_name} title={bed.origin_bed_name} />}
       {badge && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 11, lineHeight: 1.4 }}>
           <span style={{ color: "var(--ink-3)", fontWeight: 600, flexShrink: 0 }}>Disch</span>

@@ -3005,6 +3005,233 @@ function PreEditor({ user, preBlocks, onClose, onSaved, showToast }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  NURSE-IN-CHARGE MANAGER
 // ══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+//  CONSULTANT USER MANAGER — mirrors PreManager/PreEditor exactly. Login +
+//  doctors_master identity are created together as one unit (see
+//  consultantUserService.ts); departments are assigned as a follow-up Edit,
+//  not required at creation.
+// ══════════════════════════════════════════════════════════════════════════════
+export function ConsultantManager({ showToast }) {
+  const [consultants, setConsultants] = useState([]);
+  const [departments,  setDepartments] = useState([]);
+  const [editing,      setEditing]     = useState(null);
+  const [confirm, confirmDialog] = useConfirm();
+
+  const load = async () => {
+    try {
+      const [c, d] = await Promise.all([api.mgrConsultants(), api.mgrDepartments()]);
+      setConsultants(c.consultants || []);
+      setDepartments((d.departments || []).filter((x) => x.active));
+    } catch (e) { showToast(toastErr(e)); }
+  };
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div>
+      <div className="row between" style={{ marginBottom: 4 }}>
+        <div className="h1" style={{ fontSize: 18 }}>Consultant users</div>
+        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }}
+          onClick={() => setEditing("new")}>
+          <Ic d={icons.stethoscope} s={15} /> Add Consultant
+        </button>
+      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+        Same as adding a PRE user — name, username, password, and departments all in one
+        step. For a patient admitted under two or more consultants jointly, use Setup →
+        Consultant Groups instead.
+      </div>
+
+      {consultants.map((c) => (
+        <div className="card" key={c.id} style={{ padding: 14, marginBottom: 10, opacity: c.status === "inactive" ? 0.65 : 1 }}>
+          <div className="row between">
+            <div className="row" style={{ gap: 10 }}>
+              <BlockAvatar code={c.name} size={36} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{c.name}</div>
+                <div className="dim" style={{ fontSize: 11 }}>
+                  @{c.username}
+                  {c.status === "inactive" && <span style={{ color: "var(--amber)" }}> · inactive</span>}
+                  {(c.departments || []).length > 0
+                    ? <> · <span style={{ color: "var(--teal)" }}>{c.departments.map((d) => d.name).join(", ")}</span></>
+                    : <span style={{ color: "var(--red)" }}> · ⚠ no department assigned</span>}
+                </div>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="chip" onClick={() => setEditing(c)}>Edit</button>
+              <button className="chip" style={{ color: "var(--red)" }}
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: `Delete consultant "${c.name}"?`,
+                    message: `Username: ${c.username}\n\nThey will lose access immediately. Blocked if they've been used in a patient admission or Consultant Group — deactivate instead in that case.\n\nThis cannot be undone.`,
+                    confirmLabel: "Delete consultant", danger: true,
+                  });
+                  if (!ok) return;
+                  try { await api.mgrDeleteConsultant(c.id); load(); showToast(`Consultant "${c.name}" deleted`); }
+                  catch (e) { showToast(toastErr(e)); }
+                }}>Del</button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {consultants.length === 0 && (
+        <div className="card empty" style={{ marginTop: 14 }}>
+          <Ic d={icons.stethoscope} s={28} />
+          <div style={{ marginTop: 10, fontWeight: 600 }}>No consultant users yet</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>Add one above.</div>
+        </div>
+      )}
+
+      {editing !== null && (
+        <ConsultantEditor
+          consultant={editing === "new" ? null : editing}
+          departments={departments}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); showToast("Saved ✓"); }}
+          showToast={showToast}
+        />
+      )}
+      {confirmDialog}
+    </div>
+  );
+}
+
+function ConsultantEditor({ consultant, departments, onClose, onSaved, showToast }) {
+  useModal(onClose);
+  const isNew = !consultant;
+  const [username, setUsername] = useState(consultant?.username || "");
+  const [name,     setName]     = useState(consultant?.name     || "");
+  const [password, setPassword] = useState("");
+  const [showPwd,  setShowPwd]  = useState(false);
+  const [active,   setActive]   = useState(consultant?.status !== "inactive");
+  const [departmentIds, setDepartmentIds] = useState(
+    (consultant?.departments || []).map((d) => d.id)
+  );
+  const [busy, setBusy] = useState(false);
+
+  const toggleDept = (id) => {
+    setDepartmentIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const save = async () => {
+    if (!name.trim()) { showToast("Display name is required."); return; }
+    if (isNew) {
+      const uname = username.trim().toLowerCase();
+      if (!uname) { showToast("Username is required."); return; }
+      if (!/^[a-z0-9_]+$/.test(uname)) {
+        showToast("Username can only contain letters, numbers, and underscores — no spaces or special characters.");
+        return;
+      }
+      if (!password) { showToast("Password is required."); return; }
+      if (password.length < 8) { showToast("Password must be at least 8 characters."); return; }
+    }
+    if (password && !isNew && password.length < 8) {
+      showToast("New password must be at least 8 characters."); return;
+    }
+    setBusy(true);
+    try {
+      if (isNew) {
+        await api.mgrCreateConsultant({ name, username: username.trim().toLowerCase(), password, department_ids: departmentIds });
+      } else {
+        const data = { name, active, departmentIds };
+        if (username.trim().toLowerCase() !== consultant.username) data.username = username.trim().toLowerCase();
+        if (password) data.password = password;
+        await api.mgrUpdateConsultant(consultant.id, data);
+      }
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>{isNew ? "New consultant" : "Edit " + consultant.name}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Display name</label>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="Dr. Vijay Kumar" maxLength={150} autoFocus />
+          <div style={{ height: 12 }} />
+
+          <label className="label">Username <span className="dim" style={{ fontSize: 11 }}>(for login)</span></label>
+          <input className="field" value={username} autoCapitalize="none"
+            onChange={(e) => setUsername(e.target.value.toLowerCase())} placeholder="dr.vijay" maxLength={60} />
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+            Letters, numbers, and underscores only
+          </div>
+          <div style={{ height: 12 }} />
+
+          <label className="label">{isNew ? "Password" : "New password (blank = keep current)"}</label>
+          <div style={{ position: "relative" }}>
+            <input className="field" type={showPwd ? "text" : "password"} value={password}
+              onChange={(e) => setPassword(e.target.value)} placeholder="min 8 characters"
+              maxLength={72} style={{ paddingRight: 42 }} />
+            <button type="button" onClick={() => setShowPwd((v) => !v)}
+              style={{
+                position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+                background: "none", border: "none", padding: 0, cursor: "pointer",
+                color: "var(--ink-3)", display: "flex", alignItems: "center",
+              }}
+              aria-label={showPwd ? "Hide password" : "Show password"}
+            >
+              <Ic d={showPwd ? icons.eyeOff : icons.eye} s={18} />
+            </button>
+          </div>
+          <div style={{ height: 12 }} />
+
+          {!isNew && (
+            <>
+              <label className="label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)}
+                  style={{ accentColor: "var(--primary)", width: 16, height: 16 }} />
+                Active
+              </label>
+              <div style={{ height: 12 }} />
+            </>
+          )}
+
+          <label className="label">
+            Departments
+            {departmentIds.length > 0 && (
+              <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{departmentIds.length} selected</span>
+            )}
+          </label>
+          {departments.length === 0 ? (
+            <div style={{
+              padding: "10px 14px", borderRadius: 10, background: "#fff8e1",
+              border: "1px solid #f0c040", fontSize: 13, color: "#7a5c00",
+            }}>
+              No active departments — create one in Setup → Departments & Consultant Groups first.
+            </div>
+          ) : (
+            <div className="chip-pick-grid">
+              {departments.map((d) => {
+                const checked = departmentIds.includes(d.id);
+                return (
+                  <label key={d.id} className={"chip-pick" + (checked ? " on" : "")}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleDept(d.id)} />
+                    <span>{d.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
+            {busy ? "Saving…" : isNew ? "Create consultant" : "Save changes"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function NurseManager({ showToast }) {
   const [nurses,   setNurses]   = useState([]);
   const [stations, setStations] = useState([]); // [{id, name, ward_count, nurse_count}]
@@ -5004,23 +5231,25 @@ export function DestinationManager({ showToast }) {
 //  a department/doctor isn't a physical place, so nothing here touches wards or beds.
 // ══════════════════════════════════════════════════════════════════════════════
 export function DepartmentDoctorManager({ showToast }) {
-  const [section, setSection] = useState("departments"); // "departments" | "doctors"
+  const [section, setSection] = useState("departments"); // "departments" | "groups"
   return (
     <div style={{ maxWidth: 640 }}>
-      <div className="h2" style={{ marginBottom: 4 }}>Departments & Doctors</div>
+      <div className="h2" style={{ marginBottom: 4 }}>Departments & Consultant Groups</div>
       <div className="dim" style={{ fontSize: 12, marginBottom: 16 }}>
-        Master data for the Department / Consultant dropdowns shown when admitting a patient.
-        A doctor can belong to multiple departments.
+        Departments are the master list used when assigning a consultant (Users → Consultant
+        Users) or admitting a patient. Consultant Groups let a patient be admitted jointly
+        under two or more consultants at once — for a single consultant, just use their own
+        login, no group needed.
       </div>
       <div className="seg" style={{ marginBottom: 16, maxWidth: 320 }}>
         <button className={section === "departments" ? "on" : ""} onClick={() => setSection("departments")}>
           <Ic d={icons.layers} s={14} /> Departments
         </button>
-        <button className={section === "doctors" ? "on" : ""} onClick={() => setSection("doctors")}>
-          <Ic d={icons.stethoscope} s={14} /> Doctors
+        <button className={section === "groups" ? "on" : ""} onClick={() => setSection("groups")}>
+          <Ic d={icons.users} s={14} /> Consultant Groups
         </button>
       </div>
-      {section === "departments" ? <DepartmentSection showToast={showToast} /> : <DoctorMasterSection showToast={showToast} />}
+      {section === "departments" ? <DepartmentSection showToast={showToast} /> : <ConsultantGroupSection showToast={showToast} />}
     </div>
   );
 }
@@ -5159,158 +5388,56 @@ function DepartmentSection({ showToast }) {
   );
 }
 
-function DoctorMasterSection({ showToast }) {
+// List + a proper modal editor (mirrors ConsultantManager/ConsultantEditor) —
+// editing used to expand inline in the list, pushing every row below it down
+// the page; now Add and Edit both open the same popup, and the list itself
+// never re-shuffles while you work.
+function ConsultantGroupSection({ showToast }) {
+  const [groups,   setGroups]   = useState([]);
   const [doctors,  setDoctors]  = useState([]);
   const [depts,    setDepts]    = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [busy,     setBusy]     = useState(false);
+  const [editing,  setEditing]  = useState(null); // "new" | group object | null
   const [confirm, confirmDialog] = useConfirm();
-
-  // Add-new form
-  const [newName, setNewName] = useState("");
-  const [newDeptIds, setNewDeptIds] = useState([]);
-
-  // Edit-in-place
-  const [editId, setEditId] = useState(null);
-  const [editName, setEditName] = useState("");
-  const [editDeptIds, setEditDeptIds] = useState([]);
-
-  // Login credential management — loginFormId: doctor id | null
-  const [loginFormId, setLoginFormId] = useState(null); // open form for this doctor
-  const [loginAction, setLoginAction] = useState("set"); // "set" | "edit" | "reset"
-  const [loginUsername, setLoginUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
-  const [loginBusy, setLoginBusy] = useState(false);
-  const [loginErr, setLoginErr] = useState("");
 
   const load = async () => {
     setLoading(true);
     try {
-      const [d, dept, logins] = await Promise.all([api.mgrDoctorsMaster(), api.mgrDepartments(), api.mgrConsultantLogins().catch(() => ({ logins: [] }))]);
-      const loginMap = Object.fromEntries((logins.logins || []).map((l) => [l.doctor_master_id, l]));
-      setDoctors((d.doctors || []).map((doc) => ({ ...doc, login: loginMap[doc.id] || null })));
-      setDepts(dept.departments || []);
+      const [g, d, dept] = await Promise.all([api.mgrConsultantGroups(), api.mgrDoctorsMaster(), api.mgrDepartments()]);
+      setGroups(g.groups || []);
+      setDoctors(d.doctors || []);
+      setDepts((dept.departments || []).filter((x) => x.active));
     } catch (e) { showToast(toastErr(e)); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  const openLoginForm = (doc, action) => {
-    setLoginFormId(doc.id);
-    setLoginAction(action);
-    setLoginUsername(action === "set" ? "" : (doc.login?.username || ""));
-    setLoginPassword("");
-    setLoginErr("");
-  };
-
-  const saveLogin = async (doc) => {
-    const u = loginUsername.trim();
-    if (!u) { setLoginErr("Username is required."); return; }
-    if (loginAction === "set" && !loginPassword) { setLoginErr("Password is required."); return; }
-    setLoginBusy(true); setLoginErr("");
+  const toggleActive = async (g) => {
+    setBusy(true);
     try {
-      if (loginAction === "set") {
-        await api.mgrSetConsultantLogin(doc.id, u, loginPassword);
-        showToast(`Login created for ${doc.name} ✓`);
-      } else if (loginAction === "edit") {
-        await api.mgrUpdateConsultantLogin(doc.login.id, { username: u, ...(loginPassword ? { password: loginPassword } : {}) });
-        showToast("Credentials updated ✓");
-      }
-      setLoginFormId(null);
+      await api.mgrUpdateConsultantGroup(g.id, { active: !g.active });
       await load();
-    } catch (e) { setLoginErr(toastErr(e)); }
-    finally { setLoginBusy(false); }
+      showToast(`"${g.name}" ${g.active ? "deactivated" : "activated"}`);
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
   };
 
-  const removeLogin = async (doc) => {
+  const remove = async (g) => {
     const ok = await confirm({
-      title: `Remove login for "${doc.name}"?`,
-      message: "This will disable their consultant portal access. Bed entry history is not affected.",
-      confirmLabel: "Remove", danger: true,
-    });
-    if (!ok) return;
-    setBusy(true);
-    try {
-      await api.mgrDeleteConsultantLogin(doc.login.id);
-      await load();
-      showToast(`Login removed for ${doc.name}`);
-    } catch (e) { showToast(toastErr(e)); }
-    finally { setBusy(false); }
-  };
-
-  const toggleDeptId = (list, setList, id) => {
-    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
-  };
-
-  const add = async () => {
-    const n = newName.trim();
-    if (!n || newDeptIds.length === 0) return;
-    setBusy(true);
-    try {
-      await api.mgrCreateDoctorMaster(n, newDeptIds);
-      setNewName(""); setNewDeptIds([]);
-      await load();
-      showToast(`"${n}" added ✓`);
-    } catch (e) { showToast(toastErr(e)); }
-    finally { setBusy(false); }
-  };
-
-  const startEdit = (doc) => {
-    setEditId(doc.id); setEditName(doc.name); setEditDeptIds(doc.departments.map((d) => d.id));
-  };
-
-  const saveEdit = async () => {
-    const n = editName.trim();
-    if (!n || editDeptIds.length === 0) return;
-    setBusy(true);
-    try {
-      await api.mgrUpdateDoctorMaster(editId, { name: n, departmentIds: editDeptIds });
-      setEditId(null);
-      await load();
-      showToast("Saved ✓");
-    } catch (e) { showToast(toastErr(e)); }
-    finally { setBusy(false); }
-  };
-
-  const toggleActive = async (doc) => {
-    setBusy(true);
-    try {
-      await api.mgrUpdateDoctorMaster(doc.id, { active: !doc.active });
-      await load();
-      showToast(`"${doc.name}" ${doc.active ? "deactivated" : "activated"}`);
-    } catch (e) { showToast(toastErr(e)); }
-    finally { setBusy(false); }
-  };
-
-  const remove = async (doc) => {
-    const ok = await confirm({
-      title: `Delete "${doc.name}"?`,
-      message: "This cannot be undone. Blocked if this doctor has been used in any patient admission.",
+      title: `Delete "${g.name}"?`,
+      message: "This cannot be undone. Blocked if this group has been used in any patient admission.",
       confirmLabel: "Delete", danger: true,
     });
     if (!ok) return;
     setBusy(true);
     try {
-      await api.mgrDeleteDoctorMaster(doc.id);
+      await api.mgrDeleteConsultantGroup(g.id);
       await load();
-      showToast(`"${doc.name}" deleted`);
+      showToast(`"${g.name}" deleted`);
     } catch (e) { showToast(toastErr(e)); }
     finally { setBusy(false); }
   };
-
-  const deptChips = (list, setList) => (
-    <div className="chip-pick-grid" style={{ marginTop: 8 }}>
-      {depts.map((d) => {
-        const checked = list.includes(d.id);
-        return (
-          <label key={d.id} className={"chip-pick" + (checked ? " on" : "")}>
-            <input type="checkbox" checked={checked} onChange={() => toggleDeptId(list, setList, d.id)} />
-            <span>{d.name}</span>
-          </label>
-        );
-      })}
-    </div>
-  );
 
   const iconBtn = (onClick, color, title, icon) => (
     <button title={title} onClick={onClick} disabled={busy}
@@ -5321,17 +5448,16 @@ function DoctorMasterSection({ showToast }) {
 
   return (
     <div>
-      <div className="card" style={{ padding: 14, marginBottom: 16 }}>
-        <label className="label">Add new doctor</label>
-        <input className="field" value={newName} maxLength={150}
-          placeholder='e.g. "Dr. Ramesh Kumar"'
-          onChange={(e) => setNewName(e.target.value)} />
-        <div className="dim" style={{ fontSize: 11, marginTop: 10 }}>Departments (select at least one)</div>
-        {deptChips(newDeptIds, setNewDeptIds)}
-        <button className="btn btn-primary" disabled={busy || !newName.trim() || newDeptIds.length === 0} onClick={add}
-          style={{ marginTop: 12 }}>
-          <Ic d={icons.plus} s={15} /> Add doctor
+      <div className="row between" style={{ marginBottom: 4 }}>
+        <div className="h1" style={{ fontSize: 18 }}>Consultant groups</div>
+        <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }}
+          onClick={() => setEditing("new")}>
+          <Ic d={icons.users} s={15} /> Add group
         </button>
+      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
+        For a patient admitted jointly under two or more consultants at once. A single
+        consultant already works as their own login — no group needed.
       </div>
 
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -5339,107 +5465,154 @@ function DoctorMasterSection({ showToast }) {
           <div className="dim" style={{ padding: 32, textAlign: "center" }}>
             <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
           </div>
-        ) : doctors.length === 0 ? (
-          <div className="empty">No doctors yet.</div>
+        ) : groups.length === 0 ? (
+          <div className="empty">No Consultant Groups yet.</div>
         ) : (
-          doctors.map((doc) => (
-            <div key={doc.id} style={{ borderBottom: "1px solid var(--line)", background: doc.active ? "transparent" : "var(--panel-2)", opacity: doc.active ? 1 : 0.65 }}>
-              {/* Doctor info row */}
-              {editId === doc.id ? (
-                <div style={{ padding: "12px 16px" }}>
-                  <input className="field" autoFocus maxLength={150} value={editName}
-                    style={{ padding: "6px 10px", fontSize: 13, marginBottom: 8 }}
-                    onChange={(e) => setEditName(e.target.value)} />
-                  {deptChips(editDeptIds, setEditDeptIds)}
-                  <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                    <button className="btn btn-primary" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy} onClick={saveEdit}>Save</button>
-                    <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px" }} disabled={busy} onClick={() => setEditId(null)}>Cancel</button>
+          groups.map((g) => (
+            <div key={g.id} style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: g.active ? "transparent" : "var(--panel-2)", opacity: g.active ? 1 : 0.65 }}>
+              <div className="row between" style={{ gap: 10 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>{g.name}</span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
+                      background: g.active ? "var(--green-bg)" : "var(--panel-2)",
+                      color: g.active ? "var(--green)" : "var(--ink-3)",
+                      border: `1px solid ${g.active ? "var(--green)" : "var(--line)"}`,
+                    }}>{g.active ? "Active" : "Inactive"}</span>
+                  </div>
+                  <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }}>
+                    {g.doctors.map((d) => d.name).join(", ")} · {g.departments.map((d) => d.name).join(", ")}
                   </div>
                 </div>
-              ) : (
-                <div style={{ padding: "12px 16px" }}>
-                  <div className="row between" style={{ gap: 10 }}>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 600, fontSize: 13 }}>{doc.name}</span>
-                        <span style={{
-                          fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99,
-                          background: doc.active ? "var(--green-bg)" : "var(--panel-2)",
-                          color: doc.active ? "var(--green)" : "var(--ink-3)",
-                          border: `1px solid ${doc.active ? "var(--green)" : "var(--line)"}`,
-                        }}>{doc.active ? "Active" : "Inactive"}</span>
-                        {doc.login && (
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 99, background: "var(--primary-bg, rgba(59,130,246,.12))", color: "var(--primary)", border: "1px solid var(--primary)" }}>
-                            <Ic d={icons.user} s={10} /> @{doc.login.username}
-                          </span>
-                        )}
-                      </div>
-                      <div className="dim" style={{ fontSize: 11.5, marginTop: 3 }}>
-                        {doc.departments.length ? doc.departments.map((d) => d.name).join(", ") : "No departments"}
-                      </div>
-                    </div>
-                    <div className="row" style={{ gap: 0, flexShrink: 0 }}>
-                      {iconBtn(() => startEdit(doc), "var(--primary)", "Edit name/departments", icons.pencil)}
-                      {iconBtn(() => toggleActive(doc), doc.active ? "var(--amber)" : "var(--green)", doc.active ? "Deactivate" : "Activate", doc.active ? icons.eyeOff : icons.eye)}
-                      {iconBtn(() => remove(doc), "var(--red)", "Delete", icons.trash)}
-                    </div>
-                  </div>
-
-                  {/* Consultant login section */}
-                  {loginFormId === doc.id ? (
-                    <div style={{ marginTop: 12, padding: 12, background: "var(--panel-2)", borderRadius: 10 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: "var(--ink-2)" }}>
-                        {loginAction === "set" ? "Set consultant login credentials" : "Edit consultant credentials"}
-                      </div>
-                      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                        <div style={{ flex: "1 1 160px" }}>
-                          <label className="label" style={{ fontSize: 11 }}>Username</label>
-                          <input className="field" autoFocus maxLength={60} value={loginUsername}
-                            placeholder="e.g. dr.ahmed" autoCapitalize="none" autoCorrect="off"
-                            onChange={(e) => setLoginUsername(e.target.value)} />
-                        </div>
-                        <div style={{ flex: "1 1 160px" }}>
-                          <label className="label" style={{ fontSize: 11 }}>
-                            {loginAction === "edit" ? "New password (leave blank to keep)" : "Password"}
-                          </label>
-                          <input className="field" type="password" maxLength={72} value={loginPassword}
-                            placeholder={loginAction === "edit" ? "•••••• (unchanged)" : "••••••"}
-                            onChange={(e) => setLoginPassword(e.target.value)} />
-                        </div>
-                      </div>
-                      {loginErr && <div style={{ fontSize: 12, color: "var(--red)", marginTop: 6 }}>{loginErr}</div>}
-                      <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                        <button className="btn btn-primary" style={{ fontSize: 12, padding: "7px 14px" }} disabled={loginBusy} onClick={() => saveLogin(doc)}>
-                          {loginBusy ? "Saving…" : "Save"}
-                        </button>
-                        <button className="btn btn-ghost" style={{ fontSize: 12, padding: "7px 14px" }} disabled={loginBusy} onClick={() => setLoginFormId(null)}>Cancel</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                      {doc.login ? (
-                        <>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px" }} onClick={() => openLoginForm(doc, "edit")}>
-                            <Ic d={icons.pencil} s={12} /> Edit Login
-                          </button>
-                          <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px", color: "var(--red)" }} onClick={() => removeLogin(doc)}>
-                            <Ic d={icons.trash} s={12} /> Remove Login
-                          </button>
-                        </>
-                      ) : (
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: "5px 10px", color: "var(--primary)" }} onClick={() => openLoginForm(doc, "set")}>
-                          <Ic d={icons.plus} s={12} /> Set Consultant Login
-                        </button>
-                      )}
-                    </div>
-                  )}
+                <div className="row" style={{ gap: 0, flexShrink: 0 }}>
+                  {iconBtn(() => setEditing(g), "var(--primary)", "Edit name/members/departments", icons.pencil)}
+                  {iconBtn(() => toggleActive(g), g.active ? "var(--amber)" : "var(--green)", g.active ? "Deactivate" : "Activate", g.active ? icons.eyeOff : icons.eye)}
+                  {iconBtn(() => remove(g), "var(--red)", "Delete", icons.trash)}
                 </div>
-              )}
+              </div>
             </div>
           ))
         )}
       </div>
+
+      {editing !== null && (
+        <ConsultantGroupEditor
+          group={editing === "new" ? null : editing}
+          doctors={doctors}
+          departments={depts}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); showToast("Saved ✓"); }}
+          showToast={showToast}
+        />
+      )}
       {confirmDialog}
+    </div>
+  );
+}
+
+function ConsultantGroupEditor({ group, doctors, departments, onClose, onSaved, showToast }) {
+  useModal(onClose);
+  const isNew = !group;
+  const [name, setName] = useState(group?.name || "");
+  const [doctorIds, setDoctorIds] = useState((group?.doctors || []).map((d) => d.id));
+  const [deptIds,   setDeptIds]   = useState((group?.departments || []).map((d) => d.id));
+  const [busy, setBusy] = useState(false);
+
+  // Auto-suggest the name from picked consultants ("Dr. Anita / Dr. Ganesh / Sudheer")
+  // as checkboxes change, but only while the name still matches what we last
+  // auto-generated — the moment the user types their own name, this stops
+  // touching it. Starting sentinel differs from any real name so an existing
+  // group's custom name (isNew=false) is never auto-renamed just by opening
+  // the editor or toggling its members.
+  const lastAutoNameRef = useRef(isNew ? "" : Symbol("no-auto-name-yet"));
+  useEffect(() => {
+    if (name !== "" && name !== lastAutoNameRef.current) return;
+    const autoName = doctorIds
+      .map((id) => doctors.find((d) => d.id === id)?.name)
+      .filter(Boolean)
+      .join(" / ");
+    setName(autoName);
+    lastAutoNameRef.current = autoName;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doctorIds]);
+
+  const toggle = (list, setList, id) => {
+    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  };
+
+  const save = async () => {
+    const n = name.trim();
+    if (!n) { showToast("Group name is required."); return; }
+    if (doctorIds.length < 2) { showToast("Select at least 2 consultants."); return; }
+    if (deptIds.length === 0) { showToast("Select at least one department."); return; }
+    setBusy(true);
+    try {
+      if (isNew) {
+        await api.mgrCreateConsultantGroup(n, doctorIds, deptIds);
+      } else {
+        await api.mgrUpdateConsultantGroup(group.id, { name: n, doctorIds, departmentIds: deptIds });
+      }
+      onSaved();
+    } catch (e) { showToast(toastErr(e)); setBusy(false); }
+  };
+
+  const chipGrid = (items, list, setList) => (
+    <div className="chip-pick-grid" style={{ marginTop: 8 }}>
+      {items.map((d) => {
+        const checked = list.includes(d.id);
+        return (
+          <label key={d.id} className={"chip-pick" + (checked ? " on" : "")}>
+            <input type="checkbox" checked={checked} onChange={() => toggle(list, setList, d.id)} />
+            <span>{d.name}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div className="pad">
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div className="h1" style={{ fontSize: 18 }}>{isNew ? "New consultant group" : "Edit " + group.name}</div>
+            <button className="chip" onClick={onClose}>Close</button>
+          </div>
+
+          <label className="label">Group name</label>
+          <input className="field" value={name} onChange={(e) => setName(e.target.value)}
+            placeholder='e.g. "Vijay / Kumari"' maxLength={150} autoFocus />
+          <div style={{ height: 12 }} />
+
+          <label className="label">
+            Consultants
+            {doctorIds.length > 0 && <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{doctorIds.length} selected</span>}
+          </label>
+          {doctors.length === 0 ? (
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              No consultants yet — add some under Users → Consultant Users first.
+            </div>
+          ) : chipGrid(doctors, doctorIds, setDoctorIds)}
+          <div style={{ height: 12 }} />
+
+          <label className="label">
+            Departments
+            {deptIds.length > 0 && <span className="chip" style={{ marginLeft: 8, fontSize: 11 }}>{deptIds.length} selected</span>}
+          </label>
+          {departments.length === 0 ? (
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              No active departments — create one on the Departments tab first.
+            </div>
+          ) : chipGrid(departments, deptIds, setDeptIds)}
+
+          <button className="btn btn-primary btn-block" style={{ marginTop: 18 }} disabled={busy} onClick={save}>
+            {busy ? "Saving…" : isNew ? "Create group" : "Save changes"}
+          </button>
+          <div style={{ height: 14 }} />
+        </div>
+      </div>
     </div>
   );
 }
