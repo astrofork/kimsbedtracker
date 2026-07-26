@@ -3015,6 +3015,7 @@ export function ConsultantManager({ showToast }) {
   const [consultants, setConsultants] = useState([]);
   const [departments,  setDepartments] = useState([]);
   const [editing,      setEditing]     = useState(null);
+  const [search,       setSearch]      = useState("");
   const [confirm, confirmDialog] = useConfirm();
 
   const load = async () => {
@@ -3025,6 +3026,12 @@ export function ConsultantManager({ showToast }) {
     } catch (e) { showToast(toastErr(e)); }
   };
   useEffect(() => { load(); }, []);
+
+  const q = search.trim().toLowerCase();
+  const filtered = !q ? consultants : consultants.filter((c) =>
+    c.name.toLowerCase().includes(q) ||
+    c.username.toLowerCase().includes(q) ||
+    (c.departments || []).some((d) => d.name.toLowerCase().includes(q)));
 
   return (
     <div>
@@ -3041,7 +3048,13 @@ export function ConsultantManager({ showToast }) {
         Consultant Groups instead.
       </div>
 
-      {consultants.map((c) => (
+      <div className="row" style={{ gap: 8, position: "relative", marginBottom: 14 }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }}><Ic d={icons.search} s={16} /></span>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, username, or department…"
+          style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 14 }} />
+      </div>
+
+      {filtered.map((c) => (
         <div className="card" key={c.id} style={{ padding: 14, marginBottom: 10, opacity: c.status === "inactive" ? 0.65 : 1 }}>
           <div className="row between">
             <div className="row" style={{ gap: 10 }}>
@@ -3075,11 +3088,20 @@ export function ConsultantManager({ showToast }) {
         </div>
       ))}
 
-      {consultants.length === 0 && (
+      {filtered.length === 0 && (
         <div className="card empty" style={{ marginTop: 14 }}>
           <Ic d={icons.stethoscope} s={28} />
-          <div style={{ marginTop: 10, fontWeight: 600 }}>No consultant users yet</div>
-          <div style={{ fontSize: 12, marginTop: 4 }}>Add one above.</div>
+          {consultants.length === 0 ? (
+            <>
+              <div style={{ marginTop: 10, fontWeight: 600 }}>No consultant users yet</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Add one above.</div>
+            </>
+          ) : (
+            <>
+              <div style={{ marginTop: 10, fontWeight: 600 }}>No matches for "{search.trim()}"</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Try a different name, username, or department.</div>
+            </>
+          )}
         </div>
       )}
 
@@ -5261,6 +5283,7 @@ function DepartmentSection({ showToast }) {
   const [newName,  setNewName]  = useState("");
   const [editId,   setEditId]   = useState(null);
   const [editName, setEditName] = useState("");
+  const [search,   setSearch]   = useState("");
   const [confirm, confirmDialog] = useConfirm();
 
   const load = async () => {
@@ -5331,6 +5354,9 @@ function DepartmentSection({ showToast }) {
     </button>
   );
 
+  const q = search.trim().toLowerCase();
+  const filtered = !q ? depts : depts.filter((d) => d.name.toLowerCase().includes(q));
+
   return (
     <div>
       <div className="card" style={{ padding: 14, marginBottom: 16 }}>
@@ -5346,15 +5372,21 @@ function DepartmentSection({ showToast }) {
         </div>
       </div>
 
+      <div className="row" style={{ gap: 8, position: "relative", marginBottom: 12 }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }}><Ic d={icons.search} s={16} /></span>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search departments…"
+          style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 14 }} />
+      </div>
+
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {loading ? (
           <div className="dim" style={{ padding: 32, textAlign: "center" }}>
             <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
           </div>
-        ) : depts.length === 0 ? (
-          <div className="empty">No departments yet.</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty">{depts.length === 0 ? "No departments yet." : `No matches for "${search.trim()}".`}</div>
         ) : (
-          depts.map((d) => (
+          filtered.map((d) => (
             <div key={d.id} style={{ ...rowStyle, background: d.active ? "transparent" : "var(--panel-2)", opacity: d.active ? 1 : 0.65 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {editId === d.id ? (
@@ -5399,6 +5431,7 @@ function ConsultantGroupSection({ showToast }) {
   const [loading,  setLoading]  = useState(true);
   const [busy,     setBusy]     = useState(false);
   const [editing,  setEditing]  = useState(null); // "new" | group object | null
+  const [search,   setSearch]   = useState("");
   const [confirm, confirmDialog] = useConfirm();
 
   const load = async () => {
@@ -5446,6 +5479,12 @@ function ConsultantGroupSection({ showToast }) {
     </button>
   );
 
+  const q = search.trim().toLowerCase();
+  const filtered = !q ? groups : groups.filter((g) =>
+    g.name.toLowerCase().includes(q) ||
+    (g.departments || []).some((d) => d.name.toLowerCase().includes(q)) ||
+    (g.doctors || []).some((d) => d.name.toLowerCase().includes(q)));
+
   return (
     <div>
       <div className="row between" style={{ marginBottom: 4 }}>
@@ -5460,15 +5499,21 @@ function ConsultantGroupSection({ showToast }) {
         consultant already works as their own login — no group needed.
       </div>
 
+      <div className="row" style={{ gap: 8, position: "relative", marginBottom: 14 }}>
+        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)" }}><Ic d={icons.search} s={16} /></span>
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by group name, member, or department…"
+          style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel)", fontSize: 14 }} />
+      </div>
+
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {loading ? (
           <div className="dim" style={{ padding: 32, textAlign: "center" }}>
             <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={20} /></span>
           </div>
-        ) : groups.length === 0 ? (
-          <div className="empty">No Consultant Groups yet.</div>
+        ) : filtered.length === 0 ? (
+          <div className="empty">{groups.length === 0 ? "No Consultant Groups yet." : `No matches for "${search.trim()}".`}</div>
         ) : (
-          groups.map((g) => (
+          filtered.map((g) => (
             <div key={g.id} style={{ padding: "12px 16px", borderBottom: "1px solid var(--line)", background: g.active ? "transparent" : "var(--panel-2)", opacity: g.active ? 1 : 0.65 }}>
               <div className="row between" style={{ gap: 10 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
