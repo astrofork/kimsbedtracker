@@ -1474,7 +1474,11 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
 
       <div>
 
-        {/* Physical Status — first: this decides what the rest of the form asks for. */}
+        {/* Physical Status — first: this decides what the rest of the form asks for.
+              Hidden entirely for Consultants — they can't change bed physical
+              status, and even the read-only Vacant/Occupied display isn't
+              relevant to what they're here for (planning/viewing a discharge). */}
+        {cfg.role !== "CONSULTANT" && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
             Physical Status
@@ -1511,6 +1515,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             </div>
           )}
         </div>
+        )}
 
         {/* Patient Section — required when a Vacant bed is about to become Occupied.
               Future: full IP number will come from HIS; this is manual for V1. Consultant/Dept
@@ -1587,7 +1592,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
         {showActionsRow && (
           <div style={{ marginBottom: 24 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 10 }}>
-              Status
+              {cfg.role === "CONSULTANT" ? "Action" : "Status"}
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               {!cfg.readOnly && bed.bed_type !== "Lounge" && (
@@ -1631,21 +1636,27 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
                   {dischargeImmediateSaving ? "Working…" : "Discharge Immediate"}
                 </button>
               )}
-              <button onClick={() => {
+              {(() => {
                 // No plan yet and this role is allowed to make one — ask Initiate
                 // Now vs Schedule first, instead of dropping into an empty form.
                 // Otherwise (already planned/running, or a role that can't plan
                 // e.g. Nurse) go straight to the full Discharge Details page.
                 const canPlanRole = cfg.role === "PRE" || cfg.role === "DOCTOR" || cfg.role === "CONSULTANT";
-                if (!bed.discharge_tracking && canPlanRole) setDischargePlanOpen(true);
-                else setDischargeOpen(true);
-              }} style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
-                flex: "1 1 100%", borderRadius: 999, padding: "12px 14px", fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
-                background: "var(--blue-bg)", color: "var(--blue)",
-              }}>
-                <Ic d={icons.fileText} s={14} /> Discharge
-              </button>
+                const notStarted = !bed.discharge_tracking;
+                const label = notStarted ? (canPlanRole ? "Plan Discharge" : "Discharge") : "View Discharge";
+                return (
+                  <button onClick={() => {
+                    if (notStarted && canPlanRole) setDischargePlanOpen(true);
+                    else setDischargeOpen(true);
+                  }} style={{
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
+                    flex: "1 1 100%", borderRadius: 999, padding: "12px 14px", fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
+                    background: "var(--blue-bg)", color: "var(--blue)",
+                  }}>
+                    <Ic d={icons.fileText} s={14} /> {label}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         )}
