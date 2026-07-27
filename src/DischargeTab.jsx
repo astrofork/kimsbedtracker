@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { api, toastErr, fmtDateTime, createSocket } from "./lib.js";
-import { Ic, icons, useConfirm } from "./ui.jsx";
+import { Ic, icons, useConfirm, useModal } from "./ui.jsx";
 import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 
 // Steps are organized into 5 groups. Groups run in parallel — none of them wait
@@ -265,6 +266,7 @@ export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirm, confirmDialog] = useConfirm();
+  const [loungeConfirmOpen, setLoungeConfirmOpen] = useState(false);
 
   useEffect(() => {
     api.transferWards()
@@ -282,9 +284,28 @@ export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "
 
   const selectedWardEarly = (wards || []).find((w) => w.id === toWardId);
   const dischargeStatus = bed.discharge_tracking?.status;
-  const loungeMarksPhysicalCheckout =
-    selectedWardEarly?.is_discharge_lounge &&
-    (dischargeStatus === "DISCHARGE_INITIATED" || dischargeStatus === "IN_PROGRESS");
+  const dischargeInProgress = dischargeStatus === "DISCHARGE_INITIATED" || dischargeStatus === "IN_PROGRESS";
+  // TransferSection is only ever used for Readmit when the FROM bed (the one
+  // being transferred out of) is itself the Discharge Lounge — that's how
+  // ReadmitPopup gates opening this in the first place, so it's a reliable
+  // way to tell "plain transfer" and "readmit" apart without a separate prop.
+  const isReadmit = bed.bed_type === "Lounge";
+  // Any transfer INTO the Lounge (not readmit, which moves OUT of it) now
+  // auto-completes every step through Payment + Physical Checkout, regardless
+  // of whether a discharge had already been started — see
+  // autoCompleteDischargeForLoungeTransfer in dischargeService.ts.
+  const movingToLounge = !isReadmit && !!selectedWardEarly?.is_discharge_lounge;
+  // If System Checkout is already COMPLETED, Physical Checkout (which this
+  // transfer completes) is the last thing needed — completeIfEligible fires
+  // immediately server-side and the discharge finishes + bed vacates in the
+  // same request. The patient never visibly sits in the Lounge in that case,
+  // so the confirmation card needs different wording than the normal
+  // "System Checkout still pending" case.
+  const systemCheckoutAlreadyDone = bed.discharge_tracking?.system_checkout_status === "COMPLETED";
+  // Readmit is blocked server-side while a discharge is still running — the
+  // patient must have the discharge cancelled first (surfaced below as a
+  // blocking banner, not just a post-click error).
+  const readmitBlocked = isReadmit && dischargeInProgress;
 
   async function doSubmit() {
     setSaving(true); setError("");
@@ -298,16 +319,8 @@ export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "
   }
 
   async function handleConfirmClick() {
-    if (!toBedId || !reason.trim()) return;
-    if (loungeMarksPhysicalCheckout) {
-      const ok = await confirm({
-        title: "Discharge already in progress",
-        message: "This discharge is already in progress. Moving this bed to the Discharge Lounge will mark Physical Checkout as complete (patient left = yes).\n\nContinue?",
-        confirmLabel: "Yes, move to lounge",
-        cancelLabel: "Go Back",
-      });
-      if (!ok) return;
-    }
+    if (!toBedId || !reason.trim() || readmitBlocked) return;
+    if (movingToLounge) { setLoungeConfirmOpen(true); return; }
     await doSubmit();
   }
 
@@ -315,6 +328,16 @@ export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "
 
   return (
     <div style={{ background: "var(--panel-2)", borderRadius: 10, padding: 14, marginTop: 10 }}>
+      {readmitBlocked && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 8, fontSize: 12.5, fontWeight: 600,
+          color: "var(--red, #dc2626)", background: "var(--red-bg, #FEE2E2)", borderRadius: 8,
+          padding: "10px 12px", marginBottom: 12,
+        }}>
+          <Ic d={icons.alert} s={15} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span>This discharge is still in progress. Cancel the discharge process before readmitting this patient — go to Discharge Details and cancel the discharge, then come back here.</span>
+        </div>
+      )}
       <label className="label">Destination Ward</label>
       {wardsError ? (
         <div style={{ fontSize: 12, color: "var(--red)", padding: "6px 0", marginBottom: 10 }}>{wardsError}</div>
@@ -352,12 +375,126 @@ export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 8 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 14px" }} onClick={onClose}>Back</button>
-        <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={saving || !toBedId || !reason.trim()} onClick={handleConfirmClick}>
+        <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={saving || !toBedId || !reason.trim() || readmitBlocked} onClick={handleConfirmClick}>
           {saving ? "Saving…" : submitLabel}
         </button>
       </div>
       {confirmDialog}
+      {loungeConfirmOpen && (
+        <MoveToLoungeConfirmModal
+          systemCheckoutAlreadyDone={systemCheckoutAlreadyDone}
+          onCancel={() => setLoungeConfirmOpen(false)}
+          onConfirm={() => { setLoungeConfirmOpen(false); doSubmit(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// Auto-completed on any transfer into the Discharge Lounge — see
+// autoCompleteDischargeForLoungeTransfer in dischargeService.ts. Kept in sync
+// with that function's forced-step list (every step except System Checkout).
+const LOUNGE_AUTO_STEPS = [
+  "Discharge Summary", "Drug Return", "Pharmacy Clearance", "Procedure Reconciliation",
+  "Billing Started", "Bill Audit", "Bill Finalization", "Payment", "Physical Checkout",
+];
+
+function MoveToLoungeConfirmModal({ onCancel, onConfirm, systemCheckoutAlreadyDone }) {
+  useModal(onCancel);
+  return createPortal(
+    <div className="overlay" onClick={onCancel} style={{ alignItems: "center" }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="lounge-confirm-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--panel)", color: "var(--ink)", borderRadius: 16,
+          maxWidth: 380, width: "calc(100% - 32px)", margin: "auto",
+          padding: "26px 22px 20px", boxShadow: "0 20px 50px rgba(0,0,0,.25)",
+          border: "1px solid var(--line)", textAlign: "center", position: "relative",
+        }}>
+        <button onClick={onCancel} aria-label="Close" style={{
+          position: "absolute", top: 14, right: 14, background: "none", border: "none",
+          cursor: "pointer", color: "var(--ink-3)", padding: 4, display: "flex",
+        }}>
+          <Ic d={icons.x} s={18} />
+        </button>
+
+        <div style={{
+          width: 52, height: 52, borderRadius: "50%", background: "var(--red-bg, #FEE2E2)",
+          display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px",
+        }}>
+          <Ic d={icons.alert} s={24} style={{ color: "var(--red, #dc2626)" }} />
+        </div>
+
+        <div id="lounge-confirm-title" style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>
+          Move to Discharge Lounge?
+        </div>
+        <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.4, marginBottom: 18 }}>
+          {systemCheckoutAlreadyDone
+            ? "System Checkout is already complete. This transfer will finish the discharge immediately."
+            : "This will automatically complete the discharge process except System Checkout."}
+        </div>
+
+        <div style={{
+          background: "var(--green-bg, #ECFDF5)", border: "1px solid var(--green, #10b981)",
+          borderRadius: 10, padding: "12px 14px", marginBottom: 12, textAlign: "left",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--green, #059669)", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+            <Ic d={icons.check} s={15} /> Will be completed automatically
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.7 }}>
+            {systemCheckoutAlreadyDone ? [...LOUNGE_AUTO_STEPS, "System Checkout"].join(" | ") : LOUNGE_AUTO_STEPS.join(" | ")}
+          </div>
+        </div>
+
+        <div style={{
+          background: "var(--red-bg, #FEE2E2)", border: "1px solid var(--red, #dc2626)",
+          borderRadius: 10, padding: "12px 14px", marginBottom: 12, textAlign: "left",
+        }}>
+          {systemCheckoutAlreadyDone ? (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--red, #dc2626)", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                <Ic d={icons.alert} s={15} /> Nothing remaining
+              </div>
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, fontWeight: 600,
+                color: "var(--red, #dc2626)", background: "rgba(220,38,38,.1)",
+                borderRadius: 8, padding: "8px 10px",
+              }}>
+                <Ic d={icons.alert} s={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>System Checkout is already done — this discharge will complete fully and the bed will vacate right away. The patient will NOT visibly sit in the Discharge Lounge.</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--red, #dc2626)", fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                <Ic d={icons.clock} s={15} /> Remaining
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--ink-2)" }}>
+                • System Checkout (Pending)
+              </div>
+              <div style={{
+                display: "flex", alignItems: "flex-start", gap: 6, fontSize: 12, fontWeight: 600,
+                color: "var(--red, #dc2626)", background: "rgba(220,38,38,.1)",
+                borderRadius: 8, padding: "8px 10px", marginTop: 10,
+              }}>
+                <Ic d={icons.alert} s={13} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>Patient will be moved to Discharge Lounge and bed will be available for allocation.</span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+          <button className="btn btn-ghost" style={{ flex: 1, padding: "11px 0", fontSize: 13.5, fontWeight: 700 }} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" style={{ flex: 1, padding: "11px 0", fontSize: 13.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }} onClick={onConfirm}>
+            <Ic d={icons.bed} s={15} /> Move to Lounge
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 

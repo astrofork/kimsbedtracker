@@ -63,10 +63,10 @@ const ADMIN_TITLES = {
   overstay: "Overstay Alerts",
   pres: "PRE Users",
   nurses: "Nurse Users",
-  doctors: "Doctor Users",
+  doctors: "DMO Users",
   setup: "Blocks",
   preblocks: "PRE Blocks",
-  doctorblocks: "Doctor Blocks",
+  doctorblocks: "DMO Blocks",
   stations: "Stations",
   payers: "Payer Types",
   deptdoctors: "Departments & Doctors",
@@ -191,7 +191,7 @@ export default function COOApp({ user, meta, onLogout }) {
       section: "Users", items: [
         { key: "pres", icon: icons.user, label: "PRE Users" },
         { key: "nurses", icon: icons.user, label: "Nurse Users" },
-        { key: "doctors", icon: icons.stethoscope, label: "Doctor Users" },
+        { key: "doctors", icon: icons.stethoscope, label: "DMO Users" },
         { key: "consultants", icon: icons.stethoscope, label: "Consultant Users" },
         { key: "fcpharmacy", icon: icons.list, label: "FC & Pharmacy" },
       ]
@@ -200,7 +200,7 @@ export default function COOApp({ user, meta, onLogout }) {
       section: "Setup", items: [
         { key: "setup", icon: icons.layers, label: "Blocks" },
         { key: "preblocks", icon: icons.grid, label: "PRE Blocks" },
-        { key: "doctorblocks", icon: icons.stethoscope, label: "Doctor Blocks" },
+        { key: "doctorblocks", icon: icons.stethoscope, label: "DMO Blocks" },
         { key: "stations", icon: icons.bed, label: "Stations" },
         { key: "payers", icon: icons.list, label: "Payer Types" },
         { key: "destinations", icon: icons.list, label: "Destinations" },
@@ -250,7 +250,7 @@ export default function COOApp({ user, meta, onLogout }) {
         <DatePicker dates={dates} selDate={selDate} setSelDate={setSelDate} />
       )}
 
-      {tab === "dashboard" && <LiveBedDashboard refreshKey={liveKey} userName={user?.name || user?.username || "Admin"} />}
+      {tab === "dashboard" && <LiveBedDashboard refreshKey={liveKey} userName={user?.name || user?.username || "Admin"} currentUsername={user?.username || null} />}
       {tab === "activity" && <ActivityPage />}
       {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} userId={user?.id} />}
       {tab === "analytics" && (
@@ -766,8 +766,29 @@ function DischargeListModal({ entry, onClose }) {
 
 const CONSULT_ACCENT = "#0d9488"; // teal — distinct from ward table blues/oranges
 
+const CONSULTANT_GROUP_BY_OPTIONS = [
+  { value: "department", label: "Department" },
+  { value: "none", label: "None" },
+];
+
+// A consultant can have active patients spread across more than one
+// department (c.departments is a per-department patient-count breakdown,
+// not a single assignment) — grouped view puts them under whichever
+// department they have the most active patients in right now, so every
+// consultant appears exactly once instead of being duplicated per department.
+function primaryDepartment(c) {
+  const entries = Object.entries(c.departments || {});
+  if (entries.length === 0) return "Unassigned";
+  return entries.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
+}
+
 function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
   const { payerTypes, consultants: allConsultants } = data;
+  const [groupBy, setGroupBy] = useState("department");
+  const [expanded, setExpanded] = useState(new Set());
+  useEffect(() => { setExpanded(new Set()); }, [groupBy]);
+  const toggleSection = (key) =>
+    setExpanded(prev => { const s = new Set(prev); s.has(key) ? s.delete(key) : s.add(key); return s; });
   const q = search.trim().toLowerCase();
   const consultants = !q ? allConsultants
     : searchBy === "payer_type" ? allConsultants.filter(c => Object.keys(c.payers || {}).some(p => p.toLowerCase().includes(q)))
@@ -786,6 +807,57 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
   };
   const tdC = { textAlign: "center", padding: "7px 12px", minWidth: 72 };
 
+  const consultantRow = (c) => {
+    const pct = grandTotal > 0 ? Math.round((c.total / grandTotal) * 100) : 0;
+    return (
+      <tr key={c.name}>
+        <td style={{ fontWeight: 600, padding: "7px 12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <span style={{
+              width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
+              background: `${CONSULT_ACCENT}18`, color: CONSULT_ACCENT,
+              fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {c.name.trim().charAt(0).toUpperCase()}
+            </span>
+            <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.name}>
+              {c.name}
+            </span>
+          </div>
+        </td>
+        <td style={{ ...tdC, fontWeight: 700, color: CONSULT_ACCENT }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <span>{c.total}</span>
+            <span style={{ fontSize: 9, fontWeight: 600, color: "var(--ink-3)" }}>{pct}%</span>
+          </div>
+        </td>
+        {payerTypes.map(p => {
+          const n = c.payers[p] ?? 0;
+          return (
+            <td key={p} style={{ ...tdC, fontWeight: n > 0 ? 700 : 400, color: n > 0 ? pColors[p] : "var(--ink-3)" }}>
+              {n > 0 ? n : <span style={{ opacity: 0.35 }}>—</span>}
+            </td>
+          );
+        })}
+      </tr>
+    );
+  };
+
+  // Grouped-by-department: sections sorted by patient count (busiest
+  // department first), each with its own subtotal row, consultants sorted
+  // the same way as the flat view (most patients first) within each group.
+  const groups = groupBy !== "department" ? null : (() => {
+    const byDept = new Map();
+    for (const c of consultants) {
+      const dept = primaryDepartment(c);
+      if (!byDept.has(dept)) byDept.set(dept, []);
+      byDept.get(dept).push(c);
+    }
+    return [...byDept.entries()]
+      .map(([dept, list]) => ({ dept, list, total: list.reduce((s, c) => s + c.total, 0) }))
+      .sort((a, b) => b.total - a.total || a.dept.localeCompare(b.dept));
+  })();
+
   return (
     <div className="card" style={{ marginBottom: 16, overflow: "hidden" }}>
       {/* Header bar */}
@@ -796,9 +868,13 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
           </span>
           <span style={{ fontWeight: 700, fontSize: 14, color: CONSULT_ACCENT }}>Consultants</span>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <span className="chip" style={{ color: CONSULT_ACCENT }}>{consultants.length} consultants</span>
-          <span className="chip" style={{ color: CONSULT_ACCENT }}>{grandTotal} active patients</span>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
+            style={{ padding: "3px 6px", fontSize: 11, width: "auto", flexShrink: 0 }}>
+            {CONSULTANT_GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>Group by: {o.label}</option>)}
+          </select>
+          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap" }}>{consultants.length} consultants</span>
+          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap" }}>{grandTotal} active patients</span>
         </div>
       </div>
 
@@ -828,42 +904,30 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
               ))}
             </tr>
 
-            {/* One row per consultant, sorted by most patients first */}
-            {consultants.map(c => {
-              const pct = grandTotal > 0 ? Math.round((c.total / grandTotal) * 100) : 0;
+            {groups ? groups.map((g) => {
+              const isOpen = expanded.has(g.dept);
               return (
-                <tr key={c.name}>
-                  <td style={{ fontWeight: 600, padding: "7px 12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                      <span style={{
-                        width: 22, height: 22, borderRadius: "50%", flexShrink: 0,
-                        background: `${CONSULT_ACCENT}18`, color: CONSULT_ACCENT,
-                        fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
-                        {c.name.trim().charAt(0).toUpperCase()}
+                <React.Fragment key={g.dept}>
+                  <tr onClick={() => toggleSection(g.dept)}
+                    style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
+                    <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
+                      <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
+                      {g.dept}
+                      <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
+                        {g.list.length} consultant{g.list.length === 1 ? "" : "s"} · totals shown
                       </span>
-                      <span style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.name}>
-                        {c.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td style={{ ...tdC, fontWeight: 700, color: CONSULT_ACCENT }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                      <span>{c.total}</span>
-                      <span style={{ fontSize: 9, fontWeight: 600, color: "var(--ink-3)" }}>{pct}%</span>
-                    </div>
-                  </td>
-                  {payerTypes.map(p => {
-                    const n = c.payers[p] ?? 0;
-                    return (
-                      <td key={p} style={{ ...tdC, fontWeight: n > 0 ? 700 : 400, color: n > 0 ? pColors[p] : "var(--ink-3)" }}>
-                        {n > 0 ? n : <span style={{ opacity: 0.35 }}>—</span>}
+                    </td>
+                    <td style={{ ...tdC, fontWeight: 800, color: CONSULT_ACCENT }}>{g.total}</td>
+                    {payerTypes.map(p => (
+                      <td key={p} style={{ ...tdC, fontWeight: 800, color: pColors[p] }}>
+                        {g.list.reduce((s, c) => s + (c.payers[p] ?? 0), 0)}
                       </td>
-                    );
-                  })}
-                </tr>
+                    ))}
+                  </tr>
+                  {isOpen && g.list.map(consultantRow)}
+                </React.Fragment>
               );
-            })}
+            }) : consultants.map(consultantRow)}
           </tbody>
         </table>
       </div>
@@ -1089,7 +1153,15 @@ const SCOPED_FETCHERS = {
     consultants: () => api.pharmacyConsultants(), snapshots: () => api.pharmacySnapshots(),
   },
 };
-export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "admin", hideUnitFilter = false }) {
+// Transaction Board is temporarily restricted to this one username only —
+// frontend-only gate, per explicit request ("hide it for other users, don't
+// remove the code"). Everything the board depends on (adminCards.transaction,
+// openDischargeList, etc.) still loads/works normally for every role; this
+// only controls whether the board itself renders. Flip/remove this constant
+// to restore it for everyone.
+const TRANSACTION_BOARD_VISIBLE_TO = ["admin1"];
+
+export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUsername = null, scope = "admin", hideUnitFilter = false }) {
   const scoped = SCOPED_FETCHERS[scope] ?? null; // null = admin/hospital-wide
   // Whether this mount shows the whole hospital. Admin (no scoped entry) and PRE
   // both do; Nurse/Consultant don't. Sections that would leak hospital totals to
@@ -1522,12 +1594,15 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
   }, [snapBusy, showSnapToast]);
 
   // Must be before any early return — hooks cannot be called conditionally
+  // "department" is deliberately excluded here — it only scopes the
+  // Consultants table below (see ConsultantsTable's own searchBy handling),
+  // not the ward table, since department is a consultant/admission concept,
+  // not a ward-level one. Ward rows stay unfiltered in that mode.
   const searchFilter = useCallback((r) => {
     const q = search.trim().toLowerCase();
-    if (!q) return true;
+    if (!q || searchBy === "department") return true;
     if (searchBy === "room_type") return (r.room_type || "").toLowerCase().includes(q);
     if (searchBy === "payer_type") return Object.keys(r.payersLive || {}).some(p => p.toLowerCase().includes(q));
-    if (searchBy === "department") return Object.keys(r.departmentsLive || {}).some(d => d.toLowerCase().includes(q));
     return r.ward.toLowerCase().includes(q);
   }, [search, searchBy]);
 
@@ -2202,7 +2277,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", scope = "
 
       <div className="cv-join" />
 
-      {transactionCards.length > 0 && (() => {
+      {TRANSACTION_BOARD_VISIBLE_TO.includes(currentUsername) && transactionCards.length > 0 && (() => {
         const divIdx = transactionCards.findIndex((k) => k.divider);
         const sets = divIdx === -1
           ? [{ heading: null, cards: transactionCards }]
@@ -5648,7 +5723,7 @@ export function OverstayPanel({ loadFn = api.cooOverstay }) {
             <div className="card empty" style={{ padding: 32 }}>
               <Ic d={icons.check} s={28} />
               <div style={{ fontWeight: 700, fontSize: 14, marginTop: 10 }}>No overstay patients</div>
-              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>All planned discharges are on schedule.</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>No one's been waiting on Physical Checkout for over an hour after System Checkout.</div>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
