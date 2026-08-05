@@ -12,7 +12,7 @@ import {
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
   DoctorBlockManager, DoctorManager, ConsultantManager,
   DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager, PayerTATManager,
-  SimpleLoginManager,
+  SimpleLoginManager, PWO_LOGIN_TABS,
 } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
@@ -64,6 +64,7 @@ const ADMIN_TITLES = {
   pres: "PRE Users",
   nurses: "Nurse Users",
   doctors: "DMO Users",
+  welfare: "Patient Welfare Officers",
   setup: "Blocks",
   preblocks: "PRE Blocks",
   doctorblocks: "DMO Blocks",
@@ -194,6 +195,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "doctors", icon: icons.stethoscope, label: "DMO Users" },
         { key: "consultants", icon: icons.stethoscope, label: "Consultant Users" },
         { key: "fcpharmacy", icon: icons.list, label: "FC & Pharmacy" },
+        { key: "welfare", icon: icons.shield, label: "Welfare Officers" },
       ]
     },
     {
@@ -298,6 +300,14 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "doctors" && <DoctorManager showToast={showToast} />}
       {tab === "consultants" && <ConsultantManager showToast={showToast} />}
       {tab === "fcpharmacy" && <SimpleLoginManager showToast={showToast} />}
+      {tab === "welfare" && (
+        <SimpleLoginManager
+          showToast={showToast}
+          tabs={PWO_LOGIN_TABS}
+          title="Patient Welfare Officers"
+          blurb="Manage Patient Welfare Officer (PWO) logins. PWOs handle patient complaints raised from the Patient Portal."
+        />
+      )}
 
       {/* Setup */}
       {tab === "setup" && <HierarchyManager showToast={showToast} />}
@@ -868,13 +878,17 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
           </span>
           <span style={{ fontWeight: 700, fontSize: 14, color: CONSULT_ACCENT }}>Consultants</span>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {/* Shorter labels ("Group by: Department" → "Department", "active
+            patients" → "active") + tighter padding so the dropdown and both
+            chips actually fit on one line on a phone instead of the second
+            chip wrapping onto its own line. */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
           <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
-            style={{ padding: "3px 6px", fontSize: 11, width: "auto", flexShrink: 0 }}>
-            {CONSULTANT_GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>Group by: {o.label}</option>)}
+            style={{ padding: "3px 6px", fontSize: 10.5, width: "auto", flexShrink: 1, minWidth: 0 }}>
+            {CONSULTANT_GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap" }}>{consultants.length} consultants</span>
-          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap" }}>{grandTotal} active patients</span>
+          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap", fontSize: 10.5, padding: "3px 8px", flexShrink: 0 }}>{consultants.length} consultants</span>
+          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap", fontSize: 10.5, padding: "3px 8px", flexShrink: 0 }}>{grandTotal} active</span>
         </div>
       </div>
 
@@ -1850,18 +1864,28 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     physicalCheckoutPending: (adminHistory || []).map((s) => s.physical_checkout_pending || 0),
   };
 
+  // Discharge Lounge tile is Admin(COO)-only. loungeTotalBeds comes from the
+  // live ward list (not adminDashboard()), and that list can't be trimmed
+  // server-side without also breaking bed entry / lounge-transfer screens
+  // that read the same wards — so this one stays a display-only gate here,
+  // unlike totalPatientsCard/loungeCards below which the backend omits outright.
   const snapshotCards = !snap ? [] : [
     { label: "Total Beds", val: snap.totalBeds, sub: null, color: "#2f64ff", icon: icons.bed, series: S.total, explorerKey: "admin:Total Beds" },
     { label: "Operational Beds", val: snap.operationalBeds, sub: null, color: "#1d4ed8", icon: icons.refresh, series: S.total, explorerKey: "admin:Operational Beds" },
     { label: "Census Beds", val: snap.censusBeds, sub: null, color: "#1e3a8a", icon: icons.users, series: S.total, explorerKey: "admin:Census Beds" },
     { label: "Non-Census Beds", val: snap.nonCensusBeds, sub: null, color: "#0c2a6b", icon: icons.user, series: S.reserved, explorerKey: "admin:Non-Census Beds" },
-    { label: "Discharge Lounge", val: loungeTotalBeds, sub: null /* "Virtual Beds" */, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" }
+    ...(scope === "admin" ? [
+      { label: "Discharge Lounge", val: loungeTotalBeds, sub: null /* "Virtual Beds" */, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" },
+    ] : []),
   ];
 
   // Occupancy Board — laid out exactly as the CEO's wireframe: one standalone
   // "Total Patients" card, then five sub-groups (Census Occupancy / Non Census
   // Occupancy / Discharge Lounge / Vacant Beds / Patient Type).
-  const totalPatientsCard = !occ ? null :
+  // occ.totalPatients is Admin(COO)-only — the backend omits the field
+  // entirely for every other role (see adminDashboard()'s includeLoungeSummary
+  // in bedService.ts), so this naturally resolves to null for them.
+  const totalPatientsCard = !occ || occ.totalPatients == null ? null :
     { label: "Total Patients", val: occ.totalPatients, sub: "[On bed + Reserved + Overstay + Discharge lounge]", color: "#dc2626", icon: icons.chart, series: S.occupied, explorerKey: "admin:Total Patients" };
   const totalOccupancyCard = !occ ? null :
     { label: "Total Occupancy", val: occ.totalOccupancy, sub: "[On bed + Overstay + Reserved]", color: "#0d9488", icon: icons.bed, series: S.occupied, explorerKey: "admin:Total Occupancy" };
@@ -1878,7 +1902,10 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     { label: "Reserved", val: occ.nonCensus.res, sub: null, color: "#be123c", icon: icons.bookmark, series: [], explorerKey: "admin:Non-Census Res" },
     { label: "Overstay", val: occ.nonCensus.overstay, sub: null, color: "#f59e0b", icon: icons.clock, series: [], explorerKey: "admin:Non-Census Overstay" },
   ];
-  const loungeCards = !occ ? [] : [
+  // occ.lounge is Admin(COO)-only — omitted server-side for every other role,
+  // same as occ.totalPatients above, so this group naturally disappears for
+  // them (the render loop skips any group whose cards array is empty).
+  const loungeCards = !occ || !occ.lounge ? [] : [
     { label: "Total", val: occ.lounge.total, sub: null, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" },
     // "Census"/"Non Census" = origin bed type (where the patient came FROM).
     // Lounge beds have no Census/Non-Census identity of their own, so the
@@ -2055,11 +2082,20 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
               <div className="dtg">
                 <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
                 {unitOptions.length <= 4 ? (
-                  <div className="seg-pill">
-                    {unitOptions.map((k) => (
-                      <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
-                    ))}
-                  </div>
+                  // Same desktop-pill / mobile-select split as "View by" right
+                  // below — a row of up to 4 pill buttons doesn't fit a phone
+                  // width, so it needs the same fallback that section already has.
+                  <>
+                    <div className="seg-pill dt-desktop-only">
+                      {unitOptions.map((k) => (
+                        <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
+                      ))}
+                    </div>
+                    <select className="field dt-mobile-only" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
+                      style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 0, width: "auto" }}>
+                      {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
+                    </select>
+                  </>
                 ) : (
                   <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
                     style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 140 }}>
@@ -2074,7 +2110,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
           <div className="dtg">
             <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
             <div className="seg-pill dt-desktop-only">
-              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }, ...(!compact ? [{ value: "payer_type", label: "Payer Type" }, { value: "department", label: "Department" }] : [])].map((opt) => (
+              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }].map((opt) => (
                 <button key={opt.value} className={searchBy === opt.value ? "on" : ""}
                   onClick={() => { setSearchBy(opt.value); setSearch(""); }}>{opt.label}</button>
               ))}
@@ -2083,8 +2119,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
               style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 0, width: "auto" }}>
               <option value="ward">Ward</option>
               <option value="room_type">Room Type</option>
-              {!compact && <option value="payer_type">Payer Type</option>}
-              {!compact && <option value="department">Department</option>}
             </select>
           </div>
 
@@ -2112,7 +2146,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
           <span style={{
             display: "inline-flex", alignItems: "center", gap: 5,
             padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700,
-            background: "var(--primary-bg, rgba(37,99,235,.12))", color: "var(--primary)",
+            background: "var(--primary-bg, #EFF6FF)", color: "var(--primary)",
           }}>
             <Ic d={icons.search} s={12} /> Showing {shownRows.length} of {allRows.length} wards
           </span>
@@ -2567,6 +2601,21 @@ const wstSum = (list, fn) => list.reduce((a, r) => a + (fn(r) || 0), 0);
 const wstC = { textAlign: "center" };
 const wstCW = { textAlign: "center", minWidth: 58, padding: "6px 10px" };
 
+// Compact tables (Consultant dashboard only — see `compact` in LiveBedDashboard)
+// render Census Beds and Non-Census Beds as two separate <table>s stacked on
+// top of each other. With the default table-layout:auto, each <table> sizes
+// its own columns independently from the other, purely from its own content —
+// so when one table's WARD column has to fit a longer label than the other's
+// (e.g. "GENERAL WARD (F) - NON AC" vs "Dialysis"), its numeric columns land
+// at a different x-offset than the table below it, even though visually
+// stacked. These fixed widths, combined with table-layout:fixed on both
+// <table>s (see WardStatusTable), force every compact table to use the same
+// column grid regardless of its own content — restricted to `compact` only,
+// so nothing changes for any other role's ward tables.
+const wstCompactWard = { width: 280, overflow: "hidden" };
+const wstCompactNum = { textAlign: "center", width: 100 };
+const wstCompactMeta = { textAlign: "center", width: 130 };
+
 // Normalize a verbose, inconsistently-cased room type into a compact label:
 //   "SINGLE ROOM - AC"         → "Single Room · AC"
 //   "GENERAL WARD (F) - NON AC"→ "General Ward (F) · NAC"
@@ -2604,7 +2653,7 @@ function renderWardRow(r, showBadge, compact = false) {
   const updatedByName = r.updated_by_name || null;
   return (
     <tr key={r.id}>
-      <td style={{ fontWeight: 600 }}>
+      <td style={{ fontWeight: 600, ...(compact ? wstCompactWard : null) }}>
         <span>
           {r.ward}
           {showBadge && (
@@ -2624,21 +2673,21 @@ function renderWardRow(r, showBadge, compact = false) {
           </div>
         )}
       </td>
-      <td style={wstC}>{r.total}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(occ)}</td>
+      <td style={compact ? wstCompactNum : wstC}>{r.total}</td>
+      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 700, color: "var(--st-o)" }}>{d(occ)}</td>
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(o)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-or)" }}>{d(or_)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "#f59e0b" }}>{d(r.overstayCount || 0)}</td>}
       {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#2563eb" }}>{d(at.IP || 0)}</td>}
       {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#8b5cf6" }}>{d(at.OPD || 0)}</td>}
       {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#0ea5b7" }}>{d(at.DAYCARE || 0)}</td>}
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(vac)}</td>
+      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 700, color: "var(--st-v)" }}>{d(vac)}</td>
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(v)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "#0d9488" }}>{r.loungeCount || 0}</td>}
       {!compact && <td style={wstC}>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>}
-      <td><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
-      <td style={{ ...wstC, fontSize: 11, fontWeight: 600 }}>{updatedByName || <span className="dim">–</span>}</td>
+      <td style={compact ? wstCompactMeta : undefined}><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
+      <td style={{ ...(compact ? wstCompactMeta : wstC), fontSize: 11, fontWeight: 600 }}>{updatedByName || <span className="dim">–</span>}</td>
     </tr>
   );
 }
@@ -2706,45 +2755,48 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
         </div>
       </div>
       <div className="tbl-wrap" style={{ border: "none", borderRadius: 0 }}>
-        <table className="tbl tbl-pin1">
+        {/* table-layout:fixed (compact only) + the shared wstCompact* widths below
+            are what make this table's columns line up with the other compact
+            table stacked below/above it — see the comment on wstCompactWard. */}
+        <table className="tbl tbl-pin1" style={compact ? { tableLayout: "fixed" } : undefined}>
           <thead>
             <tr>
-              <th>WARD</th>
-              <th style={wstC}>TOTAL BEDS</th>
-              <th style={{ ...wstC, color: "var(--st-o)" }}>TOTAL OCC</th>
+              <th style={compact ? wstCompactWard : undefined}>WARD</th>
+              <th style={compact ? wstCompactNum : wstC}>TOTAL BEDS</th>
+              <th style={{ ...(compact ? wstCompactNum : wstC), color: "var(--st-o)" }}>TOTAL OCC</th>
               {!compact && <th style={{ ...wstC, color: "var(--st-o)" }}>ON BED</th>}
               {!compact && <th style={{ ...wstC, color: "var(--st-or)" }}>OCC[RES]</th>}
               {!compact && <th style={{ ...wstC, color: "#f59e0b" }}>OVERSTAY</th>}
               {!compact && <th style={{ ...wstCW, color: "#2563eb" }}>IP</th>}
               {!compact && <th style={{ ...wstCW, color: "#8b5cf6" }}>OP</th>}
               {!compact && <th style={{ ...wstCW, color: "#0ea5b7" }}>DAY CARE</th>}
-              <th style={{ ...wstC, color: "var(--st-v)" }}>TOTAL VAC</th>
+              <th style={{ ...(compact ? wstCompactNum : wstC), color: "var(--st-v)" }}>TOTAL VAC</th>
               {!compact && <th style={{ ...wstC, color: "var(--st-v)" }}>VACANT</th>}
               {!compact && <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC[RES]</th>}
               {!compact && <th style={{ ...wstC, color: "#0d9488" }}>DIS. LOUNGE</th>}
               {!compact && <th style={wstC}>OCC %</th>}
-              <th style={wstC}>LAST UPDATED</th>
-              <th style={wstC}>UPDATED BY</th>
+              <th style={compact ? wstCompactMeta : wstC}>LAST UPDATED</th>
+              <th style={compact ? wstCompactMeta : wstC}>UPDATED BY</th>
             </tr>
           </thead>
           <tbody>
             <tr className="tbl-total-row" style={{ background: accentBg, "--tbl-total-accent": accent }}>
-              <td style={{ fontWeight: 800, fontSize: 13, color: accent, background: accentBg }}>{totalLabel}</td>
-              <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
+              <td style={{ fontWeight: 800, fontSize: 13, color: accent, background: accentBg, ...(compact ? wstCompactWard : null) }}>{totalLabel}</td>
+              <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800 }}>{totBeds}</td>
+              <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{totOverstay}</td>}
               {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{totIp}</td>}
               {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{totOp}</td>}
               {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{totDaycare}</td>}
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
+              <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totV}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{totLounge}</td>}
               {!compact && <td style={wstC}><OccBar p={totPct} /></td>}
-              <td><LastUpdatedCell ts={totUpdatedAt} /></td>
-              <td></td>
+              <td style={compact ? wstCompactMeta : undefined}><LastUpdatedCell ts={totUpdatedAt} /></td>
+              <td style={compact ? wstCompactMeta : undefined}></td>
             </tr>
             {filtered.length === 0 ? (
               <tr><td colSpan={colSpan} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
@@ -2758,18 +2810,18 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
                   <React.Fragment key={key}>
                     <tr onClick={() => toggleSection(key)}
                       style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
-                      <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: accent, padding: "8px 14px" }}>
+                      <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: accent, padding: "8px 14px", ...(compact ? wstCompactWard : null) }}>
                         <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
                         {key}
                         <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
                           {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""}
                         </span>
                       </td>
-                      <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
-                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>
-                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{gvac}</td>
-                      <td><LastUpdatedCell ts={gUpdatedAt} /></td>
-                      <td></td>
+                      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800 }}>{gb}</td>
+                      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>
+                      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-v)" }}>{gvac}</td>
+                      <td style={compact ? wstCompactMeta : undefined}><LastUpdatedCell ts={gUpdatedAt} /></td>
+                      <td style={compact ? wstCompactMeta : undefined}></td>
                     </tr>
                     {isOpen && grpRows.map(r => renderWardRow(r, false, compact))}
                   </React.Fragment>
@@ -2861,9 +2913,15 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy, groupBySelect }) {
           </thead>
           <tbody>
             {/* Grand total always shows first — reflects the active filter,
-                including the zero-match case (all-zero totals, not vanished). */}
-            <tr className="tbl-total-row" style={{ background: "var(--primary-bg, rgba(37,99,235,.12))", "--tbl-total-accent": "var(--primary)" }}>
-              <td style={{ fontWeight: 800, fontSize: 13, color: "var(--primary)", background: "var(--primary-bg, rgba(37,99,235,.12))" }}>GRAND TOTAL</td>
+                including the zero-match case (all-zero totals, not vanished).
+                Opaque background (matching --primary-bg's fallback everywhere
+                else in the app), not the translucent rgba this used to have —
+                the first cell here is position:sticky (.tbl-pin1), and a
+                translucent sticky cell lets whatever scrolls underneath it
+                (other columns, as the table scrolls horizontally) show through
+                and visually overlap "GRAND TOTAL"'s own text. */}
+            <tr className="tbl-total-row" style={{ background: "var(--primary-bg, #EFF6FF)", "--tbl-total-accent": "var(--primary)" }}>
+              <td style={{ fontWeight: 800, fontSize: 13, color: "var(--primary)", background: "var(--primary-bg, #EFF6FF)" }}>GRAND TOTAL</td>
               <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>

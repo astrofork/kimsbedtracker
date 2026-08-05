@@ -256,7 +256,7 @@ function PlanSection({ bed, existing, onClose, onSaved }) {
 // `submit` lets a caller point this at a different backend action (Readmit uses
 // api.readmitFromLounge instead of api.transferBed) while reusing the exact same
 // ward/bed/reason UI. Defaults to the ordinary transfer.
-export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "Confirm Transfer" }) {
+export function TransferSection({ bed, onClose, onSaved, onConflict, submit, submitLabel = "Confirm Transfer" }) {
   const [wards, setWards] = useState(null);
   const [wardsError, setWardsError] = useState("");
   const [toWardId, setToWardId] = useState(bed.ward_id);
@@ -314,7 +314,17 @@ export function TransferSection({ bed, onClose, onSaved, submit, submitLabel = "
         ? await submit(Number(toWardId), Number(toBedId), reason.trim())
         : await api.transferBed(bed.id, Number(toWardId), Number(toBedId), reason.trim());
       onSaved(r);
-    } catch (e) { setError(toastErr(e)); }
+    } catch (e) {
+      // 409 = someone else already changed this patient's bed/discharge state
+      // underneath us (raced onto the same admission, took the destination bed,
+      // etc. — this codebase uses 409 exclusively for that "stale, refresh and
+      // see the real state" family, never for a fixable form mistake). Leaving
+      // the stale form open with just an inline error would need the user to
+      // notice and manually refresh, so instead let the caller close this and
+      // pull the real current state automatically.
+      if (e.status === 409 && onConflict) { onConflict(toastErr(e)); return; }
+      setError(toastErr(e));
+    }
     finally { setSaving(false); }
   }
 

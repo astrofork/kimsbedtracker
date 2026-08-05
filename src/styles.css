@@ -6,6 +6,21 @@
 :root { color-scheme: dark; }
 [data-theme="light"], [data-theme="purple"], [data-theme="teal"] { color-scheme: light; }
 
+/* ── Safe-area insets ─────────────────────────────────────────────────────── *
+ * Canonical source for every notch/Dynamic-Island/gesture-bar/home-indicator
+ * inset in the app. Resolves to 0px on any device/browser without a display
+ * cutout (the env() fallback), so these are safe to apply unconditionally —
+ * no UA/device detection anywhere. Every surface that touches a screen edge
+ * (header, sidebar, floating buttons, toasts, sheets, modals) should read
+ * these variables — never reference env(safe-area-inset-*) directly again;
+ * that's how this staying consistent across the whole app is guaranteed. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
 :root {
   /* DARK */
   --bg:#0b0f14; --panel:#11181f; --panel-2:#161f28; --line:#22303c;
@@ -110,6 +125,20 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body,#root{min-height:100%;overscroll-behavior:none;}
 html{background:var(--bg);overscroll-behavior:none;overflow-x:hidden;}
+/* Global safe-area inset — every page hangs off #root, so this alone covers
+   Login/Dashboard/Bed Matrix/Patients/Reports/etc. automatically; no page
+   needs its own device-specific padding. Fixed/sticky elements (header,
+   sidebar, floating buttons, toasts) ignore this — they're insetted
+   individually below, since position:fixed/sticky escapes an ancestor's
+   padding by definition. */
+#root{
+  min-height:100vh;
+  padding-top:var(--safe-top);
+  padding-bottom:var(--safe-bottom);
+  padding-left:var(--safe-left);
+  padding-right:var(--safe-right);
+  box-sizing:border-box;
+}
 body{font-family:'Inter',system-ui,sans-serif;font-size:13px;background:var(--bg);color:var(--ink);overscroll-behavior:none;}
 /* Body scroll lock — applied by useModal() when any sheet is open. */
 body.modal-open{overflow:hidden;position:fixed;width:100%;}
@@ -151,6 +180,12 @@ input,select,textarea{font-size:16px;}
   display:flex;flex-direction:column;
   transition:width .18s ease, transform .22s ease;
   overflow-x:hidden;
+  /* position:fixed escapes #root's padding entirely, so this needs its own
+     insets — top/bottom keep .sb-brand/.sb-foot clear of the notch and home
+     indicator, left covers a landscape notch/camera-hole on that edge. */
+  padding-top:var(--safe-top);
+  padding-bottom:var(--safe-bottom);
+  padding-left:var(--safe-left);
 }
 .sb-brand{
   display:flex;align-items:center;gap:10px;
@@ -211,11 +246,17 @@ input,select,textarea{font-size:16px;}
 /* Topbar */
 .appbar{
   position:sticky;top:0;z-index:700;
-  height:60px;flex-shrink:0;
+  /* min-height (not height) + padding-top so the safe-area inset adds to the
+     box instead of squeezing the 60px content area — sticky means this bar
+     can end up flush against the real top of the screen while scrolled, so
+     it needs its own inset independent of #root's padding (position:sticky/
+     fixed elements don't inherit an ancestor's padding once they've stuck). */
+  min-height:60px;flex-shrink:0;
+  padding-top:var(--safe-top);
   background:var(--topbar-bg);
   border-bottom:1px solid var(--line);
   display:flex;align-items:center;gap:12px;
-  padding:0 16px;
+  padding-left:16px;padding-right:16px;
   /* Fade out only — never change height/layout. Height changes cause
      the content to shift which oscillates the IntersectionObserver. */
   transition:opacity 280ms cubic-bezier(.22,.8,.2,1);
@@ -302,12 +343,12 @@ body.hero-gone .appbar{
   .shell.sb-collapsed .sb-section + .sb-section{margin-top:6px;border-top:none;padding-top:0;}
   .shell-main{margin-left:0 !important;}
   .content{padding:12px;}
-  .appbar{padding:0 12px;}
+  .appbar{padding-left:12px;padding-right:12px;} /* left/right only — don't clobber padding-top:var(--safe-top) */
   .user-chip .uname,.user-chip .role-badge{display:none;}
   .profile-menu{min-width:200px;max-width:calc(100vw - 24px);}
   /* Sheets on mobile: full-width bottom drawer, respect safe areas */
-  .sheet{padding-bottom:env(safe-area-inset-bottom, 0px);}
-  .overlay{padding-bottom:env(safe-area-inset-bottom, 0px);}
+  .sheet{padding-bottom:var(--safe-bottom);}
+  .overlay{padding-bottom:var(--safe-bottom);}
   /* Tighter headings */
   .h1{font-size:17px;}
   .appbar .page-title{font-size:15px;}
@@ -399,7 +440,7 @@ body.hero-gone .appbar{
   position:fixed;bottom:0;left:50%;transform:translateX(-50%);
   width:100%;max-width:480px;z-index:30;
   background:var(--navbar-bg);border-top:1px solid var(--line);
-  display:flex;padding-bottom:env(safe-area-inset-bottom,0px);
+  display:flex;padding-bottom:var(--safe-bottom);
 }
 .navbar button{flex:1;padding:11px 4px 9px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--ink-3);}
 .navbar button.on{color:var(--primary);}
@@ -532,11 +573,17 @@ body.hero-gone .appbar{
 .tbl-pin1 tbody td{padding:7px 7px;}
 
 /* Pin the first column (ward name) so it stays readable while the wide table
-   scrolls horizontally — no more losing the ward name off the left edge. */
+   scrolls horizontally — no more losing the ward name off the left edge.
+   transform:translateZ(0) forces this cell onto its own compositing layer —
+   without it, some browsers (mobile WebKit especially) round the sticky
+   element's position to a slightly different subpixel than the scrolling
+   content behind it, leaving a hairline gap that shows a sliver of whatever
+   column is currently scrolled underneath. */
 .tbl-pin1 thead th:first-child,
 .tbl-pin1 tbody td:first-child{
   position:sticky;left:0;z-index:2;
   min-width:128px;box-shadow:1px 0 0 var(--line);
+  transform:translateZ(0);
 }
 .tbl-pin1 thead th:first-child{z-index:3;background:var(--panel-2);}
 .tbl-pin1 tbody td:first-child{background:var(--panel);}
@@ -685,7 +732,7 @@ body.hero-gone .appbar{
    desktop. On mobile the sidebar is an off-canvas drawer (translateX(-100%))
    — it takes no layout space — so --sb-w must NOT offset the toast there,
    or it renders shifted off the right edge of the screen. */
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:32px;background:var(--ink);color:var(--panel);padding:11px 18px;border-radius:14px;font-size:13px;font-weight:600;z-index:9999;box-shadow:var(--shadow-md);max-width:min(340px,calc(100vw - 32px));text-align:center;white-space:normal;word-break:break-word;line-height:1.4;}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--safe-bottom) + 32px);background:var(--ink);color:var(--panel);padding:11px 18px;border-radius:14px;font-size:13px;font-weight:600;z-index:9999;box-shadow:var(--shadow-md);max-width:min(340px,calc(100vw - 32px));text-align:center;white-space:normal;word-break:break-word;line-height:1.4;}
 @media (min-width:768px){
   .toast{left:calc(var(--sb-w,0px) / 2 + 50%);}
 }
@@ -696,6 +743,21 @@ body.hero-gone .appbar{
 /* Horizontally-scrollable table wrapper */
 .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 .tbl-scroll .tbl{min-width:520px;}
+
+/* Table ↔ stacked row-cards swap — a real <table> needs more horizontal room
+   than a phone screen has (columns end up squeezed or clipped); below the
+   breakpoint, show full-width row-cards for the same data instead, no
+   horizontal scrolling needed. Both markups are always in the DOM; only one
+   is visible at a time, picked by viewport width. */
+.mp-tbl-mobile{display:none;}
+@media (max-width:680px){
+  .mp-tbl-desktop{display:none;}
+  .mp-tbl-mobile{display:block;}
+}
+.mp-row-card{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);cursor:pointer;}
+.mp-row-card:last-child{border-bottom:none;}
+.mp-row-card:hover{background:var(--panel-2);}
+.mp-row-card-stats{display:flex;gap:18px;flex-shrink:0;}
 
 /* Auto-flow grid: 1→2→4 columns as space grows */
 .auto-grid-4{display:grid;gap:8px;grid-template-columns:repeat(2,1fr);}
@@ -1587,7 +1649,7 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 
 /* Desktop floating pill — fixed right side */
 .snav{
-  position:fixed;right:6px;top:50%;transform:translateY(-50%);
+  position:fixed;right:calc(var(--safe-right) + 6px);top:50%;transform:translateY(-50%);
   z-index:600;
   width:48px;
   background:var(--panel);
@@ -1682,7 +1744,7 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 /* ── Mobile FAB ──────────────────────────────────────────────────────────── */
 .snav-fab{
   display:none;
-  position:fixed;right:20px;bottom:24px;z-index:600;
+  position:fixed;right:calc(var(--safe-right) + 20px);bottom:calc(var(--safe-bottom) + 24px);z-index:600;
   width:52px;height:52px;border-radius:50%;
   background:var(--primary);color:#fff;border:none;
   box-shadow:0 4px 16px rgba(37,99,235,.40),0 1px 4px rgba(0,0,0,.15);
@@ -1706,7 +1768,7 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   width:100%;
   background:var(--panel);
   border-radius:20px 20px 0 0;
-  padding:0 0 env(safe-area-inset-bottom,12px);
+  padding:0 0 calc(var(--safe-bottom) + 12px);
   box-shadow:0 -4px 32px rgba(0,0,0,.18);
   animation:snav-sheet-in 240ms cubic-bezier(.4,0,.2,1);
 }
@@ -1746,17 +1808,21 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 
 /* ── Intelligent Adaptive Header ─────────────────────────────────────────── */
 
-/* Base sticky positioning — CSS controls top; JS only toggles classes */
+/* Base sticky positioning — CSS controls top; JS only toggles classes.
+   Both offsets add var(--safe-top) — .appbar's real height is now
+   60px + safe-top (see .appbar), and in the hero-gone state this bar
+   itself becomes the de facto top header (gains the hamburger + avatar),
+   so it needs the same notch/status-bar clearance a header would. */
 .filter-bar-sticky{
   position:sticky;
-  top:68px; /* below appbar (60px) + 8px breathing room */
+  top:calc(var(--safe-top) + 68px); /* below appbar (60px) + 8px breathing room */
   z-index:500;
 }
 /* When greeting is gone: slide card up into the appbar's former position.
    The appbar's layout space (60px) is still in the DOM (transform doesn't
    affect flow), so top:8px places the card right at the viewport top. */
 body.hero-gone .filter-bar-sticky{
-  top:8px;
+  top:calc(var(--safe-top) + 8px);
 }
 
 /* All visual transitions on the filter card */
@@ -1787,9 +1853,15 @@ body.hero-gone .filter-bar-sticky{
   border-color:rgba(0,0,0,.08)!important;
 }
 
-/* When lifted: toolbar is one single row — hide group labels, no wrap */
+/* When lifted: toolbar is one single row — hide group labels, no wrap.
+   Base .dash-toolbar uses align-items:flex-end so each group's label-above-
+   control column shares a common bottom edge — correct in the normal state,
+   but once labels are hidden here, that leaves short elements (the round
+   avatar, 28px) bottom-aligned against taller ones (the pill buttons), so
+   the avatar visibly sits low. Center them instead once there's no label
+   row left to align a bottom edge against. */
 body.hero-gone .dtg-head{ display:none; }
-body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
+body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 
 .filter-lift-avatar{
   width:28px;height:28px;border-radius:50%;flex-shrink:0;
@@ -1811,7 +1883,7 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
   }
   .filter-bar--stuck{border-radius:0!important;}
   /* Hero-gone: toolbar to very top, allow wrap, hide pills/theme/avatar */
-  body.hero-gone .filter-bar-sticky{top:0!important;}
+  body.hero-gone .filter-bar-sticky{top:var(--safe-top)!important;}
   body.hero-gone .dash-toolbar{flex-wrap:wrap;}
   .dt-desktop-only{display:none!important;}
   .dt-mobile-only{display:block!important;}
@@ -1832,7 +1904,7 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
 /* Reduced motion: keep fades only, skip top transition */
 @media(prefers-reduced-motion:reduce){
   .appbar,#nav-filters{transition:opacity 200ms ease!important;}
-  body.hero-gone .filter-bar-sticky{top:68px;}
+  body.hero-gone .filter-bar-sticky{top:calc(var(--safe-top) + 68px);}
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1922,7 +1994,7 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
 
 /* ── AppShell topbar — tighter on 320px ─────────────────────────────────── */
 @media(max-width:360px){
-  .appbar{padding:0 8px;gap:8px;}
+  .appbar{padding-left:8px;padding-right:8px;gap:8px;} /* left/right only — don't clobber padding-top:var(--safe-top) */
   .appbar .page-title{font-size:13px;}
   .appbar-btn{width:32px;height:32px;}
 }
@@ -1971,3 +2043,182 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; }
   .tat-table-cell{padding:8px 10px!important;}
   .tat-table-hdr-cell{padding:8px 10px!important;font-size:10px!important;}
 }
+
+/* ══ PWO Complaints queue ══════════════════════════════════════════════════ */
+.cq-stats{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:12px;}
+@media(max-width:1200px){.cq-stats{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:620px){.cq-stats{grid-template-columns:repeat(2,1fr);gap:8px;}}
+.cq-stat{padding:13px;display:flex;align-items:flex-start;gap:11px;min-width:0;}
+.cq-stat-ic{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.cq-stat-label{font-size:11.5px;font-weight:700;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cq-stat-val{font-size:22px;font-weight:800;line-height:1.15;margin-top:1px;}
+.cq-stat-sub{font-size:10.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+.cq-toolbar{padding:12px;margin-bottom:12px;}
+.cq-searchrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.cq-search{flex:1 1 260px;min-width:0;display:flex;align-items:center;gap:8px;
+  background:var(--panel-2);border:1px solid var(--line);border-radius:10px;padding:0 12px;height:38px;color:var(--ink-3);}
+.cq-search input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--ink);font-size:13px;font-family:inherit;}
+.cq-tbtn{display:inline-flex;align-items:center;gap:6px;height:38px;padding:0 12px;flex-shrink:0;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer;white-space:nowrap;}
+.cq-tbtn:hover{background:var(--panel-2);}
+.cq-tbtn-static{cursor:default;}
+.cq-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;
+  border-radius:99px;background:var(--primary);color:#fff;font-size:10px;font-weight:800;}
+.cq-reset{height:38px;padding:0 12px;background:none;border:none;flex-shrink:0;
+  color:var(--primary);font-size:12.5px;font-weight:700;cursor:pointer;}
+.cq-daterow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--ink-2);}
+.cq-daterow label{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+.cq-daterow input{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;
+  padding:6px 9px;color:var(--ink);font-family:inherit;font-size:12px;}
+
+.cq-chiprow{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;}
+.cq-chip{display:inline-flex;align-items:center;gap:2px;padding:0 4px 0 10px;height:32px;
+  background:var(--panel);border:1px solid var(--line);border-radius:9px;}
+.cq-chip.on{border-color:var(--primary);background:var(--primary-bg,#EFF6FF);}
+.cq-chip select{background:none;border:none;outline:none;color:var(--ink);
+  font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer;padding:0 4px 0 0;max-width:150px;}
+.cq-chip.on select{color:var(--primary);}
+.cq-chip>button{display:flex;align-items:center;padding:3px;border:none;background:none;cursor:pointer;color:var(--primary);}
+.cq-sort{margin-left:auto;padding-left:9px;color:var(--ink-2);}
+
+.cq-row{cursor:pointer;}
+.cq-cmp{display:flex;gap:11px;align-items:flex-start;min-width:0;}
+.cq-cmp-ic{width:34px;height:34px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.cq-code{display:block;font-size:12.5px;font-weight:800;}
+.cq-desc{display:block;font-size:12.5px;color:var(--ink);margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;max-width:330px;}
+.cq-meta{display:block;font-size:10.5px;color:var(--ink-3);margin-top:2px;}
+.cq-cat{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;}
+.cq-cat-ic{width:26px;height:26px;border-radius:7px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.cq-loc{font-size:12.5px;font-weight:600;white-space:nowrap;}
+.cq-loc-sub{font-size:11px;color:var(--ink-3);white-space:nowrap;}
+.cq-pri{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;white-space:nowrap;}
+.cq-dot{width:7px;height:7px;border-radius:99px;flex-shrink:0;}
+.cq-when{font-size:11.5px;font-weight:600;white-space:nowrap;}
+.cq-when-sub{font-size:10.5px;color:var(--ink-3);white-space:nowrap;}
+.cq-view{padding:7px 13px;border-radius:9px;white-space:nowrap;
+  border:1px solid var(--primary);background:none;color:var(--primary);
+  font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;}
+.cq-view:hover{background:var(--primary-bg,#EFF6FF);}
+
+/* Table ↔ stacked-card swap, same reasoning as .mp-tbl-* — this table has 7
+   columns so it needs a wider breakpoint before it stops fitting. */
+.cq-mobile{display:none;}
+@media(max-width:900px){
+  .cq-desktop{display:none;}
+  .cq-mobile{display:block;}
+}
+.cq-mrow{padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer;}
+.cq-mrow:last-child{border-bottom:none;}
+.cq-mrow:hover{background:var(--panel-2);}
+.cq-mhead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.cq-mrow .cq-desc{max-width:none;-webkit-line-clamp:2;}
+
+.cq-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  padding:12px 14px;border-top:1px solid var(--line);}
+.cq-pager{display:flex;align-items:center;gap:5px;flex-wrap:wrap;}
+.cq-pager button{display:inline-flex;align-items:center;gap:4px;min-width:32px;height:32px;padding:0 10px;
+  justify-content:center;border:1px solid var(--line);background:var(--panel);border-radius:8px;
+  font-size:12px;font-weight:600;color:var(--ink-2);cursor:pointer;font-family:inherit;}
+.cq-pager button:hover:not(:disabled){background:var(--panel-2);}
+.cq-pager button.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.cq-pager button:disabled{opacity:.45;cursor:not-allowed;}
+.cq-ellipsis{padding:0 4px;color:var(--ink-3);font-size:12px;}
+
+/* ══ PWO Complaint detail ══════════════════════════════════════════════════ */
+.cd-back{display:inline-flex;align-items:center;gap:6px;margin-bottom:14px;padding:0;
+  background:none;border:none;cursor:pointer;color:var(--primary);font-size:13.5px;font-weight:700;font-family:inherit;}
+.cd-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:14px;align-items:start;}
+@media(max-width:1080px){.cd-grid{grid-template-columns:minmax(0,1fr);}}
+.cd-side{display:flex;flex-direction:column;gap:14px;}
+
+.cd-head{padding:18px;margin-bottom:14px;}
+.cd-head-top{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
+.cd-head-ids{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0;}
+.cd-code{font-size:19px;font-weight:800;letter-spacing:-.01em;}
+.cd-cat{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:99px;font-size:11px;font-weight:800;white-space:nowrap;}
+.cd-submitted{display:flex;align-items:flex-start;gap:7px;color:var(--ink-3);flex-shrink:0;}
+.cd-submitted-at{display:block;font-size:12.5px;font-weight:700;color:var(--ink-2);white-space:nowrap;}
+.cd-submitted-by{display:block;font-size:11px;color:var(--ink-3);}
+.cd-quote{background:var(--panel-2);border-radius:12px;padding:16px 18px;
+  font-size:14.5px;line-height:1.6;white-space:pre-wrap;margin-bottom:16px;}
+.cd-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0;
+  border-top:1px solid var(--line);padding-top:14px;}
+.cd-meta-item{display:flex;gap:9px;align-items:flex-start;padding:0 14px;
+  border-left:1px solid var(--line);color:var(--ink-3);min-width:0;}
+.cd-meta-item:first-child{border-left:none;padding-left:0;}
+.cd-meta-label{font-size:10.5px;color:var(--ink-3);white-space:nowrap;}
+.cd-meta-value{font-size:12.5px;font-weight:700;color:var(--ink);margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;}
+@media(max-width:700px){
+  .cd-meta{grid-template-columns:repeat(2,1fr);gap:12px 0;}
+  .cd-meta-item:nth-child(odd){border-left:none;padding-left:0;}
+}
+
+.cd-banner{display:flex;align-items:center;gap:13px;padding:15px 16px;margin-bottom:14px;flex-wrap:wrap;}
+.cd-banner-ic{width:40px;height:40px;border-radius:11px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.cd-banner-title{font-size:13.5px;font-weight:700;}
+.cd-banner-sub{font-size:12px;color:var(--ink-3);margin-top:2px;}
+
+.cd-section{padding:16px;}
+.cd-section-head{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:800;
+  color:var(--primary);margin-bottom:14px;}
+.cd-noteform{margin-bottom:14px;}
+.cd-textarea{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  padding:12px 13px;font-size:13px;font-family:inherit;color:var(--ink);resize:vertical;outline:none;line-height:1.5;}
+.cd-textarea:focus{border-color:var(--primary);}
+.cd-noteform-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:9px;}
+.cd-share{display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;color:var(--ink-2);}
+.cd-btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:10px;border:none;
+  font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;}
+.cd-btn-primary{background:var(--primary);color:#fff;}
+.cd-btn-primary:disabled{opacity:.5;cursor:not-allowed;}
+.cd-empty{text-align:center;padding:26px 10px;color:var(--ink-3);}
+.cd-empty-title{font-size:13.5px;font-weight:700;color:var(--ink-2);margin-top:10px;}
+.cd-empty-sub{font-size:12px;margin-top:3px;}
+.cd-note{border-left:3px solid var(--line);padding-left:11px;margin-bottom:13px;}
+.cd-note-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px;}
+.cd-note-tag{font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:4px;letter-spacing:.03em;}
+.cd-note-body{font-size:12.5px;line-height:1.55;white-space:pre-wrap;}
+.cd-pinfo{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;}
+.cd-pinfo-label{font-size:10.5px;color:var(--ink-3);}
+.cd-pinfo-value{font-size:13px;font-weight:700;margin-top:2px;}
+.cd-discharged{display:flex;align-items:center;gap:7px;margin-top:14px;padding:9px 11px;border-radius:9px;
+  background:var(--panel-2);color:var(--ink-2);font-size:11.5px;font-weight:600;}
+
+/* Stepper — 5 fixed columns so the labels stay under their own dot. */
+.cd-stepper{display:grid;grid-template-columns:repeat(5,1fr);margin-bottom:18px;}
+.cd-step{position:relative;display:flex;flex-direction:column;align-items:center;text-align:center;}
+.cd-step-line{position:absolute;top:9px;right:50%;width:100%;height:2px;}
+.cd-step-dot{position:relative;width:19px;height:19px;border-radius:99px;
+  border:2.5px solid var(--line);background:var(--panel);z-index:1;}
+.cd-step-dot.done{border-width:0;}
+.cd-step-label{font-size:9.5px;font-weight:700;color:var(--ink-3);margin-top:7px;line-height:1.25;}
+.cd-step-label.on{font-weight:800;}
+.cd-step-current{font-size:8.5px;color:var(--ink-3);margin-top:2px;}
+
+.cd-actions{display:flex;flex-direction:column;gap:8px;}
+.cd-action{display:flex;align-items:center;gap:9px;width:100%;padding:11px 14px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left;}
+.cd-action:hover:not(:disabled){background:var(--panel-2);}
+.cd-action.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.cd-action.danger:not(:disabled){color:var(--red);}
+.cd-action:disabled{opacity:.45;cursor:not-allowed;}
+.cd-prio{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-top:14px;padding-top:14px;border-top:1px solid var(--line);}
+
+.cd-tl{position:relative;display:flex;gap:11px;padding-bottom:16px;}
+.cd-tl:last-child{padding-bottom:0;}
+.cd-tl-dot{width:9px;height:9px;border-radius:99px;margin-top:4px;flex-shrink:0;
+  background:var(--line);z-index:1;}
+.cd-tl-line{position:absolute;left:4px;top:13px;bottom:0;width:1.5px;background:var(--line);}
+.cd-tl.future .cd-tl-title{color:var(--ink-3);}
+.cd-tl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.cd-tl-title{font-size:12.5px;font-weight:700;}
+.cd-tl-current{font-size:9px;font-weight:800;padding:2px 7px;border-radius:99px;
+  background:var(--primary-bg,#EFF6FF);color:var(--primary);}
+.cd-tl-sub{font-size:11px;color:var(--ink-3);margin-top:2px;}
+.cd-tl-note{font-size:11.5px;color:var(--ink-2);margin-top:3px;font-style:italic;}

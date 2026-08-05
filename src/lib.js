@@ -49,7 +49,14 @@ async function req(path, opts = {}) {
     throw new Error("Unauthorized");
   }
 
-  if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status})`);
+  if (!res.ok) {
+    // .status lets callers tell a real conflict (409 — someone else already
+    // changed this data, safe to auto-refresh) apart from a validation error
+    // (400 — the user needs to fix the form) without parsing message text.
+    const err = new Error(data.error || `Request failed (HTTP ${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
 
 
   return data;
@@ -366,6 +373,31 @@ export const api = {
   consultantMyWards: () => req("/consultant/my-wards"),
   consultantBeds: (wardId) => req(`/consultant/beds/${wardId}`),
   consultantMyPatients: () => req("/consultant/my-patients"),
+  // ── PWO — patient complaint management ──────────────────────────────────────
+  // REST is for the initial load, pagination and history only. Every subsequent
+  // change arrives over the socket as a targeted payload the page patches in
+  // place — see PWOApp.jsx. Nothing here should be called from a socket handler.
+  pwoMeta: () => req("/pwo/meta"),
+  pwoDashboard: () => req("/pwo/dashboard"),
+  pwoCharts: (days = 30) => req(`/pwo/charts?days=${days}`),
+  pwoComplaints: (params = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null || v === "") continue;
+      qs.set(k, String(v));
+    }
+    const s = qs.toString();
+    return req(`/pwo/complaints${s ? "?" + s : ""}`);
+  },
+  pwoComplaint: (id) => req(`/pwo/complaints/${id}`),
+  pwoAccept: (id) => req(`/pwo/complaints/${id}/accept`, { method: "POST" }),
+  pwoSetStatus: (id, status, note) =>
+    req(`/pwo/complaints/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, note: note || null }) }),
+  pwoSetPriority: (id, priority) =>
+    req(`/pwo/complaints/${id}/priority`, { method: "PATCH", body: JSON.stringify({ priority }) }),
+  pwoAddNote: (id, note, visibleToPatient = false) =>
+    req(`/pwo/complaints/${id}/notes`, { method: "POST", body: JSON.stringify({ note, visibleToPatient }) }),
+  pwoPerOfficer: () => req("/pwo/reports/per-pwo"),
   consultantMyDischarges: (params = {}) => {
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) { if (v) qs.set(k, v); }

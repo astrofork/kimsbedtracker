@@ -1,4 +1,5 @@
 import { api } from "./lib.js";
+import { registerServiceWorker } from "./swRegistration.js";
 
 function urlB64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -12,7 +13,10 @@ export async function enablePush(vapidPublic) {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
   if (!vapidPublic) return false;
   try {
-    const reg = await navigator.serviceWorker.register("/sw.js");
+    // Shared with main.jsx's registration — same worker, correct URL in both
+    // dev and prod, and no second register() call for the same scope.
+    const reg = await registerServiceWorker();
+    if (!reg) return false;
     const perm = await Notification.requestPermission();
     if (perm !== "granted") return false;
     let sub = await reg.pushManager.getSubscription();

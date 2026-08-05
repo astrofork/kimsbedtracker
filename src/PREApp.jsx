@@ -799,7 +799,7 @@ function ReservationPopup({ bed, destinations, onClose, onSave }) {
 // Bed Transfer, for an already-Occupied bed — PRE only. Now a top-level Actions
 // row item instead of a step nested inside the Discharge flow, so it's available
 // any time a bed is Occupied, not only once a discharge has been initiated.
-function TransferPopup({ bed, onClose, onSaved }) {
+function TransferPopup({ bed, onClose, onSaved, onConflict }) {
   useModal(onClose);
   return (
     <div className="overlay" onClick={onClose}>
@@ -808,7 +808,7 @@ function TransferPopup({ bed, onClose, onSaved }) {
         <div style={{ padding: "18px 20px" }}>
           <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 4 }}>Bed Transfer</div>
           <div className="dim" style={{ fontSize: 12, marginBottom: 4 }}>Move this patient to a different bed.</div>
-          <TransferSection bed={bed} onClose={onClose} onSaved={onSaved} />
+          <TransferSection bed={bed} onClose={onClose} onSaved={onSaved} onConflict={onConflict} />
         </div>
       </div>
     </div>
@@ -818,7 +818,7 @@ function TransferPopup({ bed, onClose, onSaved }) {
 // Readmit — moves a patient out of the Discharge Lounge back onto a real bed.
 // Reuses TransferSection's ward/bed/reason UI, pointed at the readmit endpoint
 // instead of the ordinary transfer one, so it's logged distinctly (is_readmit).
-function ReadmitPopup({ bed, onClose, onSaved }) {
+function ReadmitPopup({ bed, onClose, onSaved, onConflict }) {
   useModal(onClose);
   const admissionId = bed.admission_id ?? bed.discharge_tracking?.admission_id;
   return (
@@ -832,6 +832,7 @@ function ReadmitPopup({ bed, onClose, onSaved }) {
             bed={bed}
             onClose={onClose}
             onSaved={onSaved}
+            onConflict={onConflict}
             submitLabel="Confirm Readmit"
             submit={(toWardId, toBedId, reason) => api.readmitFromLounge(admissionId, toWardId, toBedId, reason)}
           />
@@ -850,7 +851,7 @@ function planPopupTodayStr(offsetDays = 0) {
 // skips the Planned state entirely (plans for today, then immediately starts it,
 // as one action) — PRE only, matching who's allowed to start a discharge at all.
 // Schedule keeps the familiar Today/Tomorrow/Custom + time picker.
-function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
+function DischargePlanPopup({ bed, canInitiate, onClose, onDone, onConflict }) {
   useModal(onClose);
   const [mode, setMode] = useState(null); // null | "schedule"
   const [option, setOption] = useState("tomorrow"); // tomorrow | custom
@@ -861,13 +862,22 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
 
   const plannedDate = option === "tomorrow" ? planPopupTodayStr(1) : customDate;
 
+  // 409 = someone else already started a discharge (or moved this patient) on
+  // this same admission underneath us — same "stale, don't leave a dead form
+  // up" case as TransferSection.doSubmit. Reflect the real state automatically
+  // instead of showing an inline error the user has to notice and act on.
+  function handleError(e) {
+    if (e.status === 409 && onConflict) { onConflict(toastErr(e)); return; }
+    setError(toastErr(e));
+  }
+
   async function initiateNow() {
     setSaving(true); setError("");
     try {
       const r = await api.dischargePlan(bed.id, planPopupTodayStr(), null);
       await api.dischargeInitiate(r.tracking.admission_id);
       onDone();
-    } catch (e) { setError(toastErr(e)); } finally { setSaving(false); }
+    } catch (e) { handleError(e); } finally { setSaving(false); }
   }
 
   async function schedule() {
@@ -875,7 +885,7 @@ function DischargePlanPopup({ bed, canInitiate, onClose, onDone }) {
     try {
       await api.dischargePlan(bed.id, plannedDate, time || null);
       onDone();
-    } catch (e) { setError(toastErr(e)); } finally { setSaving(false); }
+    } catch (e) { handleError(e); } finally { setSaving(false); }
   }
 
   return (
@@ -1723,12 +1733,26 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             // no intermediate ward-list page) needed first.
             if (onTransferred) onTransferred(r, bed);
             else { onChanged?.(); onClose(); }
+          }}
+          onConflict={(msg) => {
+            // Someone else already changed this patient's bed/discharge state
+            // (raced onto the same admission, took the destination bed, etc.) —
+            // don't leave the stale form open waiting for a manual refresh:
+            // close it, tell the user what happened, and pull the real state.
+            setTransferOpen(false);
+            onToast?.(msg);
+            onChanged?.();
           }} />,
         document.body
       )}
       {dischargePlanOpen && createPortal(
         <DischargePlanPopup bed={bed} canInitiate={cfg.role === "PRE" || cfg.role === "CONSULTANT"} onClose={() => setDischargePlanOpen(false)}
-          onDone={() => { setDischargePlanOpen(false); onChanged?.(); setDischargeOpen(true); }} />,
+          onDone={() => { setDischargePlanOpen(false); onChanged?.(); setDischargeOpen(true); }}
+          onConflict={(msg) => {
+            setDischargePlanOpen(false);
+            onToast?.(msg);
+            onChanged?.();
+          }} />,
         document.body
       )}
       {readmitOpen && createPortal(
@@ -1737,6 +1761,11 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             setReadmitOpen(false);
             if (onTransferred) onTransferred(r, bed);
             else { onChanged?.(); onClose(); }
+          }}
+          onConflict={(msg) => {
+            setReadmitOpen(false);
+            onToast?.(msg);
+            onChanged?.();
           }} />,
         document.body
       )}

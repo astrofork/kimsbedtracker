@@ -4,7 +4,7 @@ import { Ic, icons, ThemeToggle } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { LiveBedDashboard } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
-import { BedGridCard, BedDetailSheet } from "./PREApp.jsx";
+import { BedGridCard, BedDetailSheet, BackBtn } from "./PREApp.jsx";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const initialsOf = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
@@ -20,6 +20,28 @@ const CONSULTANT_CFG = {
   // updateAdmission intentionally absent → no Edit Patient Info button
   // reviewWard intentionally absent → no Review button
 };
+
+// IST day string, matching how discharge_tracking.planned_date is stored
+// server-side (see planDischarge in dischargeService.ts) — needed to compare
+// "is this patient's planned discharge today" correctly regardless of the
+// browser's own timezone.
+function todayIST() {
+  return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+const WARD_AVATAR_COLORS = ["#0d9488", "#2563eb", "#7c3aed", "#d97706", "#dc2626", "#0891b2"];
+function wardAvatarColor(key) {
+  const s = String(key);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return WARD_AVATAR_COLORS[h % WARD_AVATAR_COLORS.length];
+}
+function wardInitials(name) {
+  const words = (name || "?").trim().split(/\s+/);
+  return words.length > 1
+    ? (words[0][0] + words[1][0]).toUpperCase()
+    : (name || "?").slice(0, 2).toUpperCase();
+}
 
 // ── My Patients page — flat bed grid with ward label on each card ────────────
 // Real-time: this page stays mounted for the whole ConsultantApp session (see
@@ -39,8 +61,21 @@ function MyPatientsPage() {
   const [payerTypes, setPayerTypes] = useState([]);
   const [destinations, setDestinations] = useState([]);
   const [departments, setDepartments] = useState([]);
+  // Which ward's patient list is currently open — same "grid of cards, click
+  // one to drill in" flow as PRE Entry's ward-card → WardPage, just landing on
+  // this ward's own patient grid instead of a full bed-management page.
+  const [openWard, setOpenWard] = useState(null); // { key, wardName } | null
+  const [viewMode, setViewMode] = useState("table"); // "table" | "card"
+  const [sortBy, setSortBy] = useState("ward-asc"); // "ward-asc" | "count-desc"
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2000); }, []);
+
+  // Must sit above any early return (selectedBed/openWard below) — hooks can't
+  // be called conditionally, so this can't live further down with the values
+  // it actually depends on.
+  useEffect(() => { setPage(1); }, [search, sortBy, rowsPerPage]);
 
   const load = useCallback(async () => {
     setError("");
@@ -122,22 +157,92 @@ function MyPatientsPage() {
       })
     : null;
 
+  // Ward-wise grouping — same idea as PRE Entry's ward-card grid, keyed by
+  // this consultant's own patients instead of ward-wide bed stats. ward_id is
+  // preferred over ward_name for the key (two wards could share a display
+  // name); alphabetical by name matches every other grouped view in the app.
+  const wardGroups = filtered ? (() => {
+    const map = new Map();
+    for (const p of filtered) {
+      const key = p.ward_id ?? p.ward_name ?? "—";
+      if (!map.has(key)) map.set(key, { key, wardName: p.ward_name || "—", patients: [] });
+      map.get(key).patients.push(p);
+    }
+    return [...map.values()].sort((a, b) => a.wardName.localeCompare(b.wardName));
+  })() : [];
+
+  // Top stat cards — computed from the full unfiltered patient list, not
+  // `filtered`, so typing in the search box doesn't change these summary
+  // numbers out from under the user.
+  const totalPatientsCount = patients ? patients.length : 0;
+  const dischargeLoungeCount = patients ? patients.filter((p) => p.ward_name === "Discharge Lounge").length : 0;
+  const todayStr = todayIST();
+  const dischargeTodayCount = patients ? patients.filter((p) => {
+    const dt = p.discharge_tracking;
+    return dt && dt.planned_date === todayStr && dt.status !== "COMPLETED" && dt.status !== "CANCELLED";
+  }).length : 0;
+
+  const sortedWardGroups = [...wardGroups].sort((a, b) =>
+    sortBy === "count-desc" ? b.patients.length - a.patients.length : a.wardName.localeCompare(b.wardName)
+  );
+  const totalPages = Math.max(1, Math.ceil(sortedWardGroups.length / rowsPerPage));
+  const pageClamped = Math.min(page, totalPages);
+  const pageStart = (pageClamped - 1) * rowsPerPage;
+  const pagedWardGroups = sortedWardGroups.slice(pageStart, pageStart + rowsPerPage);
+
+  // Drilled into one ward — full-page swap, same pattern as PRE's WardPage.
+  if (openWard) {
+    const group = wardGroups.find((g) => g.key === openWard.key);
+    const groupPatients = group ? group.patients : [];
+    return (
+      <div className="slide-up">
+        <BackBtn label="Back to wards" onClick={() => setOpenWard(null)} style={{ marginBottom: 14 }} />
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-.01em" }}>{openWard.wardName}</div>
+          <div className="dim" style={{ fontSize: 12 }}>{groupPatients.length} patient{groupPatients.length !== 1 ? "s" : ""}</div>
+        </div>
+        <div className="pbed-grid">
+          {groupPatients.map((p) => (
+            <BedGridCard
+              key={p.bed_id}
+              bed={{
+                id: p.bed_id,
+                bed_name: p.bed_name,
+                physical_status: p.physical_status,
+                reservation_status: p.reservation_status,
+                operational_status: p.operational_status,
+                destination: p.destination,
+                reservation_note: p.reservation_note,
+                updated_at: p.updated_at,
+                ip_last6: p.ip_last6,
+                consultant_name: p.consultant_name,
+                department_name: p.department_name,
+                payer_type: p.payer_type,
+                admission_type: p.admission_type,
+                discharge_tracking: p.discharge_tracking,
+              }}
+              hideDoctorDept
+              onClick={() => openBed(p)}
+            />
+          ))}
+        </div>
+        {loadingBed && (
+          <div className="overlay">
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+              <span className="spin"><Ic d={icons.refresh} s={28} /></span>
+            </div>
+          </div>
+        )}
+        {toast && <div className="toast show">{toast}</div>}
+      </div>
+    );
+  }
+
   return (
     <div className="slide-up">
-      <div className="row between" style={{ marginBottom: 14, gap: 10 }}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-.01em" }}>My Patients</div>
-          <div className="dim" style={{ fontSize: 12 }}>{patients ? `${patients.length} patient${patients.length !== 1 ? "s" : ""}` : "Loading…"}</div>
-        </div>
-      </div>
-
-      {patients && patients.length > 0 && (
-        <div style={{ position: "relative", maxWidth: 360, marginBottom: 12 }}>
-          <Ic d={icons.search} s={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", pointerEvents: "none" }} />
-          <input className="field" placeholder="Search bed or IP…" value={search} onChange={(e) => setSearch(e.target.value)}
-            style={{ paddingLeft: 32, fontSize: 13, height: 36, borderRadius: 10, width: "100%" }} />
-        </div>
-      )}
+      {/* No "My Patients" heading here — the AppShell topbar title already
+          says it (see `title` in ConsultantApp below), so repeating it in the
+          body was pure duplication. */}
 
       {error && (
         <div className="card empty" style={{ padding: "24px 20px" }}>
@@ -163,33 +268,201 @@ function MyPatientsPage() {
         </div>
       )}
 
-      {!error && filtered && filtered.length > 0 && (
-        <div className="pbed-grid">
-          {filtered.map((p) => (
-            <BedGridCard
-              key={p.bed_id}
-              bed={{
-                id: p.bed_id,
-                bed_name: p.bed_name,
-                physical_status: p.physical_status,
-                reservation_status: p.reservation_status,
-                operational_status: p.operational_status,
-                destination: p.destination,
-                reservation_note: p.reservation_note,
-                updated_at: p.updated_at,
-                ip_last6: p.ip_last6,
-                consultant_name: p.consultant_name,
-                department_name: p.department_name,
-                payer_type: p.payer_type,
-                admission_type: p.admission_type,
-                discharge_tracking: p.discharge_tracking,
-              }}
-              wardLabel={p.ward_name}
-              hideDoctorDept
-              onClick={() => openBed(p)}
-            />
-          ))}
-        </div>
+      {!error && patients !== null && patients.length > 0 && (
+        <>
+          {/* Top stat cards — real counts only. No "vs yesterday" trend badges:
+              there's no history of your own patient counts to compare against,
+              and fabricating a percentage would be actively misleading here.
+              Always 3-across (not card-grid's responsive collapse to 1 column)
+              — small compact tiles, not full-width cards, even on a phone. */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
+            <div className="card" style={{ padding: "10px 8px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 4, minWidth: 0 }}>
+              <div style={{ width: 26, height: 26, borderRadius: 8, background: "var(--st-v-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Ic d={icons.users} s={13} style={{ color: "var(--st-v)" }} />
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>{totalPatientsCount}</div>
+              <div className="dim" style={{ fontSize: 9.5, lineHeight: 1.2 }}>Total Patients</div>
+            </div>
+            <div className="card" style={{ padding: "10px 8px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 4, minWidth: 0 }}>
+              <div style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,92,246,.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Ic d={icons.exchange} s={13} style={{ color: "#8b5cf6" }} />
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>{dischargeLoungeCount}</div>
+              <div className="dim" style={{ fontSize: 9.5, lineHeight: 1.2 }}>Discharge Lounge</div>
+            </div>
+            <div className="card" style={{ padding: "10px 8px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 4, minWidth: 0 }}>
+              <div style={{ width: 26, height: 26, borderRadius: 8, background: "var(--st-o-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Ic d={icons.clock} s={13} style={{ color: "var(--st-o)" }} />
+              </div>
+              <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>{dischargeTodayCount}</div>
+              <div className="dim" style={{ fontSize: 9.5, lineHeight: 1.2 }}>Discharge Today</div>
+            </div>
+          </div>
+
+          {/* Search (own row, full width) + sort/view-toggle (wrap together as
+              one group below it) — keeps every control's baseline aligned
+              instead of each wrapping independently at a different width. */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ position: "relative", marginBottom: 8 }}>
+              <Ic d={icons.search} s={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", pointerEvents: "none" }} />
+              <input className="field" placeholder="Search by ward name, bed no. or IP number…" value={search} onChange={(e) => setSearch(e.target.value)}
+                style={{ paddingLeft: 32, fontSize: 13, height: 36, borderRadius: 10, width: "100%" }} />
+            </div>
+            {/* Shorter labels + tighter padding than a first pass would use —
+                "Sort: Ward Name (A-Z)" + "Table View"/"Card View" don't fit
+                one row on a phone; "Ward Name (A-Z)" + "Table"/"Card" do. */}
+            <div className="row" style={{ gap: 6 }}>
+              <select className="field" aria-label="Sort wards" value={sortBy} onChange={(e) => setSortBy(e.target.value)}
+                style={{ width: "auto", minWidth: 0, flex: "1 1 auto", height: 32, fontSize: 11.5, fontWeight: 600, borderRadius: 10, paddingTop: 0, paddingBottom: 0, paddingLeft: 8, paddingRight: 8 }}>
+                <option value="ward-asc">Ward Name (A-Z)</option>
+                <option value="count-desc">Most Patients</option>
+              </select>
+              <button className="btn btn-ghost" onClick={() => setViewMode("table")}
+                style={{ height: 32, fontSize: 11.5, padding: "0 8px", flexShrink: 0, background: viewMode === "table" ? "var(--st-v-bg)" : undefined, color: viewMode === "table" ? "var(--st-v)" : undefined }}>
+                <Ic d={icons.list} s={13} /> Table
+              </button>
+              <button className="btn btn-ghost" onClick={() => setViewMode("card")}
+                style={{ height: 32, fontSize: 11.5, padding: "0 8px", flexShrink: 0, background: viewMode === "card" ? "var(--st-v-bg)" : undefined, color: viewMode === "card" ? "var(--st-v)" : undefined }}>
+                <Ic d={icons.grid} s={13} /> Card
+              </button>
+            </div>
+          </div>
+
+          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="row between" style={{ padding: "13px 16px", borderBottom: "1px solid var(--line)" }}>
+              <div className="row" style={{ gap: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>Wards Overview</span>
+                <span className="chip">{sortedWardGroups.length}</span>
+              </div>
+            </div>
+
+            {sortedWardGroups.length === 0 ? (
+              <div className="dim" style={{ padding: "22px 16px", textAlign: "center", fontSize: 13 }}>
+                No wards match your search.
+              </div>
+            ) : viewMode === "table" ? (
+              <>
+                {/* ≥680px: real table. No Action column — the whole row is
+                    the click target now, same as Card View's cards already are. */}
+                <div className="tbl-wrap mp-tbl-desktop" style={{ border: "none", borderRadius: 0 }}>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Ward</th>
+                        <th style={{ textAlign: "center" }}>Total Patients</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedWardGroups.map((g) => (
+                        <tr key={g.key} style={{ cursor: "pointer" }}
+                          onClick={() => setOpenWard({ key: g.key, wardName: g.wardName })}>
+                          <td>
+                            <div className="row" style={{ gap: 10 }}>
+                              <div style={{
+                                width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+                                background: wardAvatarColor(g.key), color: "#fff",
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                fontWeight: 800, fontSize: 12,
+                              }}>
+                                {wardInitials(g.wardName)}
+                              </div>
+                              <span style={{ fontWeight: 700 }}>{g.wardName}</span>
+                            </div>
+                          </td>
+                          <td style={{ textAlign: "center", fontWeight: 700 }}>{g.patients.length}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* <680px: same data, stacked full-width row-cards instead of a
+                    cramped table — no horizontal scrolling/clipped columns. */}
+                <div className="mp-tbl-mobile">
+                  {pagedWardGroups.map((g) => (
+                    <div key={g.key} className="mp-row-card"
+                      onClick={() => setOpenWard({ key: g.key, wardName: g.wardName })}>
+                      <div className="row" style={{ gap: 10, minWidth: 0 }}>
+                        <div style={{
+                          width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
+                          background: wardAvatarColor(g.key), color: "#fff",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontWeight: 800, fontSize: 12,
+                        }}>
+                          {wardInitials(g.wardName)}
+                        </div>
+                        <span style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.wardName}</span>
+                      </div>
+                      <div className="mp-row-card-stats">
+                        <div style={{ textAlign: "center" }}>
+                          <div style={{ fontWeight: 800, fontSize: 15 }}>{g.patients.length}</div>
+                          <div className="dim" style={{ fontSize: 10 }}>Patients</div>
+                        </div>
+                        <Ic d={icons.chevron} s={15} style={{ color: "var(--ink-3)" }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="card-grid" style={{ padding: 16 }}>
+                {/* Same PRE Entry ward-card style, minus the "Complete" badge
+                    (PRE's own round-status, not applicable here), the
+                    Vacant/Occupied stat row (ward-wide bed occupancy, not
+                    specific to this consultant's patients), and Manage Beds /
+                    Discharges buttons (Consultant is read-only). */}
+                {pagedWardGroups.map((g) => (
+                  <div className="ward-card slide-up" key={g.key}
+                    style={{ padding: 16, cursor: "pointer" }}
+                    onClick={() => setOpenWard({ key: g.key, wardName: g.wardName })}>
+                    <div className="row between">
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{g.wardName}</div>
+                        <div className="dim" style={{ fontSize: 12 }}>{g.patients.length} patient{g.patients.length !== 1 ? "s" : ""}</div>
+                      </div>
+                      <Ic d={icons.chevron} s={16} style={{ color: "var(--ink-3)" }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {sortedWardGroups.length > 0 && (
+              <div className="row between" style={{ padding: "12px 16px", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
+                <span className="dim" style={{ fontSize: 12 }}>
+                  Showing {pageStart + 1} to {Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
+                </span>
+                <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <button className="btn btn-ghost" disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)}
+                    style={{ padding: "6px 10px" }} aria-label="Previous page">
+                    <Ic d={icons.chevron} s={13} style={{ transform: "rotate(180deg)" }} />
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                    <button key={n} className="btn btn-ghost" onClick={() => setPage(n)}
+                      style={{
+                        padding: "6px 11px", minWidth: 32,
+                        background: n === pageClamped ? "var(--st-v)" : undefined,
+                        color: n === pageClamped ? "#fff" : undefined,
+                      }}>
+                      {n}
+                    </button>
+                  ))}
+                  <button className="btn btn-ghost" disabled={pageClamped >= totalPages} onClick={() => setPage(pageClamped + 1)}
+                    style={{ padding: "6px 10px" }} aria-label="Next page">
+                    <Ic d={icons.chevron} s={13} />
+                  </button>
+                  <select className="field" aria-label="Rows per page" value={rowsPerPage}
+                    onChange={(e) => setRowsPerPage(Number(e.target.value))}
+                    style={{ width: "auto", minWidth: 88, height: 32, fontSize: 12, marginLeft: 8, paddingTop: 0, paddingBottom: 0, paddingLeft: 10, paddingRight: 10 }}>
+                    <option value={5}>5 / page</option>
+                    <option value={10}>10 / page</option>
+                    <option value={25}>25 / page</option>
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {loadingBed && (

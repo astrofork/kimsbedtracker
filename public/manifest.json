@@ -2,6 +2,7 @@
   "name": "BedFlow — Smart Bed Management",
   "short_name": "BedFlow",
   "description": "Live hospital bed tracking for KIMS Hospitals Seethammadhara",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
