@@ -160,7 +160,12 @@ input,select,textarea{font-size:16px;}
 .slide-up{animation:slideUp .35s cubic-bezier(.2,.7,.3,1) both;}
 @keyframes slideUpCentered{from{opacity:0;transform:translate(-50%,12px);}to{opacity:1;transform:translate(-50%,0);}}
 @keyframes spin{to{transform:rotate(360deg);}}
-.spin{animation:spin .9s linear infinite;}
+/* inline-block is load-bearing, not cosmetic: every use of this class is on a
+   bare <span>, and transforms are ignored on non-replaced inline elements — so
+   the animation ran but rotated nothing and the spinner sat frozen. Verified:
+   a rotate(45deg) on an inline span leaves its box 40x19, while inline-block
+   grows to 59x59. */
+.spin{display:inline-block;animation:spin .9s linear infinite;}
 @keyframes themePop{0%{opacity:0;transform:scale(.7);}60%{transform:scale(1.12);}100%{opacity:1;transform:scale(1);}}
 .theme-pop{animation:themePop .25s cubic-bezier(.2,.7,.3,1) both;}
 
@@ -319,6 +324,17 @@ body.hero-gone .appbar{
 }
 .profile-menu-item:hover{background:var(--panel-2);}
 .profile-menu-note{font-size:11px;color:var(--ink-3);padding:6px 10px 2px;line-height:1.4;}
+/* Logout — the menu's only action now, so it's a full-width target rather than
+   another 9px list row, and tinted so it reads as the one destructive item. */
+.profile-menu-logout{
+  display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
+  padding:14px 14px;border:none;border-top:1px solid var(--line);
+  background:none;color:#dc2626;font-family:inherit;font-size:13.5px;font-weight:800;
+  cursor:pointer;transition:background .14s;
+}
+.profile-menu-logout:hover{background:rgba(220,38,38,.09);}
+.profile-menu-logout:active{background:rgba(220,38,38,.15);}
+.profile-menu-logout:focus-visible{outline:2px solid var(--primary);outline-offset:-2px;}
 
 /* Content area */
 .content{flex:1;width:100%;max-width:1240px;margin:0 auto;padding:20px;}
@@ -588,6 +604,19 @@ body.hero-gone .appbar{
 .tbl-pin1 thead th:first-child{z-index:3;background:var(--panel-2);}
 .tbl-pin1 tbody td:first-child{background:var(--panel);}
 .tbl-pin1 tbody tr:hover td:first-child{background:var(--panel-2);}
+
+/* Consultant-only compact ward tables (.wst-compact is applied when `compact`
+   in WardStatusTable — no other role's ward table gets the class). The WARD
+   column is the pinned one above, so its width is subtracted from the screen
+   permanently: at a flat 280px a 360px phone had only ~78px left to swipe the
+   remaining 560px of columns through. Both the Census and Non-Census tables
+   read this same variable, so they keep the identical column grid that the
+   fixed widths exist to guarantee.
+   130px is the practical floor — min-width:128px above clamps anything lower,
+   and the two would fight. */
+.wst-compact{--wst-ward:280px;}
+@media (max-width:820px){ .wst-compact{--wst-ward:180px;} }
+@media (max-width:560px){ .wst-compact{--wst-ward:130px;} }
 
 /* Total row — tinted with the table's accent color (set inline per table) so
    it's instantly distinguishable from ward rows at a glance. */
@@ -1173,8 +1202,11 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
    to the right edge of the card (margin-left:auto) instead of hugging the label. */
 .cv-hero-spark-rich{flex:0 0 auto;max-width:260px;margin-left:auto;}
 
-/* Sub-groups grid — one row of 6 on desktop */
-.cv-groups{display:grid;grid-template-columns:repeat(6,1fr);gap:7px;}
+/* Sub-groups grid — one full-width row, one column per group actually rendered
+   (--cv-group-count is set inline from occGroups.length: 6 for admin, 5 for
+   other roles). Fixing this at 6 left non-admin boards with a dead column on
+   the right and squeezed every label into an ellipsis. */
+.cv-groups{display:grid;grid-template-columns:repeat(var(--cv-group-count,6),1fr);gap:7px;}
 
 /* Individual sub-group card */
 .cv-group{
@@ -1255,8 +1287,73 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .cv-payer-val{font-size:17px;font-weight:900;letter-spacing:-.03em;color:var(--ink);line-height:1;}
 .cv-payer-card .kc-spark{margin:auto -10px 0;width:calc(100% + 20px);height:20px;}
 
+/* ── Occupancy strip scroll affordance ───────────────────────────────────────
+   Two cues, because they answer different questions. The edge fade says "there
+   is more this way" to someone who hasn't touched it yet; the thumb says "you
+   are here, and you can drag me". Both are driven by SwipeThumb (COOApp) off
+   real scroll measurements, so they're inert whenever the board is a grid
+   rather than a strip — no duplicate copy of the 880px container threshold.
+   The native scrollbar stays hidden: mobile overlay scrollbars aren't
+   styleable and hide themselves until you're already scrolling. */
+.cv-swipe-wrap{position:relative;}
+.cv-swipe-wrap::before,
+.cv-swipe-wrap::after{
+  content:"";position:absolute;top:0;bottom:16px;width:26px;z-index:2;
+  pointer-events:none;opacity:0;transition:opacity .18s ease;
+}
+.cv-swipe-wrap::before{left:0;background:linear-gradient(to right,var(--panel),transparent);}
+.cv-swipe-wrap::after{right:0;background:linear-gradient(to left,var(--panel),transparent);}
+.cv-swipe-wrap.cv-fade-l::before{opacity:1;}
+.cv-swipe-wrap.cv-fade-r::after{opacity:1;}
+
+/* Hairline, centred and short rather than a full-width slab — at 4px tall with
+   a 12px thumb bulging past it, this read as a chunky control instead of an
+   indicator. */
+.cv-swipe-track{
+  position:relative;height:3px;width:min(132px,42%);
+  margin:8px auto 0;border-radius:99px;
+  background:rgba(127,127,127,.16);
+}
+.cv-swipe-thumb{
+  position:absolute;left:0;top:0;height:3px;min-width:24px;
+  border-radius:99px;background:var(--ink-2);opacity:.7;
+  cursor:grab;touch-action:none;  /* else the browser pans the page mid-drag */
+  transition:opacity .15s ease,background .15s ease;
+}
+/* Thin bar, fat target: the visual stays a 3px hairline while the grabbable
+   area extends well past it, so it stays draggable with a fingertip. */
+.cv-swipe-thumb::before{content:"";position:absolute;inset:-12px -8px;}
+.cv-swipe-thumb:hover{opacity:.9;}
+.cv-swipe-thumb:active{cursor:grabbing;opacity:1;background:var(--primary);}
+
 /* Connector line between panels */
 .cv-join{width:2px;height:14px;background:var(--line);margin:0 auto;}
+
+/* ── Tablet: swipe strip once the columns get too narrow to read ─────────────
+   Queries the panel's own width rather than the viewport, because each role app
+   wraps this board in different chrome (sidebar, unit toolbar, consultant's
+   compact mode) — so viewport width is a poor proxy for the room the cards
+   actually get. Measured: below ~870px of panel width the 5 columns fall under
+   ~168px and "Non Census [Res]" / "Non Census Occupancy" start ellipsizing;
+   880px leaves a little headroom for longer payer names.
+   The min(190px,…) card width is shared with the phone rule below — at tablet
+   widths it pins to a flat 190px (~4.5 cards in view, comfortably above the
+   168px truncation floor), and only the % term takes over on phones.
+   Non-admin only: .cv-groups-swipe isn't applied to admin's 6-group board. */
+.cv-panel-occ{container-type:inline-size;}
+@container (max-width:880px){
+  .cv-groups-swipe{
+    display:flex;overflow-x:auto;
+    padding-bottom:6px;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  }
+  .cv-groups-swipe::-webkit-scrollbar{display:none;}
+  .cv-groups-swipe .cv-group{
+    flex:0 0 min(190px, calc(56% - 4px));max-width:min(190px, calc(56% - 4px));
+    scroll-snap-align:start;
+  }
+}
 
 /* Canvas responsive */
 @media (max-width:820px){
@@ -1270,6 +1367,24 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   /* Fixed 160px tiles: ~4 visible at 700px, ~2 visible at 350px, peek of next card always shows */
   .cv-snap-tile{flex:0 0 min(160px, calc(46% - 4px));max-width:min(160px, calc(46% - 4px));}
   .cv-groups{grid-template-columns:repeat(2,1fr);}
+  /* Non-admin boards only (see cv-groups-swipe in COOApp) — same swipe strip as
+     .cv-snap-grid above. Cards are wider than the 2-col grid they replace, so
+     long metric labels ("Non Census [Res]") stop ellipsizing; ~1.8 cards visible
+     means the next one always peeks in as a swipe affordance.
+     Deliberately duplicates the @container rule above: that one already covers
+     phones, but if a device is too old for container queries this viewport
+     fallback is what stops the board rendering as 5 columns ~55px wide. */
+  .cv-groups-swipe{
+    display:flex;overflow-x:auto;
+    padding-bottom:6px;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  }
+  .cv-groups-swipe::-webkit-scrollbar{display:none;}
+  .cv-groups-swipe .cv-group{
+    flex:0 0 min(190px, calc(56% - 4px));max-width:min(190px, calc(56% - 4px));
+    scroll-snap-align:start;
+  }
   .cv-txn-cards{grid-template-columns:repeat(auto-fill,minmax(110px,145px));gap:7px;justify-content:center;}
   .cv-payer-grid{grid-template-columns:repeat(2,1fr);gap:7px;}
   .cv-panel{padding:14px;}
@@ -2049,6 +2164,12 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 @media(max-width:1200px){.cq-stats{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:620px){.cq-stats{grid-template-columns:repeat(2,1fr);gap:8px;}}
 .cq-stat{padding:13px;display:flex;align-items:flex-start;gap:11px;min-width:0;}
+/* Cards that jump the queue to their own slice. Avg. Resolution has no filter
+   and stays inert, so the affordance only appears where it does something. */
+.cq-stat-click{cursor:pointer;transition:transform .15s,box-shadow .15s;}
+.cq-stat-click:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+.cq-stat-click:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.cq-stat-click[aria-pressed="true"]{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary) inset;}
 .cq-stat-ic{width:36px;height:36px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
 .cq-stat-label{font-size:11.5px;font-weight:700;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .cq-stat-val{font-size:22px;font-weight:800;line-height:1.15;margin-top:1px;}
@@ -2063,7 +2184,6 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   background:var(--panel);border:1px solid var(--line);border-radius:10px;
   font-size:12.5px;font-weight:600;color:var(--ink-2);cursor:pointer;white-space:nowrap;}
 .cq-tbtn:hover{background:var(--panel-2);}
-.cq-tbtn-static{cursor:default;}
 .cq-badge{display:inline-flex;align-items:center;justify-content:center;min-width:17px;height:17px;padding:0 5px;
   border-radius:99px;background:var(--primary);color:#fff;font-size:10px;font-weight:800;}
 .cq-reset{height:38px;padding:0 12px;background:none;border:none;flex-shrink:0;
@@ -2082,6 +2202,44 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .cq-chip.on select{color:var(--primary);}
 .cq-chip>button{display:flex;align-items:center;padding:3px;border:none;background:none;cursor:pointer;color:var(--primary);}
 .cq-sort{margin-left:auto;padding-left:9px;color:var(--ink-2);}
+
+/* Filter sheet — label + full-width control per filter. Two columns where
+   there's room, one on a phone so the native select/date pickers get the full
+   width they need to be tappable. */
+.cq-fs-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.cq-fs-field{display:flex;flex-direction:column;gap:5px;min-width:0;}
+.cq-fs-field>span{font-size:11px;font-weight:700;color:var(--ink-2);letter-spacing:.02em;}
+.cq-fs-field .field{padding:9px 11px;font-size:13px;box-shadow:none;}
+@media (max-width:480px){ .cq-fs-grid{grid-template-columns:1fr;gap:10px;} }
+
+/* ── Phone: chips become a 2-row horizontal swipe strip ──────────────────────
+   8 chips wrapped onto 3 rows and put the toolbar at 230px before a single
+   complaint was visible. Column flow gives 2 fixed rows that scroll sideways
+   (110px -> 75px). Scrollbar hidden the same way .cv-snap-grid and
+   .cv-groups-swipe do it, so all three strips in the app behave alike. */
+@media (max-width:620px){
+  .cq-chiprow{
+    display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,auto);
+    justify-content:start;
+    overflow-x:auto;overscroll-behavior-x:contain;
+    scroll-snap-type:x proximity;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;
+    padding-bottom:4px;
+  }
+  .cq-chiprow::-webkit-scrollbar{display:none;}
+  .cq-chip{scroll-snap-align:start;}
+  /* An applied filter must never be the one scrolled off-screen — its .on
+     highlight would be invisible. `order` participates in grid auto-placement,
+     so this pulls set chips to the head of the strip. Phone-only: on desktop
+     every chip is visible at once and reordering would just make them jump. */
+  .cq-chiprow .cq-chip.on{order:-1;}
+  /* margin-left:auto right-aligns Sort in the desktop flex row; in a grid cell
+     it only opens a gap. */
+  .cq-sort{margin-left:0;}
+  /* The clear "x" sits inside a horizontal scroller now — at 3px padding a tap
+     is easily swallowed as a scroll drag. */
+  .cq-chip>button{padding:8px 6px;}
+}
 
 .cq-row{cursor:pointer;}
 .cq-cmp{display:flex;gap:11px;align-items:flex-start;min-width:0;}
@@ -2185,6 +2343,12 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .cd-pinfo{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;}
 .cd-pinfo-label{font-size:10.5px;color:var(--ink-3);}
 .cd-pinfo-value{font-size:13px;font-weight:700;margin-top:2px;}
+/* Only rendered when the patient's current bed differs from the one frozen on
+   the complaint — otherwise "Currently In" just repeats the meta strip. */
+.cd-moved{
+  display:inline-block;margin-left:7px;padding:2px 8px;border-radius:99px;
+  background:#FFF6DA;color:#96700E;font-size:10px;font-weight:800;white-space:nowrap;
+}
 .cd-discharged{display:flex;align-items:center;gap:7px;margin-top:14px;padding:9px 11px;border-radius:9px;
   background:var(--panel-2);color:var(--ink-2);font-size:11.5px;font-weight:600;}
 
@@ -2203,9 +2367,21 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .cd-action{display:flex;align-items:center;gap:9px;width:100%;padding:11px 14px;border-radius:10px;
   border:1px solid var(--line);background:var(--panel);color:var(--ink);
   font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;text-align:left;}
-.cd-action:hover:not(:disabled){background:var(--panel-2);}
+/* Hover is scoped away from the filled variants: `:hover:not(:disabled)` has
+   higher specificity (0,3,0) than `.cd-action.primary` (0,2,0), so the plain
+   hover rule repainted the blue primary button panel-grey while its text
+   stayed white — white on light grey. */
+.cd-action:not(.primary):hover:not(:disabled){background:var(--panel-2);}
 .cd-action.primary{background:var(--primary);border-color:var(--primary);color:#fff;}
+.cd-action.primary:hover:not(:disabled){filter:brightness(1.08);}
+/* Destructive but not the current step — red label on the plain card. */
 .cd-action.danger:not(:disabled){color:var(--red);}
+.cd-action.danger:not(.primary):hover:not(:disabled){background:var(--red-bg);}
+/* Destructive AND the current step (Close Complaint on a RESOLVED complaint).
+   It carries both classes, and .danger's `color` landed on .primary's blue
+   background — measured red #DC2626 text on blue #2563EB, roughly 1.3:1
+   contrast. Filled red instead, so it reads as one deliberate state. */
+.cd-action.primary.danger:not(:disabled){background:var(--red);border-color:var(--red);color:#fff;}
 .cd-action:disabled{opacity:.45;cursor:not-allowed;}
 .cd-prio{display:flex;align-items:center;justify-content:space-between;gap:10px;
   margin-top:14px;padding-top:14px;border-top:1px solid var(--line);}

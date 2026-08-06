@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import { api, toastErr, createSocket } from "./lib.js";
 import { Ic, icons, ThemeToggle } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
@@ -8,6 +9,34 @@ import { BedGridCard, BedDetailSheet, BackBtn } from "./PREApp.jsx";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const initialsOf = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+
+// Spinner shown while a tapped bed's details are fetched.
+//
+// Portaled to <body> deliberately. Both call sites sit inside <div className=
+// "slide-up">, and .slide-up animates a transform with animation-fill-mode:both
+// — so a transform stays applied even at rest, which makes it the containing
+// block for position:fixed descendants. Rendered inline, .overlay's `inset:0`
+// therefore resolved against the page block (measured 1146x265) instead of the
+// viewport (1256x818): only the card grid dimmed, the spinner centred a third
+// of the way down, and the sidebar/topbar stayed unblurred *and clickable*
+// while the fetch was in flight. Portaling restores true full-screen coverage,
+// and also makes .overlay's `padding-left:var(--sb-w)` correct — that rule
+// (styles.css) exists to re-centre body-portaled overlays over the content
+// column, and was double-counting the sidebar while these were nested.
+//
+// The inner height:100% wrapper is load-bearing, not redundant: .overlay
+// switches to align-items:flex-end at <=767px for bottom sheets, so without a
+// full-height child the spinner would pin to the bottom edge on phones.
+function BedLoadingOverlay() {
+  return createPortal(
+    <div className="overlay">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+        <span className="spin"><Ic d={icons.refresh} s={28} /></span>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 // Consultant cfg — same WardPage as PRE/Nurse but readOnly=true locks all bed edits;
 // only the DischargeTab (role="CONSULTANT") remains interactive.
@@ -227,11 +256,7 @@ function MyPatientsPage() {
           ))}
         </div>
         {loadingBed && (
-          <div className="overlay">
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-              <span className="spin"><Ic d={icons.refresh} s={28} /></span>
-            </div>
-          </div>
+          <BedLoadingOverlay />
         )}
         {toast && <div className="toast show">{toast}</div>}
       </div>
@@ -466,49 +491,10 @@ function MyPatientsPage() {
       )}
 
       {loadingBed && (
-        <div className="overlay">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-            <span className="spin"><Ic d={icons.refresh} s={28} /></span>
-          </div>
-        </div>
+        <BedLoadingOverlay />
       )}
 
       {toast && <div className="toast show">{toast}</div>}
-    </div>
-  );
-}
-
-// ── Profile page ──────────────────────────────────────────────────────────────
-function ProfilePage({ user, onLogout }) {
-  return (
-    <div className="slide-up">
-      <div className="card" style={{ padding: 22, maxWidth: 440 }}>
-        <div className="row" style={{ gap: 14, marginBottom: 20 }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: 15, background: "var(--primary)", flexShrink: 0,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#fff", fontWeight: 800, fontSize: 20,
-          }}>
-            {initialsOf(user.name || user.username)}
-          </div>
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-.01em" }}>{user.name || "—"}</div>
-            <div className="dim" style={{ fontSize: 13, marginTop: 2 }}>@{user.username}</div>
-            <span className="tag v" style={{ marginTop: 6, display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <Ic d={icons.stethoscope} s={12} /> Consultant
-            </span>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-          <span className="dim" style={{ fontSize: 13 }}>Theme</span>
-          <ThemeToggle />
-        </div>
-
-        <button className="btn btn-ghost btn-block" style={{ marginTop: 14, color: "var(--red)" }} onClick={onLogout}>
-          <Ic d={icons.logout} s={15} /> Logout
-        </button>
-      </div>
     </div>
   );
 }
@@ -537,7 +523,6 @@ export default function ConsultantApp({ user, meta, onLogout }) {
     { key: "dashboard",   icon: icons.home,        label: "Dashboard" },
     { key: "mypatients",  icon: icons.bed,          label: "My Patients" },
     { key: "discharges",  icon: icons.clipboard,   label: "My Discharges" },
-    { key: "profile",     icon: icons.user,         label: "Profile" },
   ];
 
   const title = menu.find((m) => m.key === tab)?.label || "Consultant";
@@ -569,7 +554,6 @@ export default function ConsultantApp({ user, meta, onLogout }) {
           <MyPatientsPage showToast={showToast} />
         </div>
         {tab === "discharges" && <DischargesPage role="CONSULTANT" />}
-        {tab === "profile" && <ProfilePage user={user} onLogout={onLogout} />}
 
         {toast && <div className="toast">{toast}</div>}
       </AppShell>

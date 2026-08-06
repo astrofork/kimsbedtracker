@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
-import { Ic, icons, ThemeToggle, useConfirm } from "./ui.jsx";
-import { AppShell } from "./shell.jsx";
+import { Ic, icons, ThemeToggle, useConfirm, useModal } from "./ui.jsx";
+import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Patient Welfare Officer portal.
@@ -32,8 +33,19 @@ const PRIORITY_COLOR = { LOW: "#6b7280", MEDIUM: "#2563eb", HIGH: "#d97706", CRI
  *  server, which is the actual enforcer; this only decides what button to show. */
 const NEXT_STATUS = { ACCEPTED: "UNDER_REVIEW", UNDER_REVIEW: "RESOLVED", RESOLVED: "CLOSED" };
 
+/** Group filter, not a stored status — matches PENDING above and the server's
+ *  PENDING_STATUSES. The queue defaults to it because officers work the live
+ *  pile; closed and resolved complaints are history and were burying real work
+ *  at the top of the list. Cleared to "" (All) to see everything again. */
+const ACTIVE_ONLY = "ACTIVE";
+/** True when a row belongs in the list under the current status filter.
+ *  Needed because ACTIVE_ONLY covers three statuses — a plain `f.status !== s`
+ *  comparison would drop every row the moment its status changed. */
+const matchesStatus = (filterVal, status) =>
+  !filterVal || (filterVal === ACTIVE_ONLY ? PENDING.has(status) : filterVal === status);
+
 export const DEFAULT_FILTERS = {
-  status: "", categoryId: "", priorityId: "", wardId: "", floorId: "",
+  status: ACTIVE_ONLY, categoryId: "", priorityId: "", wardId: "", floorId: "",
   departmentId: "", ownerPwoId: "", search: "", from: "", to: "",
   sort: "newest", page: 1,
 };
@@ -101,6 +113,22 @@ function bumpSeries(series, key, delta = 1) {
   const next = series.slice();
   next[i] = { ...next[i], n: Math.max(0, next[i].n + delta) };
   return next;
+}
+
+// Phones hide the appbar's ThemeToggle (styles.css: `.preui .appbar > .btn.btn-ghost`
+// inside the phone media query), and the Profile page that used to carry one is
+// gone — so the control moves into the profile dropdown, the same way
+// ProfileThemeRow does it for Nurse/Doctor/PRE.
+function PwoThemeRow() {
+  const slot = useProfileMenuSlot();
+  if (!slot) return null;
+  return createPortal(
+    <div className="row between" style={{ padding: "10px 14px" }}>
+      <span style={{ fontSize: 13, fontWeight: 600 }}>Theme</span>
+      <ThemeToggle />
+    </div>,
+    slot
+  );
 }
 
 // ── Small presentational pieces ────────────────────────────────────────────
@@ -287,15 +315,29 @@ function ComplaintDetail({ id, meId, onBack, onPatched, showToast }) {
     { to: "CLOSED",       label: "Close Complaint",   icon: icons.ban,    enabled: isMine && c.status === "RESOLVED", danger: true },
   ];
 
+  // Strictly the complaint's frozen snapshot — where the patient was standing
+  // when they raised it. Department and Admitted used to sit here too, and both
+  // were re-printed verbatim by the Patient & Admission card below: admitted_at
+  // is immutable, so the snapshot copy and the live value can never disagree,
+  // and department almost never changes mid-stay. IP was the worst of the
+  // three — both cards rendered the very same `c.ipLast6`. Those three now
+  // live once each, in the card they belong to.
   const META = [
-    { label: "Patient (IP)", value: c.ipLast6,                    icon: icons.user },
-    { label: "Ward",         value: c.location.wardName,          icon: icons.building },
-    { label: "Bed",          value: c.location.bedName,           icon: icons.bed },
-    { label: "Floor",        value: c.location.floorName,         icon: icons.layers },
-    { label: "Room Type",    value: c.location.roomType,          icon: icons.grid },
-    { label: "Department",   value: c.location.departmentName,    icon: icons.clipboard },
-    { label: "Admitted",     value: c.admittedAt ? fmtDateTime(c.admittedAt) : null, icon: icons.clock },
+    { label: "Patient (IP)", value: c.ipLast6,            icon: icons.user },
+    { label: "Ward",         value: c.location.wardName,  icon: icons.building },
+    { label: "Bed",          value: c.location.bedName,   icon: icons.bed },
+    { label: "Floor",        value: c.location.floorName, icon: icons.layers },
+    { label: "Room Type",    value: c.location.roomType,  icon: icons.grid },
   ];
+
+  // The one overlap worth keeping: the snapshot ward/bed above vs where the
+  // patient is right now. Identical for most complaints (which is why it read
+  // as a third copy), so it's only worth calling out when they diverge.
+  const snapshotLoc = [c.location.wardName, c.location.bedName].filter(Boolean).join(" · ");
+  const liveLoc = [c.admission?.currentWard, c.admission?.currentBed && `Bed ${c.admission.currentBed}`]
+    .filter(Boolean).join(" · ");
+  const movedSince = c.admission?.status === "ACTIVE" && snapshotLoc && liveLoc
+    && snapshotLoc.replace(/Bed /g, "") !== liveLoc.replace(/Bed /g, "");
 
   return (
     <div className="slide-up">
@@ -419,19 +461,22 @@ function ComplaintDetail({ id, meId, onBack, onPatched, showToast }) {
             <div className="card cd-section">
               <div className="cd-section-head"><Ic d={icons.user} s={15} /> Patient &amp; Admission</div>
               <div className="cd-pinfo">
+                {/* IP Number is deliberately absent — it's already the first
+                    field of the meta strip above, and both read the same
+                    `c.ipLast6`. */}
                 {[
-                  ["IP Number", c.ipLast6],
                   ["Admission Type", c.admission.admissionType],
                   ["Consultant", c.admission.consultantName],
                   ["Department", c.admission.departmentName],
                   ["Admitted On", c.admission.admittedAt ? fmtDateTime(c.admission.admittedAt) : null],
-                  ["Currently In", c.admission.status === "ACTIVE"
-                    ? [c.admission.currentWard, c.admission.currentBed && `Bed ${c.admission.currentBed}`].filter(Boolean).join(" · ")
-                    : "Discharged"],
-                ].map(([k, v]) => (
+                  ["Currently In", c.admission.status === "ACTIVE" ? liveLoc : "Discharged", movedSince],
+                ].map(([k, v, flag]) => (
                   <div key={k}>
                     <div className="cd-pinfo-label">{k}</div>
-                    <div className="cd-pinfo-value">{v || "—"}</div>
+                    <div className="cd-pinfo-value">
+                      {v || "—"}
+                      {flag && <span className="cd-moved">moved since raised</span>}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -539,15 +584,89 @@ function pageWindow(page, pages) {
 const toEpoch = (d, endOfDay = false) =>
   d ? new Date(`${d}T${endOfDay ? "23:59:59.999" : "00:00:00"}+05:30`).getTime() : "";
 
+/* Every complaint filter in one place — what the toolbar's "Filters" button
+   opens. The chip strip stays for quick single changes; this is for seeing and
+   setting everything at once, and it's the only view that surfaces the date
+   range alongside the rest instead of behind its own toggle.
+
+   Changes apply live (onFilter fires per change and the list re-queries behind
+   the sheet), so the footer button only dismisses — hence "Done", not "Apply".
+
+   The caller renders this through a portal deliberately: ComplaintsQueue sits
+   inside <div className="slide-up">, whose animation keeps a transform applied
+   via fill-mode:both, and a transformed ancestor becomes the containing block
+   for position:fixed — so an inline .overlay would size itself to the page
+   block instead of the viewport (the bug fixed in ConsultantApp). */
+function FilterSheet({ chips, filters, onFilter, fromDate, toDate, applyDates, activeCount, onReset, onClose }) {
+  useModal(onClose);
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" role="dialog" aria-modal="true" aria-label="Filter complaints"
+        style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <div className="grab" />
+        <div style={{ padding: "16px 20px 20px" }}>
+          <div className="row between" style={{ marginBottom: 14 }}>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>
+              Filters{activeCount > 0 && <span className="cq-badge" style={{ marginLeft: 8 }}>{activeCount}</span>}
+            </div>
+            {activeCount > 0 && (
+              <button className="cq-reset" style={{ padding: 0, height: "auto" }} onClick={onReset}>Reset all</button>
+            )}
+          </div>
+
+          <div className="cq-fs-grid">
+            {chips.map(([key, label, opts, allLabel]) => (
+              <label className="cq-fs-field" key={key}>
+                <span>{label}</span>
+                <select className="field" value={filters[key]} onChange={(e) => onFilter(key, e.target.value)}>
+                  <option value="">{allLabel || "All"}</option>
+                  {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </label>
+            ))}
+            <label className="cq-fs-field">
+              <span>Sort</span>
+              <select className="field" value={filters.sort} onChange={(e) => onFilter("sort", e.target.value)}>
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="priority">Priority</option>
+                <option value="updated">Recently Updated</option>
+              </select>
+            </label>
+            <label className="cq-fs-field">
+              <span>From</span>
+              <input className="field" type="date" value={fromDate}
+                onChange={(e) => applyDates(e.target.value, toDate)} />
+            </label>
+            <label className="cq-fs-field">
+              <span>To</span>
+              <input className="field" type="date" value={toDate}
+                onChange={(e) => applyDates(fromDate, e.target.value)} />
+            </label>
+          </div>
+
+          <button className="btn btn-primary" style={{ width: "100%", marginTop: 18 }} onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilter, onPage, onReset, onOpen }) {
   const [showDates, setShowDates] = useState(false);
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
   // "Filters (N)" counts only the dropdown/date narrowing — not the search box,
   // which has its own visible input, and not sort, which isn't a filter.
+  // The default ACTIVE status filter doesn't count — otherwise a freshly
+  // loaded queue would claim "Filters (1)" with nothing narrowed by hand. The
+  // chip itself still reads "Status: Active — needs work" and stays
+  // highlighted, so the hiding of closed complaints is never invisible.
   const activeCount = ["status", "categoryId", "priorityId", "wardId", "floorId", "departmentId", "ownerPwoId"]
-    .filter((k) => filters[k]).length + (filters.from || filters.to ? 1 : 0);
+    .filter((k) => filters[k] && !(k === "status" && filters[k] === DEFAULT_FILTERS.status)).length
+    + (filters.from || filters.to ? 1 : 0);
 
   const pageSize = 25;
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -561,7 +680,12 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
   };
 
   const CHIPS = [
-    ["status", "Status", Object.entries(STATUS_META).map(([k, v]) => [k, v.label])],
+    // 4th slot overrides the generic "<label>: All" empty option — for status,
+    // "All" now means "including the closed ones", which is worth spelling out
+    // when the default deliberately hides them.
+    ["status", "Status",
+      [[ACTIVE_ONLY, "Active — needs work"], ...Object.entries(STATUS_META).map(([k, v]) => [k, v.label])],
+      "All (incl. closed)"],
     ["categoryId", "Category", (lookups?.categories || []).map((c) => [c.id, c.label])],
     ["priorityId", "Priority", (lookups?.priorities || []).map((p) => [p.id, p.label])],
     ["wardId", "Ward", (lookups?.wards || []).map((w) => [w.id, w.name])],
@@ -570,14 +694,30 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
     ["ownerPwoId", "Officer", (lookups?.pwos || []).map((p) => [p.id, p.name])],
   ];
 
+  // `filter` makes a card a one-tap shortcut into the queue below. The two
+  // "Today" cards scope the date range as well, so the list that opens matches
+  // the number on the card instead of showing every complaint ever closed.
   const CARDS = stats ? [
-    { label: "Open", value: stats.open, sub: "Needs attention", color: "#2563eb", icon: icons.fileText },
-    { label: "Accepted", value: stats.accepted, sub: "In progress", color: "#d97706", icon: icons.user },
-    { label: "Under Review", value: stats.underReview, sub: "Being reviewed", color: "#7c3aed", icon: icons.clock },
-    { label: "Resolved Today", value: stats.resolvedToday, sub: "Completed", color: "#16a34a", icon: icons.check },
-    { label: "Closed Today", value: stats.closedToday, sub: "Total closed", color: "#dc2626", icon: icons.ban },
+    { label: "Open", value: stats.open, sub: "Needs attention", color: "#2563eb", icon: icons.fileText, filter: { status: "OPEN" } },
+    { label: "Accepted", value: stats.accepted, sub: "In progress", color: "#d97706", icon: icons.user, filter: { status: "ACCEPTED" } },
+    { label: "Under Review", value: stats.underReview, sub: "Being reviewed", color: "#7c3aed", icon: icons.clock, filter: { status: "UNDER_REVIEW" } },
+    { label: "Resolved Today", value: stats.resolvedToday, sub: "Completed", color: "#16a34a", icon: icons.check, filter: { status: "RESOLVED", today: true } },
+    { label: "Closed Today", value: stats.closedToday, sub: "Total closed", color: "#dc2626", icon: icons.ban, filter: { status: "CLOSED", today: true } },
     { label: "Avg. Resolution", value: fmtDuration(stats.avgResolutionMs), sub: "All time", color: "#0891b2", icon: icons.clock },
   ] : [];
+
+  const applyCardFilter = (f) => {
+    if (!f) return;
+    onFilter("status", f.status);
+    if (f.today) {
+      // Via applyDates so the visible From/To inputs stay in step with the
+      // filter, and so the IST day boundaries come from toEpoch rather than
+      // being recomputed here.
+      const d = new Date();
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      applyDates(iso, iso);
+    }
+  };
 
   const renderRowMeta = (r) => (
     <>IP {r.ipLast6}{r.location.roomType ? ` · ${r.location.roomType}` : ""}</>
@@ -590,7 +730,12 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
       {stats && (
         <div className="cq-stats">
           {CARDS.map((c) => (
-            <div className="card cq-stat" key={c.label}>
+            <div className={"card cq-stat" + (c.filter ? " cq-stat-click" : "")} key={c.label}
+              role={c.filter ? "button" : undefined} tabIndex={c.filter ? 0 : undefined}
+              aria-label={c.filter ? `${c.label} — ${c.value}. Show these in the queue.` : undefined}
+              aria-pressed={c.filter ? filters.status === c.filter.status : undefined}
+              onClick={c.filter ? () => applyCardFilter(c.filter) : undefined}
+              onKeyDown={c.filter ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); applyCardFilter(c.filter); } } : undefined}>
               <div className="cq-stat-ic" style={{ background: `${c.color}18`, color: c.color }}>
                 <Ic d={c.icon} s={19} />
               </div>
@@ -617,10 +762,11 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
           <button className="cq-tbtn" onClick={() => setShowDates((v) => !v)}>
             <Ic d={icons.clock} s={14} /> {filters.from || filters.to ? "Date range set" : "Select date range"}
           </button>
-          <span className="cq-tbtn cq-tbtn-static">
+          <button className="cq-tbtn" onClick={() => setShowFilterSheet(true)}
+            aria-haspopup="dialog" aria-expanded={showFilterSheet}>
             <Ic d={icons.filter} s={14} /> Filters
             {activeCount > 0 && <span className="cq-badge">{activeCount}</span>}
-          </span>
+          </button>
           <button className="cq-reset" onClick={() => { setFromDate(""); setToDate(""); setShowDates(false); onReset(); }}>
             Reset
           </button>
@@ -635,10 +781,10 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
         )}
 
         <div className="cq-chiprow">
-          {CHIPS.map(([key, label, opts]) => (
+          {CHIPS.map(([key, label, opts, allLabel]) => (
             <span className={"cq-chip" + (filters[key] ? " on" : "")} key={key}>
               <select value={filters[key]} onChange={(e) => onFilter(key, e.target.value)}>
-                <option value="">{label}: All</option>
+                <option value="">{label}: {allLabel || "All"}</option>
                 {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
               {filters[key] && (
@@ -657,6 +803,16 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
           </span>
         </div>
       </div>
+
+      {showFilterSheet && createPortal(
+        <FilterSheet
+          chips={CHIPS} filters={filters} onFilter={onFilter}
+          fromDate={fromDate} toDate={toDate} applyDates={applyDates}
+          activeCount={activeCount}
+          onReset={() => { setFromDate(""); setToDate(""); setShowDates(false); onReset(); }}
+          onClose={() => setShowFilterSheet(false)} />,
+        document.body
+      )}
 
       {/* Results */}
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -837,7 +993,10 @@ export default function PWOApp({ user, meta, onLogout }) {
      *  showing a status the user has filtered out. */
     const reconcile = (id, newStatus) => {
       const f = filtersRef.current;
-      if (f.status && f.status !== newStatus) {
+      // matchesStatus, not `f.status !== newStatus`: under the default ACTIVE
+      // group filter a raw comparison is false for every real status, so each
+      // transition would have wrongly evicted the row from the queue.
+      if (!matchesStatus(f.status, newStatus)) {
         setRows((prev) => prev.filter((r) => r.id !== id));
         setTotal((t) => Math.max(0, t - 1));
       }
@@ -859,7 +1018,9 @@ export default function PWOApp({ user, meta, onLogout }) {
       });
       const f = filtersRef.current;
       // Only surface it in the list the user is actually looking at.
-      if ((!f.status || f.status === "OPEN") && f.page === 1 && !f.search) {
+      // A new complaint is always OPEN, so it belongs in any view whose status
+      // filter admits OPEN — including the default ACTIVE group.
+      if (matchesStatus(f.status, "OPEN") && f.page === 1 && !f.search) {
         setRows((prev) => (prev.some((r) => r.id === complaint.id) ? prev : [complaint, ...prev]));
         setTotal((t) => t + 1);
       }
@@ -920,9 +1081,8 @@ export default function PWOApp({ user, meta, onLogout }) {
     { key: "dashboard", icon: icons.home,      label: "Dashboard" },
     { key: "queue",     icon: icons.clipboard, label: "Complaints" },
     { key: "reports",   icon: icons.chart,     label: "Reports" },
-    { key: "profile",   icon: icons.user,      label: "Profile" },
   ];
-  const TITLES = { dashboard: "Welfare Dashboard", queue: "Complaints", reports: "Reports", profile: "Profile" };
+  const TITLES = { dashboard: "Welfare Dashboard", queue: "Complaints", reports: "Reports" };
 
   const pages = Math.max(1, Math.ceil(total / 25));
 
@@ -1038,33 +1198,8 @@ export default function PWOApp({ user, meta, onLogout }) {
           </div>
         )}
 
-        {/* ── Profile ──────────────────────────────────────────────────── */}
-        {tab === "profile" && (
-          <div className="slide-up">
-            <div className="card" style={{ padding: 22, maxWidth: 440 }}>
-              <div className="row" style={{ gap: 14, marginBottom: 20 }}>
-                <div style={{
-                  width: 52, height: 52, borderRadius: 15, background: "var(--primary)", flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 800, fontSize: 20,
-                }}>{(user?.name || "?").charAt(0).toUpperCase()}</div>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 18 }}>{user?.name || "—"}</div>
-                  <div className="dim" style={{ fontSize: 13, marginTop: 2 }}>@{user?.username}</div>
-                  <span className="tag v" style={{ marginTop: 6, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                    <Ic d={icons.shield} s={12} /> Patient Welfare Officer
-                  </span>
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid var(--line)" }}>
-                <span className="dim" style={{ fontSize: 13 }}>Theme</span>
-                <ThemeToggle />
-              </div>
-              <button className="btn btn-ghost btn-block" style={{ marginTop: 14, color: "var(--red)" }} onClick={onLogout}>
-                <Ic d={icons.logout} s={15} /> Logout
-              </button>
-            </div>
-          </div>
-        )}
+
+        <PwoThemeRow />
 
         {toast && <div className="toast show">{toast}</div>}
       </AppShell>
