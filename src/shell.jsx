@@ -211,6 +211,14 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
                   </div>
                 </div>
                 <div className="profile-menu-slot" ref={setProfileSlot} />
+                {/* Rendered by the shell so every role gets it, rather than
+                    depending on whatever each dashboard portals into the slot
+                    above. The sidebar Logout still exists, but it's off-canvas
+                    on phones — this is the reachable one there. */}
+                <button className="profile-menu-logout" role="menuitem" onClick={onLogout}>
+                  <Ic d={icons.logout} s={17} />
+                  <span>Logout</span>
+                </button>
               </div>
             )}
           </div>

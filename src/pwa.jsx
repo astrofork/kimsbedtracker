@@ -38,7 +38,7 @@ export function OfflineBanner() {
   if (!offline) return null;
 
   return (
-    <div style={{ ...bannerBase, top: 12, background: "#1E293B", color: "#F8FAFC", fontSize: 13, fontWeight: 600, fontFamily: "system-ui,sans-serif" }}>
+    <div style={{ ...bannerBase, top: "calc(var(--safe-top, 0px) + 12px)", background: "#1E293B", color: "#F8FAFC", fontSize: 13, fontWeight: 600, fontFamily: "system-ui,sans-serif" }}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb7185"
            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
         <line x1="1" y1="1" x2="23" y2="23"/>
@@ -86,7 +86,7 @@ export function UpdateToast({ registration }) {
   return (
     <div style={{
       ...bannerBase,
-      bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
+      bottom: "calc(80px + var(--safe-bottom, 0px))",
       background: "#0F172A", color: "#F8FAFC",
       fontSize: 13, fontWeight: 600, fontFamily: "system-ui,sans-serif", gap: 10,
     }}>
@@ -163,7 +163,7 @@ export function InstallBanner() {
     <div style={{
       ...bannerBase,
       // Login page has no navbar — sit 16px above the safe-area bottom
-      bottom: "calc(16px + env(safe-area-inset-bottom, 0px))",
+      bottom: "calc(16px + var(--safe-bottom, 0px))",
       background: "var(--panel, #fff)",
       border: "1px solid var(--line, #E2E8F0)",
       color: "var(--ink, #0F172A)",

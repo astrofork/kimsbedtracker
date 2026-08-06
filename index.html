@@ -37,16 +37,11 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
-  <!-- ── Safe-area CSS env vars for notched devices ────────────────────────── -->
+  <!-- ── Safe-area handling lives in styles.css (--safe-top/bottom/left/right,
+       applied to #root and every fixed/sticky surface) — this file only needs
+       the FOUC-prevention background, so the page isn't white before CSS loads. -->
   <style>
-    :root {
-      --sat: env(safe-area-inset-top);
-      --sab: env(safe-area-inset-bottom);
-      --sal: env(safe-area-inset-left);
-      --sar: env(safe-area-inset-right);
-    }
-    html { background: #F8FAFC; }   /* prevents white flash on load */
-    body { padding-bottom: var(--sab); }
+    html { background: #F8FAFC; }
   </style>
 </head>
 <body>

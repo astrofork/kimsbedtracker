@@ -5,14 +5,14 @@ import {
   Ic, icons, ThemeToggle, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
 } from "./ui.jsx";
-import { AppShell, useProfileMenuSlot, useTopBarSlot, useSidebarState } from "./shell.jsx";
+import { AppShell, useTopBarSlot, useSidebarState } from "./shell.jsx";
 import {
   HistoryViewer, actionLabel,
   HierarchyManager, PreBlockManager, PreManager,
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
   DoctorBlockManager, DoctorManager, ConsultantManager,
   DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager, PayerTATManager,
-  SimpleLoginManager,
+  SimpleLoginManager, PWO_LOGIN_TABS,
 } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
@@ -64,6 +64,7 @@ const ADMIN_TITLES = {
   pres: "PRE Users",
   nurses: "Nurse Users",
   doctors: "DMO Users",
+  welfare: "Patient Welfare Officers",
   setup: "Blocks",
   preblocks: "PRE Blocks",
   doctorblocks: "DMO Blocks",
@@ -194,6 +195,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "doctors", icon: icons.stethoscope, label: "DMO Users" },
         { key: "consultants", icon: icons.stethoscope, label: "Consultant Users" },
         { key: "fcpharmacy", icon: icons.list, label: "FC & Pharmacy" },
+        { key: "welfare", icon: icons.shield, label: "Welfare Officers" },
       ]
     },
     {
@@ -298,6 +300,14 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "doctors" && <DoctorManager showToast={showToast} />}
       {tab === "consultants" && <ConsultantManager showToast={showToast} />}
       {tab === "fcpharmacy" && <SimpleLoginManager showToast={showToast} />}
+      {tab === "welfare" && (
+        <SimpleLoginManager
+          showToast={showToast}
+          tabs={PWO_LOGIN_TABS}
+          title="Patient Welfare Officers"
+          blurb="Manage Patient Welfare Officer (PWO) logins. PWOs handle patient complaints raised from the Patient Portal."
+        />
+      )}
 
       {/* Setup */}
       {tab === "setup" && <HierarchyManager showToast={showToast} />}
@@ -868,13 +878,17 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
           </span>
           <span style={{ fontWeight: 700, fontSize: 14, color: CONSULT_ACCENT }}>Consultants</span>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {/* Shorter labels ("Group by: Department" → "Department", "active
+            patients" → "active") + tighter padding so the dropdown and both
+            chips actually fit on one line on a phone instead of the second
+            chip wrapping onto its own line. */}
+        <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
           <select className="field" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}
-            style={{ padding: "3px 6px", fontSize: 11, width: "auto", flexShrink: 0 }}>
-            {CONSULTANT_GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>Group by: {o.label}</option>)}
+            style={{ padding: "3px 6px", fontSize: 10.5, width: "auto", flexShrink: 1, minWidth: 0 }}>
+            {CONSULTANT_GROUP_BY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap" }}>{consultants.length} consultants</span>
-          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap" }}>{grandTotal} active patients</span>
+          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap", fontSize: 10.5, padding: "3px 8px", flexShrink: 0 }}>{consultants.length} consultants</span>
+          <span className="chip" style={{ color: CONSULT_ACCENT, whiteSpace: "nowrap", fontSize: 10.5, padding: "3px 8px", flexShrink: 0 }}>{grandTotal} active</span>
         </div>
       </div>
 
@@ -1161,13 +1175,115 @@ const SCOPED_FETCHERS = {
 // to restore it for everyone.
 const TRANSACTION_BOARD_VISIBLE_TO = ["admin1"];
 
+/** Draggable scroll indicator for the Occupancy Board strip, plus the edge
+ *  fades that say "there is more this way".
+ *
+ *  Why a custom thumb rather than un-hiding the native scrollbar: the strip
+ *  only exists inside `@container (max-width:880px)` — phones and small
+ *  tablets — and that is exactly where iOS Safari and Android Chrome use
+ *  overlay scrollbars, which are unstyleable and stay hidden until you are
+ *  already scrolling. The native bar would be invisible to precisely the
+ *  users who don't know the strip moves.
+ *
+ *  "Only when the cards are swipeable" is measured, not breakpointed: above
+ *  880px the container query leaves .cv-groups as a grid, so scrollWidth ===
+ *  clientWidth, `max` is 0, and this renders nothing. No second copy of the
+ *  880px threshold to drift out of sync with the CSS.
+ *
+ *  Positions are written straight to the node. Routing a scroll handler
+ *  through setState would re-render the whole occupancy panel on every frame
+ *  of a momentum swipe; React state here holds only the show/hide flag, which
+ *  changes rarely. */
+function SwipeThumb({ targetRef, deps }) {
+  const trackRef = useRef(null);
+  const thumbRef = useRef(null);
+  const dragRef = useRef(null);
+  const [scrollable, setScrollable] = useState(false);
+
+  const measure = useCallback(() => {
+    const el = targetRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const can = max > 1;
+    setScrollable((was) => (was === can ? was : can));
+
+    // Fades belong to the wrapper, and only on the side that still has content.
+    const wrap = el.parentElement;
+    if (wrap) {
+      wrap.classList.toggle("cv-fade-l", can && el.scrollLeft > 2);
+      wrap.classList.toggle("cv-fade-r", can && el.scrollLeft < max - 2);
+    }
+
+    const track = trackRef.current, thumb = thumbRef.current;
+    if (!can || !track || !thumb) return;
+    const free = track.clientWidth;
+    const w = Math.max(free * (el.clientWidth / el.scrollWidth), 24);
+    thumb.style.width = `${w}px`;
+    thumb.style.transform = `translateX(${(el.scrollLeft / max) * (free - w)}px)`;
+  }, [targetRef]);
+
+  useEffect(() => {
+    const el = targetRef.current;
+    if (!el) return;
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    // The panel is the container query's subject, so watching it catches the
+    // grid↔strip flip and rotation; watching the strip catches content growth.
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    if (el.parentElement) ro.observe(el.parentElement);
+    return () => { el.removeEventListener("scroll", measure); ro.disconnect(); };
+    // `deps` re-measures when the group count changes — the board's data lands
+    // after first paint, so the first measurement is of an empty strip.
+  }, [measure, targetRef, deps]);
+
+  // The track only exists once scrollable flips true, so it has to be sized
+  // after that render rather than during the measure that caused it.
+  useLayoutEffect(() => { measure(); }, [scrollable, measure]);
+
+  const onDown = (e) => {
+    const el = targetRef.current, track = trackRef.current, thumb = thumbRef.current;
+    if (!el || !track || !thumb) return;
+    e.preventDefault();
+    thumb.setPointerCapture(e.pointerId);
+    // scroll-snap-type:x proximity treats every scrollLeft write during a drag
+    // as a re-snap candidate, which makes the pill stick and jump. Off for the
+    // duration, restored on release.
+    el.style.scrollSnapType = "none";
+    dragRef.current = { x: e.clientX, left: el.scrollLeft, free: track.clientWidth - thumb.offsetWidth };
+  };
+  const onMove = (e) => {
+    const d = dragRef.current, el = targetRef.current;
+    if (!d || !el || d.free <= 0) return;
+    const max = el.scrollWidth - el.clientWidth;
+    el.scrollLeft = d.left + ((e.clientX - d.x) / d.free) * max;
+  };
+  const onUp = (e) => {
+    const el = targetRef.current;
+    if (dragRef.current && el) el.style.scrollSnapType = "";
+    dragRef.current = null;
+    thumbRef.current?.releasePointerCapture?.(e.pointerId);
+  };
+
+  if (!scrollable) return null;
+  // aria-hidden rather than a half-built role="scrollbar": the metric rows
+  // inside each group are already tabbable, so keyboard users scroll the strip
+  // by tabbing and the browser scrolls them into view.
+  return (
+    <div className="cv-swipe-track" ref={trackRef} aria-hidden="true">
+      <div className="cv-swipe-thumb" ref={thumbRef}
+        onPointerDown={onDown} onPointerMove={onMove}
+        onPointerUp={onUp} onPointerCancel={onUp} />
+    </div>
+  );
+}
+
 export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUsername = null, scope = "admin", hideUnitFilter = false }) {
   const scoped = SCOPED_FETCHERS[scope] ?? null; // null = admin/hospital-wide
   // Whether this mount shows the whole hospital. Admin (no scoped entry) and PRE
   // both do; Nurse/Consultant don't. Sections that would leak hospital totals to
   // a ward-scoped user gate on this rather than on `scoped`.
   const hospitalWide = !scoped || scoped.hospitalWide === true;
-  const profileMenuSlot = useProfileMenuSlot();
   const topBarSlot = useTopBarSlot();
   const [liveData, setLiveData] = useState(null);
   const [snaps, setSnaps] = useState(null);
@@ -1177,13 +1293,14 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
   const [searchBy, setSearchBy] = useState("ward");
   const compact = scope === "consultant";
   const [groupBy, setGroupBy] = useState(compact ? "room_type" : "none");
-  const [snapBusy, setSnapBusy] = useState(null);
   const [snapToast, setSnapToast] = useState("");
   const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
   const [adminCards, setAdminCards] = useState(null); // Hospital Snapshot / Occupancy / Transaction boards
   const [adminHistory, setAdminHistory] = useState(null); // hourly history for the flat-line cards' sparklines
   const [consultantData, setConsultantData] = useState(null); // { payerTypes, consultants }
   const snapshotRef = useRef(null);
+  // Occupancy Board strip — read by SwipeThumb to size and drive its indicator.
+  const occStripRef = useRef(null);
 
   // ── Adaptive header: sidebar state + greeting visibility observer
   const sidebarState = useSidebarState();
@@ -1279,32 +1396,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
       }
     } catch { /* corrupt/old value — fall back to default order */ }
   }, []);
-
-  const toggleLayoutLock = () => {
-    setLayoutLocked((was) => {
-      const nowLocked = !was;
-      showSnapToast(nowLocked ? "Layout locked" : "Layout editing enabled");
-      return nowLocked;
-    });
-  };
-
-  const saveLayout = (order) => {
-    try { localStorage.setItem(KPI_LAYOUT_KEY, JSON.stringify(order)); } catch { /* storage unavailable */ }
-    showSnapToast("Layout saved");
-  };
-
-  const requestResetLayout = async () => {
-    const ok = await confirm({
-      title: "Reset dashboard layout to default?",
-      message: "This clears your saved card order on this device and restores the original layout.",
-      confirmLabel: "Reset",
-      danger: true,
-    });
-    if (!ok) return;
-    try { localStorage.removeItem(KPI_LAYOUT_KEY); } catch { /* ignore */ }
-    setKpiOrder(null);
-    showSnapToast("Layout reset to default");
-  };
 
   const reorder = (fromKey, toKey, baseOrder) => {
     const arr = [...baseOrder];
@@ -1580,18 +1671,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
   }, [refreshKey, scoped]);
 
   const showSnapToast = useCallback((m) => { setSnapToast(m); setTimeout(() => setSnapToast(""), 2400); }, []);
-  const runSnap = useCallback(async (kind, fn, okMsg) => {
-    if (snapBusy) return;
-    const el = snapshotRef.current;
-    if (!el) return;
-    setSnapBusy(kind);
-    try { await fn(el); showSnapToast(okMsg); }
-    catch (e) {
-      const msg = e?.message || "";
-      if (msg.includes("not supported")) showSnapToast(msg);
-      else if (e?.name !== "AbortError") showSnapToast("Unable to generate snapshot. Try again.");
-    } finally { setSnapBusy(null); }
-  }, [snapBusy, showSnapToast]);
 
   // Must be before any early return — hooks cannot be called conditionally
   // "department" is deliberately excluded here — it only scopes the
@@ -1792,8 +1871,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     ...payerTypeCards,
   ];
 
-  const canShare = snapshotCanShare();
-
   // Apply the shared order onto the live KPI data — defensive against the
   // card set itself changing (renamed/added/removed) since the layout was
   // last saved: unknown saved labels are dropped, new cards are appended at
@@ -1850,18 +1927,28 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     physicalCheckoutPending: (adminHistory || []).map((s) => s.physical_checkout_pending || 0),
   };
 
+  // Discharge Lounge tile is Admin(COO)-only. loungeTotalBeds comes from the
+  // live ward list (not adminDashboard()), and that list can't be trimmed
+  // server-side without also breaking bed entry / lounge-transfer screens
+  // that read the same wards — so this one stays a display-only gate here,
+  // unlike totalPatientsCard/loungeCards below which the backend omits outright.
   const snapshotCards = !snap ? [] : [
     { label: "Total Beds", val: snap.totalBeds, sub: null, color: "#2f64ff", icon: icons.bed, series: S.total, explorerKey: "admin:Total Beds" },
     { label: "Operational Beds", val: snap.operationalBeds, sub: null, color: "#1d4ed8", icon: icons.refresh, series: S.total, explorerKey: "admin:Operational Beds" },
     { label: "Census Beds", val: snap.censusBeds, sub: null, color: "#1e3a8a", icon: icons.users, series: S.total, explorerKey: "admin:Census Beds" },
     { label: "Non-Census Beds", val: snap.nonCensusBeds, sub: null, color: "#0c2a6b", icon: icons.user, series: S.reserved, explorerKey: "admin:Non-Census Beds" },
-    { label: "Discharge Lounge", val: loungeTotalBeds, sub: null /* "Virtual Beds" */, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" }
+    ...(scope === "admin" ? [
+      { label: "Discharge Lounge", val: loungeTotalBeds, sub: null /* "Virtual Beds" */, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" },
+    ] : []),
   ];
 
   // Occupancy Board — laid out exactly as the CEO's wireframe: one standalone
   // "Total Patients" card, then five sub-groups (Census Occupancy / Non Census
   // Occupancy / Discharge Lounge / Vacant Beds / Patient Type).
-  const totalPatientsCard = !occ ? null :
+  // occ.totalPatients is Admin(COO)-only — the backend omits the field
+  // entirely for every other role (see adminDashboard()'s includeLoungeSummary
+  // in bedService.ts), so this naturally resolves to null for them.
+  const totalPatientsCard = !occ || occ.totalPatients == null ? null :
     { label: "Total Patients", val: occ.totalPatients, sub: "[On bed + Reserved + Overstay + Discharge lounge]", color: "#dc2626", icon: icons.chart, series: S.occupied, explorerKey: "admin:Total Patients" };
   const totalOccupancyCard = !occ ? null :
     { label: "Total Occupancy", val: occ.totalOccupancy, sub: "[On bed + Overstay + Reserved]", color: "#0d9488", icon: icons.bed, series: S.occupied, explorerKey: "admin:Total Occupancy" };
@@ -1878,7 +1965,10 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     { label: "Reserved", val: occ.nonCensus.res, sub: null, color: "#be123c", icon: icons.bookmark, series: [], explorerKey: "admin:Non-Census Res" },
     { label: "Overstay", val: occ.nonCensus.overstay, sub: null, color: "#f59e0b", icon: icons.clock, series: [], explorerKey: "admin:Non-Census Overstay" },
   ];
-  const loungeCards = !occ ? [] : [
+  // occ.lounge is Admin(COO)-only — omitted server-side for every other role,
+  // same as occ.totalPatients above, so this group naturally disappears for
+  // them (the render loop skips any group whose cards array is empty).
+  const loungeCards = !occ || !occ.lounge ? [] : [
     { label: "Total", val: occ.lounge.total, sub: null, color: "#f59e0b", icon: icons.exchange, series: H.loungePatients, explorerKey: "admin:In Discharge Lounge" },
     // "Census"/"Non Census" = origin bed type (where the patient came FROM).
     // Lounge beds have no Census/Non-Census identity of their own, so the
@@ -1901,6 +1991,22 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     { label: "Day Care", val: occ.patientType.dayCare, sub: null, color: "#0ea5b7", icon: icons.stethoscope, series: H.nonCensusDaycare, explorerKey: "admin:Patient Type Daycare" },
     { label: "OPD", val: occ.patientType.opd, sub: null, color: "#8b5cf6", icon: icons.users, series: [], explorerKey: "admin:Patient Type OPD" },
   ];
+
+  // Occupancy Board sub-groups, already filtered to what actually renders.
+  // Discharge Lounge drops out for every non-admin scope (see loungeCards) and
+  // By Payer drops out when no payer types are configured — so the grid's
+  // column count is driven off this length rather than hardcoded at 6, which
+  // used to leave an empty column on the right for non-admin roles.
+  // Must stay below every *Cards declaration it reads — they're `const`, so
+  // hoisting this above them is a TDZ ReferenceError, not an undefined.
+  const occGroups = [
+    { title: "Census Occupancy", cards: censusOccCards, accent: "#ea580c" },
+    { title: "Non Census Occupancy", cards: nonCensusOccCards, accent: "#f97316" },
+    { title: "Discharge Lounge", cards: loungeCards, accent: "#f59e0b" },
+    { title: "Vacant Beds", cards: vacantBedsCards, accent: "#16a34a" },
+    { title: "Patient Type", cards: patientTypeCards, accent: "#2563eb" },
+    { title: "By Payer", cards: payerCards, accent: "#8b5cf6" },
+  ].filter((g) => g.cards.length > 0);
 
   // step = key passed to openDischargeList — cards without one (New Admissions
   const transactionCards = !txn ? [] : [
@@ -1988,48 +2094,13 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
       </div>
 
 
-      {/* Layout controls + Snapshot actions live in the profile dropdown (top
-          right), not inline here — portaled into the slot AppShell exposes
-          while it's open. */}
-      {profileMenuSlot && createPortal(
-        <>
-          <div className="profile-menu-section">
-            <div className="profile-menu-label">Dashboard Layout</div>
-            <button className="profile-menu-item" onClick={toggleLayoutLock}>
-              <span>{layoutLocked ? "🔒 Layout Locked" : "🔓 Editing Layout"}</span>
-            </button>
-            {!layoutLocked && (
-              <>
-                <button className="profile-menu-item" onClick={() => saveLayout(effectiveOrder)}>
-                  <span>💾 Save Layout</span>
-                </button>
-                <button className="profile-menu-item" onClick={requestResetLayout}>
-                  <span>↺ Reset Layout</span>
-                </button>
-                <div className="profile-menu-note">Editing enabled — drag cards on the dashboard to reorder.</div>
-              </>
-            )}
-          </div>
-          <div className="profile-menu-section" style={{ borderTop: "1px solid var(--line)" }}>
-            <div className="profile-menu-label">Snapshot</div>
-            <button className="profile-menu-item" disabled={snapBusy !== null}
-              onClick={() => runSnap("download", snapshotDownload, "Snapshot downloaded")}>
-              <span>📷 {snapBusy === "download" ? "Downloading…" : "Download Snapshot"}</span>
-            </button>
-            <button className="profile-menu-item" disabled={snapBusy !== null}
-              onClick={() => runSnap("copy", snapshotCopy, "Snapshot copied to clipboard")}>
-              <span>📋 {snapBusy === "copy" ? "Copying…" : "Copy to Clipboard"}</span>
-            </button>
-            {canShare && (
-              <button className="profile-menu-item" disabled={snapBusy !== null}
-                onClick={() => runSnap("share", snapshotShare, "Shared successfully")}>
-                <span>📤 {snapBusy === "share" ? "Sharing…" : "Share"}</span>
-              </button>
-            )}
-          </div>
-        </>,
-        profileMenuSlot
-      )}
+      {/* The profile dropdown used to carry Dashboard Layout (lock / save /
+          reset) and Snapshot (download / copy / share) sections. Both are gone:
+          the layout lock never did anything useful for these users, and the
+          menu is now just identity + Logout, which AppShell renders itself.
+          layoutLocked therefore stays true for good, so the KPI grid is
+          permanently non-draggable — the drag handlers below are inert but
+          left in place rather than ripped out with them. */}
 
       {/* Toolbar — Unit filter + View-by + Search + Group-by + Snapshot. Sits at
           the top so its filter applies to everything below: KPI cards, By Payer
@@ -2055,11 +2126,20 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
               <div className="dtg">
                 <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.building} s={16} /></span><span className="dtg-label">Unit</span></div>
                 {unitOptions.length <= 4 ? (
-                  <div className="seg-pill">
-                    {unitOptions.map((k) => (
-                      <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
-                    ))}
-                  </div>
+                  // Same desktop-pill / mobile-select split as "View by" right
+                  // below — a row of up to 4 pill buttons doesn't fit a phone
+                  // width, so it needs the same fallback that section already has.
+                  <>
+                    <div className="seg-pill dt-desktop-only">
+                      {unitOptions.map((k) => (
+                        <button key={k} className={activeUnit === k ? "on" : ""} onClick={() => setViewBy(k)}>{k === "TOTAL" ? "TOTAL" : k}</button>
+                      ))}
+                    </div>
+                    <select className="field dt-mobile-only" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
+                      style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 0, width: "auto" }}>
+                      {unitOptions.map((k) => <option key={k} value={k}>{k === "TOTAL" ? "All units" : k}</option>)}
+                    </select>
+                  </>
                 ) : (
                   <select className="field" value={activeUnit} onChange={(e) => setViewBy(e.target.value)}
                     style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 140 }}>
@@ -2074,7 +2154,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
           <div className="dtg">
             <div className="dtg-head"><span className="dtg-ic"><Ic d={icons.grid} s={15} /></span><span className="dtg-label">View by</span></div>
             <div className="seg-pill dt-desktop-only">
-              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }, ...(!compact ? [{ value: "payer_type", label: "Payer Type" }, { value: "department", label: "Department" }] : [])].map((opt) => (
+              {[{ value: "ward", label: "Ward" }, { value: "room_type", label: "Room Type" }].map((opt) => (
                 <button key={opt.value} className={searchBy === opt.value ? "on" : ""}
                   onClick={() => { setSearchBy(opt.value); setSearch(""); }}>{opt.label}</button>
               ))}
@@ -2083,8 +2163,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
               style={{ fontSize: 12, fontWeight: 600, height: 34, borderRadius: 9, paddingTop: 0, paddingBottom: 0, minWidth: 0, width: "auto" }}>
               <option value="ward">Ward</option>
               <option value="room_type">Room Type</option>
-              {!compact && <option value="payer_type">Payer Type</option>}
-              {!compact && <option value="department">Department</option>}
             </select>
           </div>
 
@@ -2112,7 +2190,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
           <span style={{
             display: "inline-flex", alignItems: "center", gap: 5,
             padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700,
-            background: "var(--primary-bg, rgba(37,99,235,.12))", color: "var(--primary)",
+            background: "var(--primary-bg, #EFF6FF)", color: "var(--primary)",
           }}>
             <Ic d={icons.search} s={12} /> Showing {shownRows.length} of {allRows.length} wards
           </span>
@@ -2201,7 +2279,7 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
 
       <div className="cv-join" />
 
-      <div id="nav-occupancy" className="cv-panel" style={{ scrollMarginTop: 72 }}>
+      <div id="nav-occupancy" className="cv-panel cv-panel-occ" style={{ scrollMarginTop: 72 }}>
         <div className="cv-panel-head">
           <div className="cv-panel-title">Occupancy Board</div>
         </div>
@@ -2244,15 +2322,14 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
             )}
           </div>
         )}
-        <div className="cv-groups">
-          {[
-            { title: "Census Occupancy", cards: censusOccCards, accent: "#ea580c" },
-            { title: "Non Census Occupancy", cards: nonCensusOccCards, accent: "#f97316" },
-            { title: "Discharge Lounge", cards: loungeCards, accent: "#f59e0b" },
-            { title: "Vacant Beds", cards: vacantBedsCards, accent: "#16a34a" },
-            { title: "Patient Type", cards: patientTypeCards, accent: "#2563eb" },
-            { title: "By Payer", cards: payerCards, accent: "#8b5cf6" },
-          ].map((g) => g.cards.length > 0 && (
+        {/* Non-admin scopes render 5 groups (no Discharge Lounge — see loungeCards
+            above), which leaves a hole in the last row of the 2-column phone grid.
+            cv-groups-swipe turns the board into a horizontal strip there instead.
+            Admin renders 6 and fills the grid exactly, so it keeps the grid. */}
+        <div className="cv-swipe-wrap">
+        <div ref={occStripRef} className={"cv-groups" + (scope === "admin" ? "" : " cv-groups-swipe")}
+          style={{ "--cv-group-count": occGroups.length }}>
+          {occGroups.map((g) => (
             <div key={g.title} className="cv-group">
               <div className="cv-group-head">
                 {g.title}
@@ -2272,6 +2349,8 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
               ))}
             </div>
           ))}
+        </div>
+        {scope !== "admin" && <SwipeThumb targetRef={occStripRef} deps={occGroups.length} />}
         </div>
       </div>
 
@@ -2567,6 +2646,26 @@ const wstSum = (list, fn) => list.reduce((a, r) => a + (fn(r) || 0), 0);
 const wstC = { textAlign: "center" };
 const wstCW = { textAlign: "center", minWidth: 58, padding: "6px 10px" };
 
+// Compact tables (Consultant dashboard only — see `compact` in LiveBedDashboard)
+// render Census Beds and Non-Census Beds as two separate <table>s stacked on
+// top of each other. With the default table-layout:auto, each <table> sizes
+// its own columns independently from the other, purely from its own content —
+// so when one table's WARD column has to fit a longer label than the other's
+// (e.g. "GENERAL WARD (F) - NON AC" vs "Dialysis"), its numeric columns land
+// at a different x-offset than the table below it, even though visually
+// stacked. These fixed widths, combined with table-layout:fixed on both
+// <table>s (see WardStatusTable), force every compact table to use the same
+// column grid regardless of its own content — restricted to `compact` only,
+// so nothing changes for any other role's ward tables.
+// Width comes from --wst-ward (see .wst-compact in styles.css) rather than a
+// literal, so it can shrink on narrow screens: this is also the sticky pinned
+// column, and at a flat 280px it left only ~78px of a phone to swipe the other
+// 560px of columns through. Both stacked tables read the same variable, so they
+// stay on one shared column grid — the reason these widths are fixed at all.
+const wstCompactWard = { width: "var(--wst-ward, 280px)", overflow: "hidden" };
+const wstCompactNum = { textAlign: "center", width: 100 };
+const wstCompactMeta = { textAlign: "center", width: 130 };
+
 // Normalize a verbose, inconsistently-cased room type into a compact label:
 //   "SINGLE ROOM - AC"         → "Single Room · AC"
 //   "GENERAL WARD (F) - NON AC"→ "General Ward (F) · NAC"
@@ -2604,7 +2703,7 @@ function renderWardRow(r, showBadge, compact = false) {
   const updatedByName = r.updated_by_name || null;
   return (
     <tr key={r.id}>
-      <td style={{ fontWeight: 600 }}>
+      <td style={{ fontWeight: 600, ...(compact ? wstCompactWard : null) }}>
         <span>
           {r.ward}
           {showBadge && (
@@ -2624,21 +2723,21 @@ function renderWardRow(r, showBadge, compact = false) {
           </div>
         )}
       </td>
-      <td style={wstC}>{r.total}</td>
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(occ)}</td>
+      <td style={compact ? wstCompactNum : wstC}>{r.total}</td>
+      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 700, color: "var(--st-o)" }}>{d(occ)}</td>
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-o)" }}>{d(o)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-or)" }}>{d(or_)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "#f59e0b" }}>{d(r.overstayCount || 0)}</td>}
       {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#2563eb" }}>{d(at.IP || 0)}</td>}
       {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#8b5cf6" }}>{d(at.OPD || 0)}</td>}
       {!compact && <td style={{ ...wstCW, fontWeight: 700, color: "#0ea5b7" }}>{d(at.DAYCARE || 0)}</td>}
-      <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(vac)}</td>
+      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 700, color: "var(--st-v)" }}>{d(vac)}</td>
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-v)" }}>{d(v)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "var(--st-vr)" }}>{d(vr)}</td>}
       {!compact && <td style={{ ...wstC, fontWeight: 700, color: "#0d9488" }}>{r.loungeCount || 0}</td>}
       {!compact && <td style={wstC}>{reported ? <OccBar p={p} /> : <span className="dim">–</span>}</td>}
-      <td><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
-      <td style={{ ...wstC, fontSize: 11, fontWeight: 600 }}>{updatedByName || <span className="dim">–</span>}</td>
+      <td style={compact ? wstCompactMeta : undefined}><LastUpdatedCell ts={r.updatedAt} reviewedAt={r.reviewedAt} /></td>
+      <td style={{ ...(compact ? wstCompactMeta : wstC), fontSize: 11, fontWeight: 600 }}>{updatedByName || <span className="dim">–</span>}</td>
     </tr>
   );
 }
@@ -2706,45 +2805,48 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
         </div>
       </div>
       <div className="tbl-wrap" style={{ border: "none", borderRadius: 0 }}>
-        <table className="tbl tbl-pin1">
+        {/* table-layout:fixed (compact only) + the shared wstCompact* widths below
+            are what make this table's columns line up with the other compact
+            table stacked below/above it — see the comment on wstCompactWard. */}
+        <table className={"tbl tbl-pin1" + (compact ? " wst-compact" : "")} style={compact ? { tableLayout: "fixed" } : undefined}>
           <thead>
             <tr>
-              <th>WARD</th>
-              <th style={wstC}>TOTAL BEDS</th>
-              <th style={{ ...wstC, color: "var(--st-o)" }}>TOTAL OCC</th>
+              <th style={compact ? wstCompactWard : undefined}>WARD</th>
+              <th style={compact ? wstCompactNum : wstC}>TOTAL BEDS</th>
+              <th style={{ ...(compact ? wstCompactNum : wstC), color: "var(--st-o)" }}>TOTAL OCC</th>
               {!compact && <th style={{ ...wstC, color: "var(--st-o)" }}>ON BED</th>}
               {!compact && <th style={{ ...wstC, color: "var(--st-or)" }}>OCC[RES]</th>}
               {!compact && <th style={{ ...wstC, color: "#f59e0b" }}>OVERSTAY</th>}
               {!compact && <th style={{ ...wstCW, color: "#2563eb" }}>IP</th>}
               {!compact && <th style={{ ...wstCW, color: "#8b5cf6" }}>OP</th>}
               {!compact && <th style={{ ...wstCW, color: "#0ea5b7" }}>DAY CARE</th>}
-              <th style={{ ...wstC, color: "var(--st-v)" }}>TOTAL VAC</th>
+              <th style={{ ...(compact ? wstCompactNum : wstC), color: "var(--st-v)" }}>TOTAL VAC</th>
               {!compact && <th style={{ ...wstC, color: "var(--st-v)" }}>VACANT</th>}
               {!compact && <th style={{ ...wstC, color: "var(--st-vr)" }}>VAC[RES]</th>}
               {!compact && <th style={{ ...wstC, color: "#0d9488" }}>DIS. LOUNGE</th>}
               {!compact && <th style={wstC}>OCC %</th>}
-              <th style={wstC}>LAST UPDATED</th>
-              <th style={wstC}>UPDATED BY</th>
+              <th style={compact ? wstCompactMeta : wstC}>LAST UPDATED</th>
+              <th style={compact ? wstCompactMeta : wstC}>UPDATED BY</th>
             </tr>
           </thead>
           <tbody>
             <tr className="tbl-total-row" style={{ background: accentBg, "--tbl-total-accent": accent }}>
-              <td style={{ fontWeight: 800, fontSize: 13, color: accent, background: accentBg }}>{totalLabel}</td>
-              <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
+              <td style={{ fontWeight: 800, fontSize: 13, color: accent, background: accentBg, ...(compact ? wstCompactWard : null) }}>{totalLabel}</td>
+              <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800 }}>{totBeds}</td>
+              <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-or)" }}>{totOR}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "#f59e0b" }}>{totOverstay}</td>}
               {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#2563eb" }}>{totIp}</td>}
               {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#8b5cf6" }}>{totOp}</td>}
               {!compact && <td style={{ ...wstCW, fontWeight: 800, color: "#0ea5b7" }}>{totDaycare}</td>}
-              <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
+              <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-v)" }}>{totVac}</td>
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{totV}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "var(--st-vr)" }}>{totR}</td>}
               {!compact && <td style={{ ...wstC, fontWeight: 800, color: "#0d9488" }}>{totLounge}</td>}
               {!compact && <td style={wstC}><OccBar p={totPct} /></td>}
-              <td><LastUpdatedCell ts={totUpdatedAt} /></td>
-              <td></td>
+              <td style={compact ? wstCompactMeta : undefined}><LastUpdatedCell ts={totUpdatedAt} /></td>
+              <td style={compact ? wstCompactMeta : undefined}></td>
             </tr>
             {filtered.length === 0 ? (
               <tr><td colSpan={colSpan} style={{ textAlign: "center", color: "var(--ink-3)", padding: "22px 14px" }}>
@@ -2758,18 +2860,15 @@ function WardStatusTable({ title, accent, accentBg, rows, totalLabel, searchFilt
                   <React.Fragment key={key}>
                     <tr onClick={() => toggleSection(key)}
                       style={{ cursor: "pointer", background: "var(--panel-2)", borderTop: "1px solid var(--line)", userSelect: "none" }}>
-                      <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: accent, padding: "8px 14px" }}>
+                      <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: accent, padding: "8px 14px", ...(compact ? wstCompactWard : null) }}>
                         <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
                         {key}
-                        <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
-                          {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""}
-                        </span>
                       </td>
-                      <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
-                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>
-                      <td style={{ ...wstC, fontWeight: 800, color: "var(--st-v)" }}>{gvac}</td>
-                      <td><LastUpdatedCell ts={gUpdatedAt} /></td>
-                      <td></td>
+                      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800 }}>{gb}</td>
+                      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>
+                      <td style={{ ...(compact ? wstCompactNum : wstC), fontWeight: 800, color: "var(--st-v)" }}>{gvac}</td>
+                      <td style={compact ? wstCompactMeta : undefined}><LastUpdatedCell ts={gUpdatedAt} /></td>
+                      <td style={compact ? wstCompactMeta : undefined}></td>
                     </tr>
                     {isOpen && grpRows.map(r => renderWardRow(r, false, compact))}
                   </React.Fragment>
@@ -2861,9 +2960,15 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy, groupBySelect }) {
           </thead>
           <tbody>
             {/* Grand total always shows first — reflects the active filter,
-                including the zero-match case (all-zero totals, not vanished). */}
-            <tr className="tbl-total-row" style={{ background: "var(--primary-bg, rgba(37,99,235,.12))", "--tbl-total-accent": "var(--primary)" }}>
-              <td style={{ fontWeight: 800, fontSize: 13, color: "var(--primary)", background: "var(--primary-bg, rgba(37,99,235,.12))" }}>GRAND TOTAL</td>
+                including the zero-match case (all-zero totals, not vanished).
+                Opaque background (matching --primary-bg's fallback everywhere
+                else in the app), not the translucent rgba this used to have —
+                the first cell here is position:sticky (.tbl-pin1), and a
+                translucent sticky cell lets whatever scrolls underneath it
+                (other columns, as the table scrolls horizontally) show through
+                and visually overlap "GRAND TOTAL"'s own text. */}
+            <tr className="tbl-total-row" style={{ background: "var(--primary-bg, #EFF6FF)", "--tbl-total-accent": "var(--primary)" }}>
+              <td style={{ fontWeight: 800, fontSize: 13, color: "var(--primary)", background: "var(--primary-bg, #EFF6FF)" }}>GRAND TOTAL</td>
               <td style={{ ...wstC, fontWeight: 800 }}>{totBeds}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totOcc}</td>
               <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{totO}</td>

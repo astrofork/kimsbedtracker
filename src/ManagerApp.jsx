@@ -7094,6 +7094,12 @@ const SIMPLE_LOGIN_TABS = [
   { role: "MASTER_PHARMACY", label: "Master Pharmacy" },
 ];
 
+// Patient Welfare Officers are the same shape of account (username/password, no
+// ward/block/station assignment), so they reuse SimpleLoginManager rather than
+// duplicating a whole CRUD screen — just pointed at a different role set and
+// given their own entry in Admin → Users.
+export const PWO_LOGIN_TABS = [{ role: "PWO", label: "Welfare Officer" }];
+
 function SimpleLoginEditor({ user, roleLabel, onClose, onSaved, showToast, activeRole }) {
   useModal(onClose);
   const isNew = !user;
@@ -7195,8 +7201,13 @@ function SimpleLoginEditor({ user, roleLabel, onClose, onSaved, showToast, activ
   );
 }
 
-export function SimpleLoginManager({ showToast }) {
-  const [activeRole, setActiveRole] = useState("FC");
+export function SimpleLoginManager({
+  showToast,
+  tabs = SIMPLE_LOGIN_TABS,
+  title = "FC & Pharmacy Users",
+  blurb = "Manage Finance Coordinator and Pharmacy logins. Master roles can approve reopen requests.",
+}) {
+  const [activeRole, setActiveRole] = useState(tabs[0].role);
   const [logins, setLogins] = useState([]);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ username: "", password: "", name: "" });
@@ -7259,27 +7270,48 @@ export function SimpleLoginManager({ showToast }) {
     } catch (e) { showToast(toastErr(e)); }
   };
 
-  const tabLabel = SIMPLE_LOGIN_TABS.find(t => t.role === activeRole)?.label || activeRole;
+  const tabLabel = tabs.find(t => t.role === activeRole)?.label || activeRole;
+
+  // Enable/Disable — the backend has always supported it (PUT with {status}),
+  // but the UI only ever *displayed* "· inactive" with no way to set it.
+  const toggleStatus = async (u) => {
+    const next = u.status === "inactive" ? "active" : "inactive";
+    if (next === "inactive") {
+      const ok = await confirm({
+        title: `Disable "${u.name}"?`,
+        message: `They will not be able to sign in until re-enabled.\nNothing they've already done is removed.`,
+        confirmLabel: "Disable", danger: true,
+      });
+      if (!ok) return;
+    }
+    try {
+      await api.mgrUpdateSimpleLogin(u.id, { status: next });
+      showToast(next === "active" ? "Login enabled" : "Login disabled");
+      await load(activeRole);
+    } catch (e) { showToast(toastErr(e)); }
+  };
 
   return (
     <div>
       <div className="row between" style={{ marginBottom: 4 }}>
-        <div className="h1" style={{ fontSize: 18 }}>FC & Pharmacy Users</div>
+        <div className="h1" style={{ fontSize: 18 }}>{title}</div>
         <button className="btn btn-primary" style={{ padding: "8px 12px", fontSize: 13 }} onClick={openNew}>
           <Ic d={icons.user} s={15} /> Add {tabLabel}
         </button>
       </div>
-      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>
-        Manage Finance Coordinator and Pharmacy logins. Master roles can approve reopen requests.
-      </div>
+      <div className="dim" style={{ fontSize: 13, marginBottom: 14 }}>{blurb}</div>
 
-      <div className="seg" style={{ marginBottom: 14, maxWidth: 500 }}>
-        {SIMPLE_LOGIN_TABS.map(t => (
-          <button key={t.role} className={activeRole === t.role ? "on" : ""} onClick={() => setActiveRole(t.role)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {/* Single-role screens (e.g. Welfare Officers) have nothing to switch
+          between — the tab strip would just be one permanently-active button. */}
+      {tabs.length > 1 && (
+        <div className="seg" style={{ marginBottom: 14, maxWidth: 500 }}>
+          {tabs.map(t => (
+            <button key={t.role} className={activeRole === t.role ? "on" : ""} onClick={() => setActiveRole(t.role)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {logins.map((u) => (
         <div className="card" key={u.id} style={{ padding: 14, marginBottom: 10 }}>
@@ -7296,6 +7328,11 @@ export function SimpleLoginManager({ showToast }) {
             </div>
             <div className="row" style={{ gap: 8 }}>
               <button className="chip" onClick={() => openEdit(u)}>Edit</button>
+              <button className="chip"
+                style={{ color: u.status === "inactive" ? "var(--st-v)" : "var(--amber, #b45309)" }}
+                onClick={() => toggleStatus(u)}>
+                {u.status === "inactive" ? "Enable" : "Disable"}
+              </button>
               <button className="chip" style={{ color: "var(--red)" }} onClick={() => remove(u)}>Delete</button>
             </div>
           </div>
