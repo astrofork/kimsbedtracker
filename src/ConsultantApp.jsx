@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { api, toastErr, createSocket } from "./lib.js";
-import { Ic, icons, ThemeToggle } from "./ui.jsx";
+import { Ic, icons, ThemeToggle, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { LiveBedDashboard } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
@@ -85,6 +85,10 @@ function MyPatientsPage() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [selectedBed, setSelectedBed] = useState(null);
+  // Opening a bed replaces this whole page with BedDetailSheet — save/restore
+  // scroll across that swap. saveBedScroll() must be called wherever
+  // selectedBed is opened, before setSelectedBed.
+  const saveBedScroll = useScrollRestore(!!selectedBed);
   const [loadingBed, setLoadingBed] = useState(false);
   const [toast, setToast] = useState("");
   const [payerTypes, setPayerTypes] = useState([]);
@@ -94,6 +98,9 @@ function MyPatientsPage() {
   // one to drill in" flow as PRE Entry's ward-card → WardPage, just landing on
   // this ward's own patient grid instead of a full bed-management page.
   const [openWard, setOpenWard] = useState(null); // { key, wardName } | null
+  // saveWardScroll() must be called wherever openWard is opened, before
+  // setOpenWard — see useScrollRestore's doc comment for why.
+  const saveWardScroll = useScrollRestore(!!openWard);
   const [viewMode, setViewMode] = useState("table"); // "table" | "card"
   const [sortBy, setSortBy] = useState("ward-asc"); // "ward-asc" | "count-desc"
   const [page, setPage] = useState(1);
@@ -144,6 +151,7 @@ function MyPatientsPage() {
   }, []);
 
   const openBed = async (p) => {
+    saveBedScroll();
     setLoadingBed(true);
     try {
       const result = await api.consultantBeds(p.ward_id);
@@ -380,7 +388,7 @@ function MyPatientsPage() {
                     <tbody>
                       {pagedWardGroups.map((g) => (
                         <tr key={g.key} style={{ cursor: "pointer" }}
-                          onClick={() => setOpenWard({ key: g.key, wardName: g.wardName })}>
+                          onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
                           <td>
                             <div className="row" style={{ gap: 10 }}>
                               <div style={{
@@ -406,7 +414,7 @@ function MyPatientsPage() {
                 <div className="mp-tbl-mobile">
                   {pagedWardGroups.map((g) => (
                     <div key={g.key} className="mp-row-card"
-                      onClick={() => setOpenWard({ key: g.key, wardName: g.wardName })}>
+                      onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
                       <div className="row" style={{ gap: 10, minWidth: 0 }}>
                         <div style={{
                           width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
@@ -439,7 +447,7 @@ function MyPatientsPage() {
                 {pagedWardGroups.map((g) => (
                   <div className="ward-card slide-up" key={g.key}
                     style={{ padding: 16, cursor: "pointer" }}
-                    onClick={() => setOpenWard({ key: g.key, wardName: g.wardName })}>
+                    onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
                     <div className="row between">
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 15 }}>{g.wardName}</div>

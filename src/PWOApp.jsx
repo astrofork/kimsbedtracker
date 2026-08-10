@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
-import { Ic, icons, ThemeToggle, useConfirm, useModal } from "./ui.jsx";
+import { Ic, icons, ThemeToggle, useConfirm, useModal, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -949,6 +949,10 @@ export default function PWOApp({ user, meta, onLogout }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState(null);
+  // Opening a complaint replaces the queue with its detail — save/restore
+  // scroll across that swap. saveQueueScroll() must be called wherever
+  // detailId is opened, before setDetailId.
+  const saveQueueScroll = useScrollRestore(!!detailId);
   const [officers, setOfficers] = useState([]);
 
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
@@ -1146,7 +1150,7 @@ export default function PWOApp({ user, meta, onLogout }) {
             lookups={lookups} filters={filters}
             onFilter={setFilter} onPage={(p) => setFilters((f) => ({ ...f, page: p }))}
             onReset={() => setFilters(DEFAULT_FILTERS)}
-            onOpen={setDetailId}
+            onOpen={(id) => { saveQueueScroll(); setDetailId(id); }}
           />
         ))}
 

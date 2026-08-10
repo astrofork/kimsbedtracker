@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api, createSocket } from "./lib.js";
-import { Ic, icons, StatusBar } from "./ui.jsx";
+import { Ic, icons, StatusBar, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
 import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
@@ -139,6 +139,11 @@ export default function NurseApp({ user, onLogout }) {
   const [loadError,   setLoadError]   = useState(null); // null | string — real network errors only
   const [configError, setConfigError] = useState(null); // null | string — account config issues
   const [openWard, setOpenWard] = useState(null); // { ward, tab } | null — full-page ward view
+  // Opening a ward replaces the ward-list page with WardPage entirely — save/
+  // restore scroll across that swap the same way Entry does in PREApp.jsx.
+  // saveWardScroll() must be called at each place that OPENS a ward, before
+  // setOpenWard — see useScrollRestore's doc comment for why.
+  const saveWardScroll = useScrollRestore(!!openWard);
   const [navTab, setNavTab] = useState("dash"); // "dash" | "wards" | "discharges"
   const [stationFilter, setStationFilter] = useState("all"); // "all" | station id
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
@@ -288,7 +293,6 @@ export default function NurseApp({ user, onLogout }) {
           initialTab={openWard.tab}
           initialSearch={openWard.search}
           cfg={NURSE_CFG}
-          allWards={wards.map(w => ({ id: w.id, ward: w.name }))}
           onBack={() => { setOpenWard(null); load(); }}
         />
       ) : navTab === "wards" ? (<>
@@ -367,7 +371,7 @@ export default function NurseApp({ user, onLogout }) {
                 <div className="card-grid">
                   {list.map((ward, i) => (
                     <WardCard key={ward.id} ward={ward} index={i}
-                      onOpen={(w, tab) => setOpenWard({ ward: w, tab, search: isIpSearch ? nq : undefined })} />
+                      onOpen={(w, tab) => { saveWardScroll(); setOpenWard({ ward: w, tab, search: isIpSearch ? nq : undefined }); }} />
                   ))}
                 </div>
               </div>
@@ -384,7 +388,7 @@ export default function NurseApp({ user, onLogout }) {
             })
             .map((ward, i) => (
               <WardCard key={ward.id} ward={ward} index={i}
-                onOpen={(w, tab) => setOpenWard({ ward: w, tab, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined })} />
+                onOpen={(w, tab) => { saveWardScroll(); setOpenWard({ ward: w, tab, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined }); }} />
             ))}
         </div>
       )}

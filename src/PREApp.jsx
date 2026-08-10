@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, createSocket } from "./lib.js";
-import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm } from "./ui.jsx";
+import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 import { OverstayPanel } from "./COOApp.jsx";
 import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus } from "./bedUtils.js";
@@ -78,10 +78,74 @@ export default function PREApp({ user, meta, onLogout }) {
   }, []);
 
   const alarmActive = data?.alarm?.alarmActive;
+
+  // Silencing the beep is NOT the same as resolving the alarm — every visual
+  // cue (nav dot, banner, pulsing Submit button) keeps tracking raw
+  // `alarmActive` untouched below. Only the AUDIO is gated behind `acknowledged`:
+  // it goes quiet once the user demonstrably starts responding (opens Entry, or
+  // saves a bed), and re-arms itself after a period of no further activity so
+  // "opened the tab once" can't turn into a silent snooze for the rest of the round.
+  const ALARM_IDLE_MS = 3 * 60 * 1000; // grace period of inactivity before the beep resumes
+  const [acknowledged, setAcknowledged] = useState(false);
+  const lastEngagementRef = useRef(null); // Date.now() of the last sign of activity, or null
+  const seenRoundStartRef = useRef(null); // round.startMin last seen while alarmActive was true
+
+  // Resets acknowledgment whenever there's a genuinely NEW debt to acknowledge:
+  // the alarm just turned on, or — because a user can stay unsubmitted straight
+  // through a round boundary — the 2-hour round rolled over while still active.
+  // Also resets (to a clean idle state, not a "silenced" one) whenever nothing
+  // is currently overdue, so the next activation always starts unacknowledged.
   useEffect(() => {
-    if (alarmActive) startAlarm(); else stopAlarm();
-    return () => stopAlarm();
+    const alarm = data?.alarm;
+    const roundStart = alarm?.round?.startMin ?? null;
+    if (!alarm?.alarmActive) {
+      setAcknowledged(false);
+      lastEngagementRef.current = null;
+      seenRoundStartRef.current = roundStart;
+      return;
+    }
+    if (seenRoundStartRef.current !== roundStart) {
+      setAcknowledged(false);
+      lastEngagementRef.current = null;
+      seenRoundStartRef.current = roundStart;
+    }
+  }, [data?.alarm?.alarmActive, data?.alarm?.round?.startMin]);
+
+  // Call on any concrete sign the PRE user is actively responding to the overdue
+  // round (opening Entry, saving a bed). A no-op while nothing is overdue.
+  const acknowledgeAlarm = useCallback(() => {
+    if (!alarmActive) return;
+    lastEngagementRef.current = Date.now();
+    setAcknowledged(true);
   }, [alarmActive]);
+
+  // Idle watchdog — only runs while silenced, so it costs nothing the rest of
+  // the time. Polls rather than a single setTimeout because `acknowledgeAlarm`
+  // can push the deadline out repeatedly (e.g. one bed save after another)
+  // without this effect needing to re-run on every single engagement.
+  useEffect(() => {
+    if (!acknowledged) return;
+    const id = setInterval(() => {
+      if (lastEngagementRef.current !== null && Date.now() - lastEngagementRef.current >= ALARM_IDLE_MS) {
+        setAcknowledged(false);
+      }
+    }, 15 * 1000);
+    return () => clearInterval(id);
+  }, [acknowledged]);
+
+  const audioShouldPlay = alarmActive && !acknowledged;
+  useEffect(() => {
+    if (audioShouldPlay) startAlarm(); else stopAlarm();
+    return () => stopAlarm();
+  }, [audioShouldPlay]);
+
+  // Reaching the Entry tab — however the user got there (nav item, the alarm
+  // banner's "Enter bed status" button, or the RoundDuePopup's "Go" button) —
+  // is itself the engagement signal, so this is keyed off the resulting `tab`
+  // state rather than duplicated across every button that can set it.
+  useEffect(() => {
+    if (tab === "entry") acknowledgeAlarm();
+  }, [tab, acknowledgeAlarm]);
 
   const [submitting, setSubmitting] = useState(false);
   const submitRound = async () => {
@@ -184,7 +248,7 @@ export default function PREApp({ user, meta, onLogout }) {
             <LiveBedDashboard refreshKey={liveKey} userName={user.username || data.pre} scope="pre" />
           </>
         )}
-        {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} />}
+        {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} onEngage={acknowledgeAlarm} />}
         {tab === "discharges" && <DischargesPage role="PRE" />}
         {tab === "overstay" && <OverstayPanel loadFn={api.preOverstay} />}
 
@@ -301,7 +365,7 @@ function Home({ data, setTab, alarmActive }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  ENTRY TAB — ward cards with live counts + View/Manage beds
 // ══════════════════════════════════════════════════════════════════════════════
-function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
+function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage }) {
   const [openWard, setOpenWard] = useState(null); // { ward, tab, search? } | null
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [wardSearch, setWardSearch] = useState("");
@@ -313,6 +377,13 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
   // no network call at all.
   const [bedDetails, setBedDetails] = useState(null);
   const bedDetailsLoadingRef = useRef(false);
+
+  // Opening a ward replaces this whole grid with WardPage — without this, the
+  // ward always starts scrolled wherever the grid happened to be, and going
+  // back drops you at the top of the grid instead of back where you were.
+  // saveWardScroll() must be called at each place that OPENS a ward, before
+  // setOpenWard — see useScrollRestore's doc comment for why.
+  const saveWardScroll = useScrollRestore(!!openWard);
 
   // A 6-digit search value is treated as an IP lookup instead of a ward-name
   // filter — narrows the ward grid down to the one matching ward's card (same
@@ -342,8 +413,8 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
       ward={openWard.ward}
       initialTab={openWard.tab}
       initialSearch={openWard.search}
-      allWards={data.wards}
       onBack={() => { setOpenWard(null); onRefresh(); }}
+      onBedSaved={onEngage}
     />
   );
 
@@ -488,11 +559,11 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh }) {
                     {!nonOp && (
                       <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
                         <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
-                          onClick={() => setOpenWard({ ward: w, tab: "manage", search: isIpSearch ? wardSearch.trim() : undefined })}>
+                          onClick={() => { saveWardScroll(); setOpenWard({ ward: w, tab: "manage", search: isIpSearch ? wardSearch.trim() : undefined }); }}>
                           <Ic d={icons.bed} s={13} /> Manage Beds
                         </button>
                         <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
-                          onClick={() => setOpenWard({ ward: w, tab: "discharge", search: isIpSearch ? wardSearch.trim() : undefined })}>
+                          onClick={() => { saveWardScroll(); setOpenWard({ ward: w, tab: "discharge", search: isIpSearch ? wardSearch.trim() : undefined }); }}>
                           <Ic d={icons.clipboard} s={13} /> Discharges
                         </button>
                       </div>
@@ -849,7 +920,8 @@ function planPopupTodayStr(offsetDays = 0) {
 // First click on "Discharge" (no plan exists yet) — asks how this discharge should
 // start, instead of dropping straight into an empty planning form. Initiate Now
 // skips the Planned state entirely (plans for today, then immediately starts it,
-// as one action) — PRE only, matching who's allowed to start a discharge at all.
+// as one action) — gated by canInitiate, matching who's allowed to start a
+// discharge at all (see INITIATE_ROLES in dischargeService.ts on the backend).
 // Schedule keeps the familiar Today/Tomorrow/Custom + time picker.
 function DischargePlanPopup({ bed, canInitiate, onClose, onDone, onConflict }) {
   useModal(onClose);
@@ -977,6 +1049,10 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   const [deptOpen, setDeptOpen] = useState(false);
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [dischargeOpen, setDischargeOpen] = useState(false);
+  // "Discharge Details" replaces this whole bed editor with its own full page —
+  // same swap pattern as ward↔bed above, same fix. saveDischargeScroll() must
+  // be called at each place that opens it, before setDischargeOpen(true).
+  const saveDischargeScroll = useScrollRestore(dischargeOpen);
   const [reservationOpen, setReservationOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [readmitOpen, setReadmitOpen] = useState(false);
@@ -1429,7 +1505,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             )}
             {bed.physical_status === "OCCUPIED" && (
               <div className="pdlg-row" style={{ padding: "10px 0" }}>
-                <span className="k row" style={{ gap: 10 }}><Ic d={icons.user} s={16} /> IP ID</span>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.user} s={16} /> IP/OPD</span>
                 <span className="v">{bed.ip_last6 || "Not recorded"}</span>
               </div>
             )}
@@ -1457,6 +1533,12 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
                 return ` · ${p.done}/${p.total} done`;
               })()}
             </span>
+          </div>
+        )}
+        {bed.bed_type === "Lounge" && bed.physical_status === "OCCUPIED" && bed.origin_note && (
+          <div className="pdlg-row" style={{ padding: "10px 0" }}>
+            <span className="k row" style={{ gap: 10 }}><Ic d={icons.fileText} s={16} /> Transfer Note</span>
+            <span className="v">{bed.origin_note}</span>
           </div>
         )}
         <div className="pdlg-row" style={{ padding: "10px 0" }}>
@@ -1656,8 +1738,10 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
                 const label = notStarted ? (canPlanRole ? "Plan Discharge" : "Discharge") : "View Discharge";
                 return (
                   <button onClick={() => {
+                    // dischargePlanOpen is a popup (useModal handles its own scroll
+                    // lock) — only the full-page dischargeOpen needs the explicit save.
                     if (notStarted && canPlanRole) setDischargePlanOpen(true);
-                    else setDischargeOpen(true);
+                    else { saveDischargeScroll(); setDischargeOpen(true); }
                   }} style={{
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 8, border: "none", cursor: "pointer",
                     flex: "1 1 100%", borderRadius: 999, padding: "12px 14px", fontSize: 13, fontWeight: 800, letterSpacing: 0.3,
@@ -1746,8 +1830,8 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
         document.body
       )}
       {dischargePlanOpen && createPortal(
-        <DischargePlanPopup bed={bed} canInitiate={cfg.role === "PRE" || cfg.role === "CONSULTANT"} onClose={() => setDischargePlanOpen(false)}
-          onDone={() => { setDischargePlanOpen(false); onChanged?.(); setDischargeOpen(true); }}
+        <DischargePlanPopup bed={bed} canInitiate={cfg.role === "PRE" || cfg.role === "DOCTOR" || cfg.role === "CONSULTANT"} onClose={() => setDischargePlanOpen(false)}
+          onDone={() => { setDischargePlanOpen(false); onChanged?.(); saveDischargeScroll(); setDischargeOpen(true); }}
           onConflict={(msg) => {
             setDischargePlanOpen(false);
             onToast?.(msg);
@@ -1797,7 +1881,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
 // ══════════════════════════════════════════════════════════════════════════════
 //  WARD PAGE — full-page ward view (View / Manage / Discharge tabs, no popup)
 // ══════════════════════════════════════════════════════════════════════════════
-export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, initialSearch }) {
+export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, initialSearch, onBedSaved }) {
   const [tab, setTab] = useState(initialTab || "manage");
   const [beds, setBeds] = useState([]);
   const [filter, setFilter] = useState("ALL");
@@ -1805,6 +1889,12 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   const [editingBed, setEditingBed] = useState(null);  // bed object | null
   const [loading, setLoading] = useState(false);
   const [loadedAt, setLoadedAt] = useState(null);
+  // Opening a bed replaces this whole grid with BedDetailSheet — without this,
+  // the editor always starts scrolled wherever the grid happened to be, and
+  // "Back to beds" drops you at the top of the grid instead of back where you were.
+  // saveBedScroll() must be called at each place that OPENS a bed, before
+  // setEditingBed — see useScrollRestore's doc comment for why.
+  const saveBedScroll = useScrollRestore(!!editingBed);
   const [toast, setToast] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [reviewedAt, setReviewedAt] = useState(ward.reviewedAt ?? null);
@@ -1851,20 +1941,55 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
     finally { setReviewing(false); }
   };
 
+  // Guards against two hazards if WardPage is ever reused across a direct
+  // ward-to-ward switch without unmounting (today every switch goes through
+  // onBack/null first, so this doesn't fire in practice, but nothing else was
+  // stopping it): a stale load for the PREVIOUS ward resolving late and
+  // clobbering the new ward's already-loaded beds, and the spinner being
+  // wrongly suppressed because loadedAt still held the old ward's timestamp.
+  const loadTokenRef = useRef(0);
+  useEffect(() => { setBeds([]); setLoadedAt(null); }, [ward.id]);
+
   const load = useCallback(async () => {
+    const myToken = ++loadTokenRef.current;
     setLoading(true);
     try {
       const result = await cfg.listBeds(ward.id);
+      if (loadTokenRef.current !== myToken) return; // a newer ward's load has since started
       // Annotate beds with ward-level unit_type so filter + badges work uniformly
       const unitType = ward.unit_type || null;
       setBeds((result.beds || []).map(b => ({ ...b, unit_type: unitType })));
       setLoadedAt(new Date());
     }
-    catch (e) { showToast(toastErr(e)); }
-    finally { setLoading(false); }
+    catch (e) { if (loadTokenRef.current === myToken) showToast(toastErr(e)); }
+    finally { if (loadTokenRef.current === myToken) setLoading(false); }
   }, [ward.id, ward.unit_type, showToast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Only the very FIRST load has nothing to show yet — every load after that is
+  // a background refresh of a grid that's already on screen. Gating the
+  // spinner on this (instead of raw `loading`, which also flips true on every
+  // background refresh) is what stops those refreshes from tearing the grid
+  // down to a spinner and collapsing the page's scroll height each time.
+  const firstLoadPending = loading && loadedAt === null;
+
+  // Patches a single bed into the already-loaded array in place — used when a
+  // live event already carries that bed's full current row, so one bed
+  // changing doesn't require refetching (or blanking) every other bed in the
+  // ward. unit_type is a client-only annotation (see load() above), not part
+  // of the server row, so it's carried over from the existing entry rather
+  // than lost. No-ops if the bed isn't in this ward's array yet (e.g. the
+  // initial load hasn't landed); that load will bring it in a moment later.
+  const patchBed = useCallback((incoming) => {
+    setBeds(prev => {
+      const idx = prev.findIndex(b => b.id === incoming.id);
+      if (idx === -1) return prev;
+      const next = prev.slice();
+      next[idx] = { ...incoming, unit_type: prev[idx].unit_type };
+      return next;
+    });
+  }, []);
 
   const focusedRef = useRef(false);
   useEffect(() => {
@@ -1875,15 +2000,20 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   }, [focusBedId, beds]);
 
   // Live refresh — every bed/discharge change lands here instantly via websocket.
-  // Payloads carrying a wardId are filtered to this ward; anything else reloads
-  // defensively. The ref keeps the handler on the latest load closure without
-  // reconnecting the socket on every render.
+  // Payloads carrying a wardId are filtered to this ward. A bed:update that also
+  // carries the bed's full row (every role's status-update route sends one) is
+  // applied directly via patchBed — no refetch needed for a change to one bed.
+  // Anything else (discharge/operational events, or a payload without a full
+  // row) falls back to a full reload, which — thanks to firstLoadPending above —
+  // no longer blanks the grid while it runs. The ref keeps the handler on the
+  // latest load closure without reconnecting the socket on every render.
   const liveLoadRef = useRef(load);
   liveLoadRef.current = load;
   useEffect(() => {
     const socket = createSocket();
     const onData = (p) => {
       if (p && p.wardId != null && Number(p.wardId) !== Number(ward.id)) return;
+      if (p?.bed && p.bed.id != null) { patchBed(p.bed); return; }
       liveLoadRef.current();
     };
     socket.on("bed:update", onData);
@@ -1891,7 +2021,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
     socket.on("ward:operational", onData);
     socket.on("connect", () => liveLoadRef.current()); // reconnect → catch missed updates
     return () => { socket.disconnect(); };
-  }, [ward.id]);
+  }, [ward.id, patchBed]);
 
   // On phones, hide the app top bar while inside a ward — the back chip is the way
   // out, and the reclaimed space goes to the bed grid. (CSS: body.ward-focus)
@@ -1945,12 +2075,17 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
     });
     try {
       await cfg.updateBedStatus(bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId);
+      // Only on confirmed success — a failed save (caught below) isn't a sign of
+      // real progress, so it shouldn't reset the alarm's idle timer. `onBedSaved`
+      // is undefined for every role besides PRE (Doctor/Nurse/FC don't pass it),
+      // so this is a no-op everywhere else.
+      onBedSaved?.();
     } catch (e) {
       setBeds(snapshot);
       showToast(toastErr(e));
       throw e;  // re-throw so handleSave knows the save failed and skips the success toast
     }
-  }, [showToast]);
+  }, [showToast, onBedSaved]);
 
   const emptyState = (
     <div className="card empty" style={{ marginTop: 8 }}>
@@ -2029,7 +2164,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           onChange={(e) => {
             const b = sortedBeds.find((x) => String(x.id) === e.target.value);
             if (!b) return;
-            if (b.operational_status !== false) setEditingBed(b);
+            if (b.operational_status !== false) { saveBedScroll(); setEditingBed(b); }
             else { setSearch(b.bed_name); setFilter("ALL"); }
           }}
           style={{ width: "auto", flex: "0 1 auto", maxWidth: 150, fontWeight: 600 }}
@@ -2063,7 +2198,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           <BedGridCard
             key={bed.id}
             bed={bed}
-            onClick={clickable && bed.operational_status !== false ? () => setEditingBed(bed) : undefined}
+            onClick={clickable && bed.operational_status !== false ? () => { saveBedScroll(); setEditingBed(bed); } : undefined}
           />
         ))}
       </div>
@@ -2221,9 +2356,9 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         <DischargesPage role={cfg.role} wardId={ward.id} />
       ) : (
         <>
-          {!loading && beds.length > 0 && searchBar}
-          {loading ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable />}
-          {!loading && beds.length > 0 && summaryStrip}
+          {!firstLoadPending && beds.length > 0 && searchBar}
+          {firstLoadPending ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable />}
+          {!firstLoadPending && beds.length > 0 && summaryStrip}
         </>
       )}
 
