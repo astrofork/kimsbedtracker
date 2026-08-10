@@ -190,6 +190,9 @@ export const api = {
   doctorActivity: () => req("/doctor/activity"),
   doctorLiveWards: () => req("/doctor/live-wards"),
   doctorBedDetails: () => req("/doctor/bed-details"),
+  // Scoped to the doctor's own blocks — used by Entry search. /bed-details stays
+  // hospital-wide for the read-only Admin dashboard.
+  doctorMyBedDetails: () => req("/doctor/my-bed-details"),
   doctorAdminDashboard: (unit) => req(`/doctor/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   doctorAdminDashboardHistory: (unit) => req(`/doctor/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   doctorSnapshots: () => req("/doctor/snapshots"),
@@ -296,6 +299,8 @@ export const api = {
   mgrDischargeLounge: () => req("/manager/discharge-lounge"),
   mgrSetupDischargeLounge: (name, initialBeds) => req("/manager/discharge-lounge", { method: "POST", body: JSON.stringify({ name, initial_beds: initialBeds }) }),
   mgrRenameDischargeLounge: (name) => req("/manager/discharge-lounge", { method: "PUT", body: JSON.stringify({ name }) }),
+  mgrBulkSetLoungeBedOperational: (fromNum, toNum, operationalStatus) =>
+    req("/manager/discharge-lounge/beds/bulk-operational", { method: "PATCH", body: JSON.stringify({ fromNum, toNum, operationalStatus }) }),
   cooViews: (source = "matrix") => req(`/coo/views?source=${source}`),
   cooSaveView: (data) => req("/coo/views", { method: "POST", body: JSON.stringify(data) }),
   cooEditView: (id, data) => req(`/coo/views/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -338,7 +343,7 @@ export const api = {
   transferCandidates: (wardId) => req(`/discharge/transfer/candidates?wardId=${wardId}`),
   transferBed: (fromBedId, toWardId, toBedId, reason) =>
     req("/discharge/transfer", { method: "POST", body: JSON.stringify({ fromBedId, toWardId, toBedId, reason }) }),
-  dischargeMoveToLounge: (admissionId) => req(`/discharge/${admissionId}/move-to-lounge`, { method: "POST", body: JSON.stringify({}) }),
+  dischargeMoveToLounge: (admissionId, reason) => req(`/discharge/${admissionId}/move-to-lounge`, { method: "POST", body: JSON.stringify({ reason }) }),
   readmitFromLounge: (admissionId, toWardId, toBedId, reason) =>
     req(`/discharge/${admissionId}/readmit`, { method: "POST", body: JSON.stringify({ toWardId, toBedId, reason }) }),
   dischargeForceComplete: (admissionId) =>

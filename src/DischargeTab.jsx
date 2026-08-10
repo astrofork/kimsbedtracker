@@ -54,8 +54,52 @@ function todayStr(offsetDays = 0) {
   return new Date(Date.now() + offsetDays * 86400000).toISOString().slice(0, 10);
 }
 
-function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking }) {
+// "Patient Left" while System Checkout is still pending needs a mandatory note
+// (same rule as any other bed transfer — moving to the Lounge IS a transfer)
+// before it can move the bed. Short by design: this fires every time a
+// discharge reaches this point, so it stays to the point rather than
+// re-explaining the whole Lounge mechanism on every use.
+function MoveToLoungeNotePopup({ onCancel, onConfirm, saving }) {
+  const [note, setNote] = useState("");
+  useModal(onCancel);
+  return createPortal(
+    <div className="overlay" onClick={onCancel} style={{ alignItems: "center" }}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="lounge-note-title"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--panel)", color: "var(--ink)", borderRadius: 16,
+          maxWidth: 360, width: "calc(100% - 32px)", margin: "auto",
+          padding: "22px 20px 18px", boxShadow: "0 20px 50px rgba(0,0,0,.25)",
+          border: "1px solid var(--line)",
+        }}>
+        <div id="lounge-note-title" style={{ fontWeight: 800, fontSize: 16, marginBottom: 6 }}>
+          Move to Discharge Lounge
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--ink-2)", lineHeight: 1.4, marginBottom: 12 }}>
+          System Checkout is still pending. This frees up the bed for a new patient.
+        </div>
+        <label className="label" style={{ fontSize: 11 }}>Note * <span style={{ fontWeight: 400, color: "var(--ink-3)" }}>({note.length}/50)</span></label>
+        <textarea className="field" autoFocus value={note} maxLength={50} rows={2}
+          placeholder="Why is this bed being moved to the lounge?"
+          onChange={(e) => setNote(e.target.value)}
+          style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", marginTop: 4, marginBottom: 14 }} />
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn-ghost" style={{ flex: 1, padding: "10px 0", fontSize: 13, fontWeight: 700 }}
+            disabled={saving} onClick={onCancel}>Dismiss</button>
+          <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", fontSize: 13, fontWeight: 700 }}
+            disabled={saving || !note.trim()} onClick={() => onConfirm(note.trim())}>
+            {saving ? "Moving…" : "Move to Discharge Lounge"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking, actor }) {
   const [pickingLeft, setPickingLeft] = useState(false);
+  const [loungeNoteOpen, setLoungeNoteOpen] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
   const canAct = step.roles.includes(role);
   const isPharmacyStep = ["DRUG_RETURN", "PHARMACY_CLEARANCE"].includes(step.key);
@@ -127,7 +171,11 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
           </div>
         )}
       </div>
-      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+      {/* marginLeft: auto keeps this block pinned to the right edge even when
+          flex-wrap drops it onto its own line on narrow (phone) widths — without
+          it, a lone wrapped flex item falls back to flex-start instead of
+          honoring the parent's justify-content: space-between. */}
+      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, marginLeft: "auto" }}>
         {locked ? (
           <span title={lockedTitle} style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 4 }}>
             <Ic d={icons.ban} s={12} /> After {lockedOn}
@@ -150,18 +198,7 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
                   setPickingLeft(false);
                   onSetStatus(step.key, "COMPLETED", { patientLeft: true });
                 } else {
-                  const choice = await confirm({
-                    title: "Patient Has Left",
-                    message: "System Checkout is still pending — billing/paperwork isn't complete yet.\n\nMove the patient to the Discharge Lounge to free up this bed?",
-                    confirmLabel: "Move to Discharge Lounge",
-                    cancelLabel: "Dismiss",
-                    danger: false,
-                    warning: true,
-                  });
-                  if (choice) {
-                    setPickingLeft(false);
-                    onSetStatus(step.key, "COMPLETED", { patientLeft: true, moveToLounge: true });
-                  }
+                  setLoungeNoteOpen(true);
                 }
               }}>Patient Left</button>
             <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
@@ -189,9 +226,27 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
             )}
           </div>
         ) : null}
-        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
+        {(status === "COMPLETED" || status === "NOT_APPLICABLE") && actor ? (
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-2)" }} title={fmtDateTime(actor.at)}>
+            {status === "NOT_APPLICABLE" ? "Marked N/A" : "Completed"} by {actor.name || "Unknown"}
+            {actor.role && ` (${ROLE_SHORT[actor.role] || actor.role})`}
+          </span>
+        ) : (
+          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
+        )}
       </div>
       {confirmDialog}
+      {loungeNoteOpen && (
+        <MoveToLoungeNotePopup
+          saving={busy}
+          onCancel={() => setLoungeNoteOpen(false)}
+          onConfirm={(note) => {
+            setLoungeNoteOpen(false);
+            setPickingLeft(false);
+            onSetStatus(step.key, "COMPLETED", { patientLeft: true, moveToLounge: true, moveNote: note });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -379,9 +434,10 @@ export function TransferSection({ bed, onClose, onSaved, onConflict, submit, sub
           {candidates.map((b) => <option key={b.id} value={b.id}>{b.bed_name}</option>)}
         </select>
       )}
-      <textarea className="field" value={reason} maxLength={500} rows={2} placeholder="Transfer reason *"
+      <textarea className="field" value={reason} maxLength={50} rows={2} placeholder="Transfer reason *"
         onChange={(e) => setReason(e.target.value)}
-        style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", marginBottom: 10 }} />
+        style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", marginBottom: 2 }} />
+      <div style={{ fontSize: 11, color: "var(--ink-3)", textAlign: "right", marginBottom: 8 }}>{reason.length}/50</div>
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 8 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 14px" }} onClick={onClose}>Back</button>
@@ -532,7 +588,7 @@ function HistorySection({ admissionId }) {
           {item.type === "discharge" ? (
             <>
               <div style={{ fontWeight: 700, marginBottom: 3 }}>{item.d.field.replace(/_/g, " ")}</div>
-              <div className="dim">{item.d.old_value ?? "—"} → {item.d.new_value ?? "—"} · {item.d.changed_by_name || "System"} · {fmtDateTime(item.ts)}</div>
+              <div className="dim">{item.d.old_value ?? "—"} → {item.d.new_value ?? "—"} · {item.d.changed_by_name ? `${item.d.changed_by_name}${item.d.changed_by_role ? ` (${ROLE_SHORT[item.d.changed_by_role] || item.d.changed_by_role})` : ""}` : "System"} · {fmtDateTime(item.ts)}</div>
               {item.d.reason && <div className="dim" style={{ marginTop: 2 }}>Reason: {item.d.reason}</div>}
             </>
           ) : (
@@ -557,6 +613,8 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   const [tracking, setTracking] = useState(null);
   // Backend-computed SLA view: per-phase deadlines/state plus the overall ETA.
   const [workflow, setWorkflow] = useState(null);
+  // Who completed each step (name + role), keyed by step key — see stepActorsForAdmission.
+  const [stepActors, setStepActors] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [section, setSection] = useState(null); // "plan" | "transfer" | "history" | null
@@ -571,12 +629,14 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
       setAdmission(r.admission);
       setTracking(r.tracking);
       setWorkflow(r.workflow ?? null);
+      setStepActors(r.stepActors ?? {});
     } catch (e) {
       const msg = toastErr(e);
       if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
         setAdmission(null);
         setTracking(null);
         setWorkflow(null);
+        setStepActors({});
         onChanged?.();
       } else {
         setError(msg);
@@ -613,16 +673,20 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   const onStepAction = async (step, status, opts = {}) => {
     if (step === "PHYSICAL_CHECKOUT" && status === "COMPLETED" && opts.moveToLounge) {
       await setStep(step, status, opts);
-      await moveToLounge();
+      await moveToLounge(opts.moveNote);
       return;
     }
     setStep(step, status, opts);
   };
 
-  const moveToLounge = async () => {
+  // reason is mandatory — MoveToLoungeNotePopup already keeps its Confirm
+  // button disabled until a note is typed, but the backend enforces it too
+  // (same rule as an ordinary bed transfer), so this is never called with an
+  // empty note.
+  const moveToLounge = async (reason) => {
     setBusy(true); setError("");
     try {
-      await api.dischargeMoveToLounge(tracking.admission_id);
+      await api.dischargeMoveToLounge(tracking.admission_id, reason);
       await refresh();
     } catch (e) { setError(toastErr(e)); }
     finally { setBusy(false); }
@@ -831,7 +895,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                           patientLeft={tracking.patient_left}
                           systemCheckoutDone={tracking.system_checkout_status === "COMPLETED"}
                           phase={phaseByKey.get(step.key)} isLast={i === g.steps.length - 1}
-                          tracking={tracking} />
+                          tracking={tracking} actor={stepActors[step.key]} />
                       );
                     })}
                   </div>

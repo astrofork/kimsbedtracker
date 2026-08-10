@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { api, fmtTime, fmtClock, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
-import { Ic, icons, StatusBar, useModal, BlockAvatar, useConfirm } from "./ui.jsx";
+import { Ic, icons, StatusBar, useModal, BlockAvatar, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { naturalSort, calculateWardTotals } from "./bedUtils.js";
 
@@ -791,6 +791,11 @@ export function HierarchyManager({ showToast }) {
   // drill-down state
   const [selBlock,  setSelBlock]  = useState(null);
   const [selFloor,  setSelFloor]  = useState(null);
+  // Selecting a block/floor replaces the list above it with the next level down
+  // — save/restore scroll across each swap. saveBlockScroll()/saveFloorScroll()
+  // must be called wherever selBlock/selFloor are opened, before their setters.
+  const saveBlockScroll = useScrollRestore(!!selBlock);
+  const saveFloorScroll = useScrollRestore(!!selFloor);
 
   // data
   const [bblocks,  setBblocks]  = useState([]);
@@ -853,7 +858,7 @@ export function HierarchyManager({ showToast }) {
             <button
               style={{ width: "100%", padding: "14px 16px", background: "transparent", border: "none",
                 cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 14 }}
-              onClick={() => setSelBlock(bb)}>
+              onClick={() => { saveBlockScroll(); setSelBlock(bb); }}>
               <BlockAvatar code={bb.name} size={44} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700, fontSize: 16 }}>Block {bb.name}</div>
@@ -928,7 +933,7 @@ export function HierarchyManager({ showToast }) {
             <button
               style={{ width: "100%", padding: "14px 16px", background: "transparent", border: "none",
                 cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}
-              onClick={() => setSelFloor(floor)}>
+              onClick={() => { saveFloorScroll(); setSelFloor(floor); }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10, background: "var(--teal)",
                 color: "#fff", display: "flex", alignItems: "center", justifyContent: "center",
@@ -2349,6 +2354,10 @@ export function PreBlockManager({ showToast }) {
   const [blocks,  setBlocks]  = useState([]);
   const [allWards, setAllWards] = useState([]);
   const [selBlock, setSelBlock] = useState(null); // null = list | object = detail
+  // Selecting a block replaces this list with PreBlockDetail — save/restore
+  // scroll across that swap. saveBlockScroll() must be called wherever
+  // selBlock is opened, before setSelBlock.
+  const saveBlockScroll = useScrollRestore(!!selBlock);
   const [editing,  setEditing]  = useState(null); // null | "new" | block obj
   const [confirm, confirmDialog] = useConfirm();
 
@@ -2396,6 +2405,7 @@ export function PreBlockManager({ showToast }) {
             border: "none", cursor: "pointer", textAlign: "left", display: "flex",
             alignItems: "center", gap: 12 }}
             onClick={async () => {
+              saveBlockScroll();
               try {
                 const detail = await api.mgrPreBlock(b.id);
                 setSelBlock(detail);
@@ -3513,6 +3523,10 @@ function NurseEditor({ nurse, stations, onClose, onSaved, showToast }) {
 export function StationManager({ showToast }) {
   const [stations,         setStations]         = useState([]);
   const [selectedStation,  setSelectedStation]  = useState(null);
+  // Selecting a station replaces this list with StationDetail — save/restore
+  // scroll across that swap. saveStationScroll() must be called wherever
+  // selectedStation is opened, before setSelectedStation.
+  const saveStationScroll = useScrollRestore(!!selectedStation);
   const [editing,          setEditing]          = useState(null);
   const [confirm, confirmDialog] = useConfirm();
 
@@ -3549,7 +3563,7 @@ export function StationManager({ showToast }) {
 
       {stations.map((s) => (
         <div className="card" key={s.id} style={{ padding: 14, marginBottom: 10, cursor: "pointer" }}
-          onClick={() => setSelectedStation(s)}>
+          onClick={() => { saveStationScroll(); setSelectedStation(s); }}>
           <div className="row between">
             <div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name}</div>
@@ -5686,6 +5700,11 @@ export function DischargeLoungeManager({ showToast }) {
   const [editBedId, setEditBedId] = useState(null);
   const [editBedName, setEditBedName] = useState("");
 
+  // Range disable/enable (e.g. "beds 51 to 300 are out of service")
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo,   setRangeTo]   = useState("");
+  const [rangeOp,   setRangeOp]   = useState(false); // target operationalStatus
+
   const load = async () => {
     try { setData(await api.mgrDischargeLounge()); }
     catch (e) { showToast(toastErr(e)); }
@@ -5738,6 +5757,35 @@ export function DischargeLoungeManager({ showToast }) {
     try {
       await api.updateBedMaster(bed.id, { operationalStatus: !(bed.operational_status !== false) });
       await load();
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const applyRange = async () => {
+    const from = parseInt(rangeFrom, 10);
+    const to   = parseInt(rangeTo, 10);
+    if (Number.isNaN(from) || Number.isNaN(to) || from < 0 || to < 0 || from > to) {
+      showToast("Enter a valid range (From ≤ To)");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await api.mgrBulkSetLoungeBedOperational(from, to, rangeOp);
+      await load();
+      const skipNote = res.skippedOccupied > 0
+        ? ` (${res.skippedOccupied} occupied bed${res.skippedOccupied !== 1 ? "s" : ""} skipped)`
+        : "";
+      let msg;
+      if (res.updated > 0) {
+        msg = `${res.updated} bed${res.updated !== 1 ? "s" : ""} marked ${rangeOp ? "operational" : "non-operational"}${skipNote} ✓`;
+      } else if (res.skippedOccupied > 0 && res.skippedOccupied === res.totalInRange) {
+        msg = `All ${res.skippedOccupied} bed${res.skippedOccupied !== 1 ? "s" : ""} in that range ${res.skippedOccupied !== 1 ? "are" : "is"} occupied — free them up first`;
+      } else if (res.skippedOccupied > 0) {
+        msg = `No changes made — ${res.skippedOccupied} occupied bed${res.skippedOccupied !== 1 ? "s" : ""} skipped, the rest ${res.totalInRange - res.skippedOccupied !== 1 ? "were" : "was"} already ${rangeOp ? "operational" : "non-operational"}`;
+      } else {
+        msg = "No matching beds in that range needed a change";
+      }
+      showToast(msg);
     } catch (e) { showToast(toastErr(e)); }
     finally { setBusy(false); }
   };
@@ -5840,12 +5888,63 @@ export function DischargeLoungeManager({ showToast }) {
             </div>
           </div>
 
+          <div className="card" style={{ padding: 14, marginBottom: 16 }}>
+            <label className="label">Range disable / enable</label>
+            <div className="dim" style={{ fontSize: 11, marginBottom: 10 }}>
+              Applies to every bed numbered in this range. Already-used beds can't be deleted, but
+              marking them non-operational hides them from other roles' ward view and from bed transfer.
+              Occupied beds can't be disabled or enabled — they're always skipped either way.
+            </div>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div>
+                <label className="label">From bed #</label>
+                <input className="field" type="number" min={0} value={rangeFrom} style={{ width: 100 }}
+                  onChange={(e) => setRangeFrom(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">To bed #</label>
+                <input className="field" type="number" min={0} value={rangeTo} style={{ width: 100 }}
+                  onChange={(e) => setRangeTo(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Action</label>
+                <div style={{
+                  display: "inline-flex", padding: 3, gap: 2, borderRadius: "var(--radius-sm)",
+                  background: "var(--panel-2)", border: "1px solid var(--line)",
+                }}>
+                  <button onClick={() => setRangeOp(false)} style={{
+                    fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: 6, border: "none", cursor: "pointer",
+                    background: !rangeOp ? "var(--panel)" : "transparent",
+                    color: !rangeOp ? "var(--amber)" : "var(--ink-3)",
+                    boxShadow: !rangeOp ? "var(--shadow)" : "none",
+                    transition: "background .15s, box-shadow .15s, color .15s",
+                  }}>Disable</button>
+                  <button onClick={() => setRangeOp(true)} style={{
+                    fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: 6, border: "none", cursor: "pointer",
+                    background: rangeOp ? "var(--panel)" : "transparent",
+                    color: rangeOp ? "var(--green)" : "var(--ink-3)",
+                    boxShadow: rangeOp ? "var(--shadow)" : "none",
+                    transition: "background .15s, box-shadow .15s, color .15s",
+                  }}>Enable</button>
+                </div>
+              </div>
+              <button className="btn btn-primary" disabled={busy || rangeFrom === "" || rangeTo === ""} onClick={applyRange} style={{ whiteSpace: "nowrap" }}>
+                Apply
+              </button>
+            </div>
+          </div>
+
           <div className="card" style={{ padding: 0, overflow: "hidden" }}>
             {data.beds.length === 0 ? (
               <div className="empty">No beds yet — add some above.</div>
             ) : (
               data.beds.map((bed) => {
                 const op = bed.operational_status !== false;
+                const occupied = bed.physical_status === "OCCUPIED";
+                // This icon always toggles to the opposite of the current state, so
+                // any click on an occupied bed is an attempted change — block it
+                // outright, in either direction.
+                const blockedByOccupied = occupied;
                 return (
                   <div key={bed.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", borderBottom: "1px solid var(--line)", opacity: op ? 1 : 0.6 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -5869,8 +5968,15 @@ export function DischargeLoungeManager({ showToast }) {
                         style={{ background: "none", border: "none", cursor: "pointer", color: "var(--primary)", padding: 4, borderRadius: 6, display: "flex" }}>
                         <Ic d={icons.pencil} s={16} />
                       </button>
-                      <button title={op ? "Mark non-operational" : "Mark operational"} onClick={() => toggleBedOp(bed)} disabled={busy}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: op ? "var(--amber)" : "var(--green)", padding: 4, borderRadius: 6, display: "flex" }}>
+                      <button
+                        title={blockedByOccupied ? "Bed is occupied — free it up first" : op ? "Mark non-operational" : "Mark operational"}
+                        onClick={() => toggleBedOp(bed)} disabled={busy || blockedByOccupied}
+                        style={{
+                          background: "none", border: "none", padding: 4, borderRadius: 6, display: "flex",
+                          cursor: blockedByOccupied ? "not-allowed" : "pointer",
+                          color: blockedByOccupied ? "var(--ink-3)" : op ? "var(--amber)" : "var(--green)",
+                          opacity: blockedByOccupied ? 0.5 : 1,
+                        }}>
                         <Ic d={op ? icons.eyeOff : icons.eye} s={16} />
                       </button>
                       <button title="Delete" onClick={() => removeBed(bed)} disabled={busy}
@@ -6217,6 +6323,10 @@ export function DoctorBlockManager({ showToast }) {
   const [allWards,   setAllWards]   = useState([]);
   const [allDoctors, setAllDoctors] = useState([]);
   const [selBlock,   setSelBlock]   = useState(null);
+  // Selecting a block replaces this list with DoctorBlockDetail — save/restore
+  // scroll across that swap. saveBlockScroll() must be called wherever
+  // selBlock is opened, before setSelBlock.
+  const saveBlockScroll = useScrollRestore(!!selBlock);
   const [editing,    setEditing]    = useState(null);
   const [confirm, confirmDialog] = useConfirm();
 
@@ -6260,7 +6370,7 @@ export function DoctorBlockManager({ showToast }) {
       {blocks.map((b) => (
         <div key={b.id} className="card" style={{ padding: 0, marginBottom: 10, overflow: "hidden" }}>
           <button style={{ width: "100%", padding: "14px 16px", background: "transparent", border: "none", cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 12 }}
-            onClick={async () => { try { setSelBlock(await api.mgrDoctorBlock(b.id)); } catch (e) { showToast(toastErr(e)); } }}>
+            onClick={async () => { saveBlockScroll(); try { setSelBlock(await api.mgrDoctorBlock(b.id)); } catch (e) { showToast(toastErr(e)); } }}>
             <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: b.status === "active" ? "var(--teal)" : "var(--panel-3, #ccc)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Ic d={icons.stethoscope} s={20} />
             </div>

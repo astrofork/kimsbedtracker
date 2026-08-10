@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { api, toastErr, createSocket, fmtRelative } from "./lib.js";
 import { AppShell } from "./shell.jsx";
-import { Ic, icons } from "./ui.jsx";
+import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { fmtIpLast6 } from "./bedUtils.js";
 import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
@@ -270,6 +270,11 @@ export default function FCApp({ user, onLogout }) {
   // ── Bed Entry (hospital-wide, operational wards only) ──────────────────────
   const [wards, setWards] = useState(null);
   const [openWard, setOpenWard] = useState(null); // { ward, tab } | null
+  // Opening a ward replaces the ward-list page with WardPage entirely — save/
+  // restore scroll across that swap the same way Entry does in PREApp.jsx.
+  // saveWardScroll() must be called at each place that OPENS a ward, before
+  // setOpenWard — see useScrollRestore's doc comment for why.
+  const saveWardScroll = useScrollRestore(!!openWard);
   const [wardFilter, setWardFilter] = useState("all");
   const [wardSearch, setWardSearch] = useState("");
   const [ipMatch, setIpMatch] = useState(null); // { wardId } | null — resolved IP lookup
@@ -470,7 +475,6 @@ export default function FCApp({ user, onLogout }) {
             initialTab={openWard.tab}
             initialSearch={openWard.search}
             cfg={FC_CFG}
-            allWards={(wards || []).map(w => ({ id: w.id, ward: w.ward, is_discharge_lounge: w.is_discharge_lounge }))}
             onBack={() => { setOpenWard(null); loadWards(); }}
           />
         ) : wards === null ? (
@@ -536,7 +540,7 @@ export default function FCApp({ user, onLogout }) {
                   })
                   .map((ward, i) => (
                     <WardCard key={ward.id} ward={{ ...ward, name: ward.ward, total_beds: ward.total }} index={i}
-                      onOpen={(w, t) => setOpenWard({ ward: { ...w, ward: w.name }, tab: t, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined })} />
+                      onOpen={(w, t) => { saveWardScroll(); setOpenWard({ ward: { ...w, ward: w.name }, tab: t, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined }); }} />
                   ))}
               </div>
             )}

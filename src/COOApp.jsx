@@ -927,9 +927,6 @@ function ConsultantsTable({ data, search = "", searchBy = "ward" }) {
                     <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
                       <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
                       {g.dept}
-                      <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
-                        {g.list.length} consultant{g.list.length === 1 ? "" : "s"} · totals shown
-                      </span>
                     </td>
                     <td style={{ ...tdC, fontWeight: 800, color: CONSULT_ACCENT }}>{g.total}</td>
                     {payerTypes.map(p => (
@@ -3000,9 +2997,6 @@ function UnifiedGroupedTable({ rows, searchFilter, groupBy, groupBySelect }) {
                       <td style={{ fontWeight: 800, fontSize: 12, letterSpacing: ".04em", color: "var(--primary)", padding: "8px 14px" }}>
                         <span style={{ marginRight: 8, display: "inline-block", transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s", fontSize: 10 }}>▶</span>
                         {key}
-                        <span style={{ marginLeft: 10, fontWeight: 600, color: "var(--ink-3)", fontSize: 11 }}>
-                          {grpRows.length} ward{grpRows.length !== 1 ? "s" : ""} · totals shown
-                        </span>
                       </td>
                       <td style={{ ...wstC, fontWeight: 800 }}>{gb}</td>
                       <td style={{ ...wstC, fontWeight: 800, color: "var(--st-o)" }}>{gocc}</td>

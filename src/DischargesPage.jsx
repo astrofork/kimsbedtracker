@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api, toastErr, createSocket, fmtRelative } from "./lib.js";
-import { Ic, icons } from "./ui.jsx";
+import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 import DischargeTab from "./DischargeTab.jsx";
 import { BackBtn } from "./PREApp.jsx";
@@ -149,6 +149,10 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL | PLANNED | RUNNING
   const [openBed, setOpenBed] = useState(null); // { id, bed_name, ward_id } | null
+  // Opening a bed replaces this whole list with its discharge detail — save/
+  // restore scroll across that swap. saveScroll() must be called wherever
+  // openBed is opened, before setOpenBed — see useScrollRestore's doc comment.
+  const saveScroll = useScrollRestore(!!openBed);
 
   const load = useCallback(() => {
     api.dischargesActive(wardId)
@@ -258,7 +262,7 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {shown.map((row) => (
             <DischargeCard key={row.admission_id} row={row}
-              onOpen={() => setOpenBed({ id: row.bed_id, bed_name: row.bed_name, ward_id: row.ward_id })} />
+              onOpen={() => { saveScroll(); setOpenBed({ id: row.bed_id, bed_name: row.bed_name, ward_id: row.ward_id }); }} />
           ))}
         </div>
       )}

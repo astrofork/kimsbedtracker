@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 export const Ic = ({ d, s = 22, style, className }) => (
@@ -118,6 +118,93 @@ export function useModal(onClose) {
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
   }, [onClose]);
+}
+
+/**
+ * For a full-page conditional swap — one view replaced by another in place,
+ * not an overlay on top of one (e.g. a ward's bed grid swapping to a single
+ * bed's editor). Unlike useModal, this does NOT lock body scroll: there's no
+ * frozen background to preserve, the whole view has genuinely changed.
+ *
+ * Returns `save` — call it SYNCHRONOUSLY inside the click handler that
+ * triggers the swap, before the state update that causes it:
+ *
+ *   onClick={() => { save(); setOpenWard(ward); }}
+ *
+ * This can't be done reactively (e.g. capturing window.scrollY in an effect
+ * keyed on `active` becoming true) because by the time any effect runs, React
+ * has already swapped the DOM — and the replacement view typically starts
+ * empty/short before its own data has loaded, so the browser silently clamps
+ * the scroll position to that shorter height the moment it lands. An effect
+ * would then be reading the already-clamped value, not the real one.
+ *
+ * The CLOSING side usually needs no such care — going back typically reveals
+ * content whose data was already loaded and held by an ancestor that never
+ * unmounted, so the plain setter is fine there: onBack={() => setOpenWard(null)}.
+ * BUT: if the screen being returned to is itself a component that fully
+ * unmounted while this one was open (rather than a sibling branch of an
+ * always-mounted parent), it restarts from scratch — its own "loading" state,
+ * short until its own fetch resolves — and the exact same clamp-before-you-
+ * can-read-it problem happens on the way back out too. The retry loop below
+ * covers that case for free: it keeps re-asserting the target position for a
+ * bit after the swap, so it still lands correctly once that screen's data
+ * arrives and it grows to its real height, without needing to know in advance
+ * whether this particular return trip will have that problem.
+ *
+ * While `active` is true: resets scroll to the top, so the replacement view
+ * starts at its own top instead of wherever the previous view was scrolled
+ * to. The moment `active` goes back to false, whatever `save()` captured is
+ * restored — so returning to a long list lands you back where you were.
+ */
+// Doctor's BlockDetail (refetching its block + wards + doctors on every
+// remount) measured at ~1.1-1.3s to finish and grow back to full height on a
+// normal connection — a 1s budget cut off just short of that and silently
+// failed. 6s leaves real margin above the slowest observed case for a
+// middling connection, while costing nothing on a fast one: the loop stops
+// the instant it lands, it doesn't wait out the full budget every time.
+const SCROLL_RESTORE_RETRY_MS = 6000;
+export function useScrollRestore(active) {
+  const yRef = useRef(null);
+  // Tracks the currently in-flight retry loop's frame id (if any). Only
+  // touched on the OPENING branch below — cancelling here on every effect
+  // run (including the closing one) would cancel the very retry loop that
+  // closing's own cleanup just launched, in the same synchronous effect
+  // flush, before it ever got a frame to run.
+  const restoreFrameRef = useRef(null);
+  const save = useCallback(() => { yRef.current = window.scrollY; }, []);
+  useEffect(() => {
+    if (!active) return; // closing: nothing to do here — the PREVIOUS (opening) run's cleanup below handles the restore
+    // Opening: cancel any retry loop still running from an earlier close
+    // (e.g. a rapid close→reopen before it finished), so it doesn't fight
+    // the fresh top-of-page reset this open is about to do.
+    if (restoreFrameRef.current != null) {
+      cancelAnimationFrame(restoreFrameRef.current);
+      restoreFrameRef.current = null;
+    }
+    // Falls back to reading it now if save() was never called (e.g. a
+    // programmatic transition with no click to hook, such as auto-opening a
+    // bed from a deep link) — same behavior as before this fix for that
+    // narrow case, just no longer the path every ordinary click takes.
+    const y = yRef.current ?? window.scrollY;
+    yRef.current = null;
+    window.scrollTo(0, 0);
+    return () => {
+      const deadline = Date.now() + SCROLL_RESTORE_RETRY_MS;
+      const tick = () => {
+        window.scrollTo(0, y);
+        // Stop as soon as it actually lands (the page has grown enough to
+        // hold it) or time runs out — whichever first, so this never fights
+        // the user's own scrolling once the target has genuinely been reached.
+        if (window.scrollY !== y && Date.now() < deadline) {
+          restoreFrameRef.current = requestAnimationFrame(tick);
+        } else {
+          restoreFrameRef.current = null;
+        }
+      };
+      restoreFrameRef.current = requestAnimationFrame(tick);
+    };
+  }, [active]);
+  return save;
 }
 
 /** Numbered pagination row with a ±2-page window and smart ellipsis. */
