@@ -72,6 +72,39 @@ export function fmtIpLast6(ipLast6) {
   return ipLast6 ? `IP …${ipLast6}` : "IP not recorded";
 }
 
+// ── Entry search ─────────────────────────────────────────────────────────────
+// A 6-digit query stays an exact IP lookup. Anything else is matched against
+// ward names (by the caller) AND patient names (here). Kept in one place because
+// the same rule runs at two levels — the ward grid and the bed list inside a
+// ward — across four role apps that each own their own search box.
+
+/** Below this length a name query matches so much that it's noise, not a search. */
+export const PATIENT_NAME_MIN_QUERY = 2;
+
+/** Trimmed, lowercased, internal whitespace collapsed — so "asha   r" finds a
+ *  stored "Asha R". Mirrors the collapsing the API applies when saving a name. */
+export function normalizeQuery(s) {
+  return String(s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** True when this bed's active admission has a patient name containing `q`.
+ *  `q` must already be normalized. Beds with no name on file — every admission
+ *  predating the field — simply never match; that is not an error. */
+export function bedMatchesPatientName(bed, q) {
+  if (!q || q.length < PATIENT_NAME_MIN_QUERY) return false;
+  return !!bed?.patient_name && normalizeQuery(bed.patient_name).includes(q);
+}
+
+/** Ward ids containing at least one bed whose patient name matches `q`.
+ *  Returns an empty Set for a blank/too-short query or a not-yet-loaded list, so
+ *  callers can use it unconditionally without null checks. */
+export function wardIdsMatchingPatientName(bedDetails, q) {
+  const ids = new Set();
+  if (!Array.isArray(bedDetails) || !q || q.length < PATIENT_NAME_MIN_QUERY) return ids;
+  for (const b of bedDetails) if (bedMatchesPatientName(b, q)) ids.add(b.ward_id);
+  return ids;
+}
+
 /** Friendly current-status label: On Bed / On Bed [Res] / Discharge Initiated / Vacant [Res] / Vacant. */
 export function bedCurrentStatus(bed) {
   const occupied = bed.physical_status === "OCCUPIED";
