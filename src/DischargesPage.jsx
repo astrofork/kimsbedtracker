@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { api, toastErr, createSocket, fmtRelative } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce, fmtRelative } from "./lib.js";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 import DischargeTab from "./DischargeTab.jsx";
@@ -165,15 +165,49 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
   const liveRef = useRef(load);
   liveRef.current = load;
   useEffect(() => {
-    const socket = createSocket();
-    const onData = (p) => {
+    const socket = getSocket();
+    // Coalesced reload: bursts (per-bed ward edits, scheduler ticks) collapse
+    // into one refetch. Targeted patches below stay instant. See coalesce().
+    const reload = coalesce(() => liveRef.current());
+    const onBedUpdate = (p) => {
       if (wardId && p && p.wardId != null && Number(p.wardId) !== Number(wardId)) return;
-      liveRef.current();
+      reload();
     };
-    socket.on("discharge:update", onData);
-    socket.on("bed:update", onData);
-    socket.on("connect", onData);
-    return () => { socket.disconnect(); };
+    // discharge:update sometimes carries the full tracking row (plan/reschedule/
+    // initiate/step), sometimes just IDs (cancel/force-complete) or a partial
+    // transfer summary. Only the full-row case can be patched in place; the
+    // rest fall back to a refetch, same as before.
+    const onDischargeUpdate = (p) => {
+      if (wardId && p && p.wardId != null && Number(p.wardId) !== Number(wardId)) return;
+      if (!p?.tracking || p.tracking.admission_id == null) { reload(); return; }
+      setRows((prev) => {
+        if (!prev) return prev;
+        const idx = prev.findIndex((r) => r.admission_id === p.tracking.admission_id);
+        if (idx === -1) {
+          // A discharge just appeared in this scope for the first time (e.g.
+          // freshly planned) — the payload has tracking fields but not the
+          // bed_name/ward_name/ip_last6/payer_type this list also displays,
+          // so there's not enough here to construct a correct row. Refetch.
+          reload();
+          return prev;
+        }
+        const merged = { ...prev[idx], ...p.tracking };
+        const stillActive = ["PLANNED", "DISCHARGE_INITIATED", "IN_PROGRESS"].includes(merged.status);
+        if (!stillActive) return prev.filter((_, i) => i !== idx);
+        const next = prev.slice();
+        next[idx] = merged;
+        return next;
+      });
+    };
+    socket.on("discharge:update", onDischargeUpdate);
+    socket.on("bed:update", onBedUpdate);
+    // Reconnect (not first connect) → catch updates missed while disconnected.
+    const offReconnect = onReconnect(socket, () => liveRef.current());
+    return () => {
+      socket.off("discharge:update", onDischargeUpdate);
+      socket.off("bed:update", onBedUpdate);
+      offReconnect(); reload.cancel();
+    };
   }, [wardId]);
 
   // Full discharge page for a picked bed

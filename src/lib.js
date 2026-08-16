@@ -176,7 +176,7 @@ export const api = {
   doctorBlock: (id) => req(`/doctor/blocks/${id}`),
   doctorBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/doctor/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -200,7 +200,7 @@ export const api = {
   // ── manager — bed details (create/configure only) ────────────────────────────
   wardBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/manager/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -217,7 +217,7 @@ export const api = {
   // ── PRE — bed status management ──────────────────────────────────────────────
   preBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/pre/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -246,7 +246,7 @@ export const api = {
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/nurse/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -444,7 +444,7 @@ export const api = {
   fcDestinations: () => req("/fc/destinations"),
   fcBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/fc/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -467,21 +467,88 @@ export const api = {
 // In dev: BASE_API is "" so socket connects to the vite dev server which proxies
 // /socket.io → localhost:4000 (see vite.config.js).
 // In prod: BASE_API is the backend URL so socket connects directly.
-export function createSocket() {
-  const socket = io(BASE_API || undefined, {
-    auth: { token: getToken() },
-    // polling first so the initial handshake always works through Vite's proxy;
-    // socket.io then upgrades to WebSocket automatically if the path supports it
-    transports: ["polling", "websocket"],
-  });
-  socket.on("connect_error", (err) => {
-    if (err.message === "No token" || err.message === "Invalid token") {
-      window.dispatchEvent(new CustomEvent("session:expired", {
-        detail: { message: "Session expired. Please log in again." },
-      }));
-    }
-  });
-  return socket;
+//
+// One shared connection per browser tab, not one per component. Every screen
+// that used to call createSocket() (each opening its own independent
+// connection — a ward view + its Overstay tab + its Discharges tab could
+// have 3 live sockets open at once, each reacting to the same event) now
+// calls getSocket() instead, which returns the same connection every time.
+// Callers must clean up with socket.off(event, handler) on unmount, NEVER
+// socket.disconnect() — disconnecting would kill the connection for every
+// other screen still using it. disconnectSocket() is the one exception,
+// called from logout() so a fresh login opens a fresh connection with the
+// new token instead of reusing a stale/anonymous one.
+let sharedSocket = null;
+export function getSocket() {
+  if (!sharedSocket) {
+    sharedSocket = io(BASE_API || undefined, {
+      // Function form: re-evaluated on every (re)connect attempt, so a token
+      // obtained after this socket was first created (e.g. a re-login later
+      // in the same tab, post logout->disconnectSocket->fresh getSocket) is
+      // always the one actually sent, not whatever was current at construction.
+      auth: (cb) => cb({ token: getToken() }),
+      // polling first so the initial handshake always works through Vite's proxy;
+      // socket.io then upgrades to WebSocket automatically if the path supports it
+      transports: ["polling", "websocket"],
+    });
+    sharedSocket.on("connect_error", (err) => {
+      if (err.message === "No token" || err.message === "Invalid token") {
+        window.dispatchEvent(new CustomEvent("session:expired", {
+          detail: { message: "Session expired. Please log in again." },
+        }));
+      }
+    });
+  }
+  return sharedSocket;
+}
+export function disconnectSocket() {
+  if (sharedSocket) { sharedSocket.disconnect(); sharedSocket = null; }
+}
+
+/** Collapses a burst of socket events into ONE call.
+ *
+ *  Several server actions legitimately emit many events back-to-back — the
+ *  scheduler emits one `alarm:active` per PRE block on every 30s tick, and a
+ *  ward edit can emit per affected bed. Each of those used to trigger a full
+ *  aggregate reload, so an idle dashboard fired ~25 requests every 30 seconds
+ *  and the burst then queued behind the browser's 6-connection limit, turning
+ *  sub-second calls into multi-second ones.
+ *
+ *  The refetch is identical whether it runs once or seven times, so this only
+ *  removes duplicated work — it never changes what data is loaded. Trailing
+ *  edge: the last event in a burst wins, 250ms later (imperceptible for a
+ *  dashboard, and far cheaper than the congestion it prevents).
+ *
+ *  Callers MUST call .cancel() in their effect cleanup so a pending timer
+ *  can't fire into an unmounted component. */
+export function coalesce(fn, ms = 250) {
+  let t = null;
+  const wrapped = (...args) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => { t = null; fn(...args); }, ms);
+  };
+  wrapped.cancel = () => { if (t) { clearTimeout(t); t = null; } };
+  return wrapped;
+}
+
+/** socket.io fires "connect" for BOTH the first connection and every later
+ *  reconnect. Only a RECONNECT needs a catch-up refetch — while disconnected
+ *  the client misses events, so its data may be stale. The FIRST connection
+ *  misses nothing: the component's own mount-time load already fetched
+ *  everything, and that load and the first connect happen a few hundred ms
+ *  apart, so treating them the same made every page load fetch twice.
+ *
+ *  `seen` is seeded from socket.connected because the socket is shared: a
+ *  component mounting later finds it already connected, so no "connect" will
+ *  fire for it — without the seed, that component's first REAL reconnect
+ *  would be mistaken for a first connect and skipped.
+ *
+ *  Returns an unsubscribe function; call it in the effect cleanup. */
+export function onReconnect(socket, handler) {
+  let seen = socket.connected;
+  const onConnect = () => { if (seen) handler(); else seen = true; };
+  socket.on("connect", onConnect);
+  return () => socket.off("connect", onConnect);
 }
 
 // ---- audio alarm (loud repeating two-tone) ----

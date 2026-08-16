@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, createSocket } from "./lib.js";
+import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
 import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 import { OverstayPanel } from "./COOApp.jsx";
 import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus } from "./bedUtils.js";
 import DischargeTab, { TransferSection } from "./DischargeTab.jsx";
 import DischargesPage from "./DischargesPage.jsx";
-import { LiveBedDashboard } from "./COOApp.jsx";
+import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
 
 // "dashboard" is no longer a tab of its own — the full dashboard now renders
 // underneath Home on the same page (see the home branch below).
@@ -40,6 +40,9 @@ export default function PREApp({ user, meta, onLogout }) {
   const [toast, setToast] = useState("");
   const [liveKey, setLiveKey] = useState(0); // bumped on every live event — feeds the Dashboard tab
   const loadRef = useRef(null);
+  // Lives here, above the Home/Entry/Discharges tab switch, so it survives
+  // navigating away from and back to Home — see useLiveBedDashboardData.
+  const dashboardData = useLiveBedDashboardData("pre", tab === "home");
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
 
@@ -63,18 +66,21 @@ export default function PREApp({ user, meta, onLogout }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Real-time updates via WebSocket — replaces 15-second polling
+  // Real-time updates via WebSocket — replaces 15-second polling. Shared
+  // connection (see getSocket() in lib.js) — .off() each listener on
+  // cleanup, never .disconnect(), since other mounted screens (e.g. an open
+  // WardPage) are using the same connection.
   useEffect(() => {
-    const socket = createSocket();
-    const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
-    socket.on("bed:update", refresh); // ward counts changed
-    socket.on("discharge:update", refresh); // discharge step/plan/transfer changed
-    socket.on("discharge:overstay", refresh); // 60-min overstay timer fired
-    socket.on("round:submit", refresh); // round submitted → alarm clears
-    socket.on("alarm:active", refresh); // scheduler fired → alarm state changed
-    socket.on("ward:operational", refresh); // manager toggled ward operational status
-    socket.on("connect", refresh); // reconnect → catch missed updates
-    return () => { socket.disconnect(); };
+    const socket = getSocket();
+    // Coalesced: PRE joins "overview", so it receives the scheduler's
+    // per-block alarm:active burst every 30s too. See coalesce().
+    const refresh = coalesce(() => { loadRef.current(); setLiveKey(k => k + 1); });
+    const events = ["bed:update", "discharge:update", "discharge:overstay", "round:submit", "alarm:active", "ward:operational"];
+    for (const ev of events) socket.on(ev, refresh);
+    // Only a RECONNECT refreshes — the first connect would just duplicate the
+    // mount-time load() a few hundred ms later. See onReconnect().
+    const offReconnect = onReconnect(socket, refresh);
+    return () => { for (const ev of events) socket.off(ev, refresh); offReconnect(); refresh.cancel(); };
   }, []);
 
   const alarmActive = data?.alarm?.alarmActive;
@@ -245,7 +251,7 @@ export default function PREApp({ user, meta, onLogout }) {
           <>
             <Home {...{ data, meta, setTab, alarmActive }} />
             <div style={{ height: 20 }} />
-            <LiveBedDashboard refreshKey={liveKey} userName={user.username || data.pre} scope="pre" />
+            <LiveBedDashboard data={dashboardData} userName={user.username || data.pre} scope="pre" />
           </>
         )}
         {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} onEngage={acknowledgeAlarm} />}
@@ -2010,17 +2016,26 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   const liveLoadRef = useRef(load);
   liveLoadRef.current = load;
   useEffect(() => {
-    const socket = createSocket();
+    const socket = getSocket();
+    // Only the RELOAD fallback is coalesced — a payload carrying the full bed
+    // row still patches instantly, since that costs no request.
+    const reload = coalesce(() => liveLoadRef.current());
     const onData = (p) => {
       if (p && p.wardId != null && Number(p.wardId) !== Number(ward.id)) return;
       if (p?.bed && p.bed.id != null) { patchBed(p.bed); return; }
-      liveLoadRef.current();
+      reload();
     };
     socket.on("bed:update", onData);
     socket.on("discharge:update", onData);
     socket.on("ward:operational", onData);
-    socket.on("connect", () => liveLoadRef.current()); // reconnect → catch missed updates
-    return () => { socket.disconnect(); };
+    // Reconnect (not first connect) → catch updates missed while disconnected.
+    const offReconnect = onReconnect(socket, () => liveLoadRef.current());
+    return () => {
+      socket.off("bed:update", onData);
+      socket.off("discharge:update", onData);
+      socket.off("ward:operational", onData);
+      offReconnect(); reload.cancel();
+    };
   }, [ward.id, patchBed]);
 
   // On phones, hide the app top bar while inside a ward — the back chip is the way

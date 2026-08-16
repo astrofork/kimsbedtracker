@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
+import { api, toastErr, getSocket, fmtRelative, fmtDateTime } from "./lib.js";
 import { Ic, icons, ThemeToggle, useConfirm, useModal, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 
@@ -987,7 +987,7 @@ export default function PWOApp({ user, meta, onLogout }) {
 
   // ── Live updates: patch in place, never refetch ──────────────────────────
   useEffect(() => {
-    const socket = createSocket();
+    const socket = getSocket();
 
     const patchRow = (id, patch) =>
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -1006,7 +1006,7 @@ export default function PWOApp({ user, meta, onLogout }) {
       }
     };
 
-    socket.on("complaint:created", ({ complaint }) => {
+    const onCreated = ({ complaint }) => {
       setStats((s) => s && {
         ...s,
         open: s.open + 1,
@@ -1029,9 +1029,9 @@ export default function PWOApp({ user, meta, onLogout }) {
         setTotal((t) => t + 1);
       }
       showToast(`New complaint · ${complaint.category.label}`);
-    });
+    };
 
-    socket.on("complaint:accepted", (p) => {
+    const onAccepted = (p) => {
       setStats((s) => applyStatusDelta(s, p.fromStatus, p.status));
       patchRow(p.complaintId, {
         status: p.status, ownerPwoId: p.ownerPwoId, ownerName: p.ownerName,
@@ -1039,9 +1039,9 @@ export default function PWOApp({ user, meta, onLogout }) {
       });
       reconcile(p.complaintId, p.status);
       detailPatch.current?.("complaint:accepted", p);
-    });
+    };
 
-    socket.on("complaint:status_changed", (p) => {
+    const onStatusChanged = (p) => {
       setRows((prev) => {
         const row = prev.find((r) => r.id === p.complaintId);
         setStats((s) => applyStatusDelta(s, p.fromStatus, p.status, row?.priority?.code));
@@ -1051,9 +1051,9 @@ export default function PWOApp({ user, meta, onLogout }) {
       });
       reconcile(p.complaintId, p.status);
       detailPatch.current?.("complaint:status_changed", p);
-    });
+    };
 
-    socket.on("complaint:priority_changed", (p) => {
+    const onPriorityChanged = (p) => {
       setRows((prev) => {
         const row = prev.find((r) => r.id === p.complaintId);
         // Keep the High/Critical cards honest when priority changes on a
@@ -1072,11 +1072,23 @@ export default function PWOApp({ user, meta, onLogout }) {
         return prev.map((r) => (r.id === p.complaintId ? { ...r, priority: p.priority, updatedAt: p.updatedAt } : r));
       });
       detailPatch.current?.("complaint:priority_changed", p);
-    });
+    };
 
-    socket.on("complaint:note_added", (p) => detailPatch.current?.("complaint:note_added", p));
+    const onNoteAdded = (p) => detailPatch.current?.("complaint:note_added", p);
 
-    return () => socket.disconnect();
+    socket.on("complaint:created", onCreated);
+    socket.on("complaint:accepted", onAccepted);
+    socket.on("complaint:status_changed", onStatusChanged);
+    socket.on("complaint:priority_changed", onPriorityChanged);
+    socket.on("complaint:note_added", onNoteAdded);
+
+    return () => {
+      socket.off("complaint:created", onCreated);
+      socket.off("complaint:accepted", onAccepted);
+      socket.off("complaint:status_changed", onStatusChanged);
+      socket.off("complaint:priority_changed", onPriorityChanged);
+      socket.off("complaint:note_added", onNoteAdded);
+    };
   }, [showToast]);
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v, page: k === "page" ? v : 1 }));

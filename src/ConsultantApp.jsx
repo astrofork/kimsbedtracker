@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, createSocket } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
 import { Ic, icons, ThemeToggle, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { LiveBedDashboard } from "./COOApp.jsx";
+import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 import { BedGridCard, BedDetailSheet, BackBtn } from "./PREApp.jsx";
 
@@ -130,8 +130,8 @@ function MyPatientsPage() {
   // this one only ever receives events this consultant actually owns (room-scoped
   // server-side), so every event here is guaranteed relevant, no filtering needed.
   useEffect(() => {
-    const socket = createSocket();
-    socket.on("consultant:patient-update", (payload) => {
+    const socket = getSocket();
+    const onPatientUpdate = (payload) => {
       if (!payload || typeof payload !== "object") return;
       const { action, admission_id } = payload;
       setPatients((prev) => {
@@ -146,8 +146,9 @@ function MyPatientsPage() {
         next[idx] = payload;
         return next;
       });
-    });
-    return () => socket.disconnect();
+    };
+    socket.on("consultant:patient-update", onPatientUpdate);
+    return () => socket.off("consultant:patient-update", onPatientUpdate);
   }, []);
 
   const openBed = async (p) => {
@@ -514,17 +515,20 @@ export default function ConsultantApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
   const [liveKey, setLiveKey] = useState(0);
+  // Lives here, above the tab switch, so it survives navigating away from and
+  // back to the Dashboard tab — see useLiveBedDashboardData.
+  const dashboardData = useLiveBedDashboardData("consultant", tab === "dashboard");
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2600); }, []);
 
   // Live reload trigger for dashboard
   useEffect(() => {
-    const socket = createSocket();
-    const bump = () => setLiveKey((k) => k + 1);
-    socket.on("bed:update", bump);
-    socket.on("discharge:update", bump);
-    socket.on("discharge:overstay", bump);
-    socket.on("connect", bump);
-    return () => socket.disconnect();
+    const socket = getSocket();
+    const bump = coalesce(() => setLiveKey((k) => k + 1));
+    const events = ["bed:update", "discharge:update", "discharge:overstay"];
+    for (const ev of events) socket.on(ev, bump);
+    // Only a RECONNECT bumps — the first connect would duplicate the initial load.
+    const offReconnect = onReconnect(socket, bump);
+    return () => { for (const ev of events) socket.off(ev, bump); offReconnect(); bump.cancel(); };
   }, []);
 
   const menu = [
@@ -548,7 +552,7 @@ export default function ConsultantApp({ user, meta, onLogout }) {
       >
         {tab === "dashboard" && (
           <LiveBedDashboard
-            refreshKey={liveKey}
+            data={dashboardData}
             userName={user.name || user.username || "Consultant"}
             scope="consultant"
             hideUnitFilter

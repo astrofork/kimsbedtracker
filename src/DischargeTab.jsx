@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, fmtDateTime, createSocket } from "./lib.js";
+import { api, toastErr, fmtDateTime, getSocket, onReconnect, coalesce } from "./lib.js";
 import { Ic, icons, useConfirm, useModal } from "./ui.jsx";
 import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 
@@ -651,14 +651,27 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   const liveLoadRef = useRef(load);
   liveLoadRef.current = load;
   useEffect(() => {
-    const socket = createSocket();
-    socket.on("discharge:update", () => liveLoadRef.current());
-    socket.on("bed:update", (p) => {
+    const socket = getSocket();
+    // This panel's `workflow` (deadlines/ETA/delay state) is computed
+    // server-side from the tracking row + phase config — even though some
+    // discharge:update payloads carry the raw tracking row, there's no safe
+    // way to re-derive workflow from it on the client, so this single-record
+    // panel stays a refetch (cheap: it's one admission, not a list).
+    const reload = coalesce(() => liveLoadRef.current());
+    const onDischargeUpdate = () => reload();
+    const onBedUpdate = (p) => {
       // The bed this panel is for changed (e.g. manual vacate resets the workflow)
-      if (!p || p.bedId == null || Number(p.bedId) === Number(bed.id)) liveLoadRef.current();
-    });
-    socket.on("connect", () => liveLoadRef.current());
-    return () => { socket.disconnect(); };
+      if (!p || p.bedId == null || Number(p.bedId) === Number(bed.id)) reload();
+    };
+    socket.on("discharge:update", onDischargeUpdate);
+    socket.on("bed:update", onBedUpdate);
+    // Reconnect (not first connect) → catch updates missed while disconnected.
+    const offReconnect = onReconnect(socket, () => liveLoadRef.current());
+    return () => {
+      socket.off("discharge:update", onDischargeUpdate);
+      socket.off("bed:update", onBedUpdate);
+      offReconnect(); reload.cancel();
+    };
   }, [bed.id]);
 
   const refresh = async () => { setSection(null); await load(); onChanged?.(); };
