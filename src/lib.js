@@ -183,8 +183,13 @@ export const api = {
   },
   doctorPayerTypes: () => req("/doctor/payer-types"),
   doctorDestinations: () => req("/doctor/destinations"),
-  doctorUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
-    req(`/doctor/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
+  // The trailing `admission` object is where new admission-time fields go from
+  // here on. The positional list ahead of it is already at its practical limit —
+  // adding a 14th and 15th slot for patient name/date would make every call site
+  // a counting exercise, and a silently misordered argument is exactly the kind
+  // of bug that reaches production intact.
+  doctorUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, { patientName, admissionDate } = {}) =>
+    req(`/doctor/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   doctorReview: (blockId) => req(`/doctor/blocks/${blockId}/review`, { method: "POST" }),
   doctorReviewWard: (wardId) => req(`/doctor/wards/${wardId}/review`, { method: "POST" }),
   doctorActivity: () => req("/doctor/activity"),
@@ -232,16 +237,19 @@ export const api = {
   preAdminDashboardHistory: (unit) => req(`/pre/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   preConsultants: () => req("/pre/consultants"),
   preSnapshots: () => req("/pre/snapshots"),
-  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
-    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
+  preUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, { patientName, admissionDate } = {}) =>
+    req(`/pre/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   // Corrects a data-entry mistake on an already-active admission (IP/type/consultant/dept)
   // — never changes physical/reservation status.
   // doctorId/consultantGroupId are passed through as-is (not `?? undefined`) —
   // when the owner is switched to a Consultant Group, doctorId is explicitly
   // `null`, and `?? undefined` would wrongly coerce that to "omitted", breaking
   // the backend's "both fields sent together" contract.
-  preUpdateAdmission: (bedId, { ipLast6, admissionType, departmentName, doctorId, departmentId, consultantGroupId, payerType }) =>
-    req(`/pre/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId, payer_type: payerType }) }),
+  // patientName/admissionDate use `?? undefined` deliberately, unlike
+  // doctorId/consultantGroupId above: omitting them means "untouched, leave the
+  // stored value alone", and there is no request that clears them back to blank.
+  preUpdateAdmission: (bedId, { ipLast6, admissionType, patientName, admissionDate, departmentName, doctorId, departmentId, consultantGroupId, payerType }) =>
+    req(`/pre/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId, payer_type: payerType }) }),
   // ── Nurse — bed management ───────────────────────────────────────────────────
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
@@ -264,8 +272,8 @@ export const api = {
   nurseHospitalAdminDashboardHistory: (unit) => req(`/nurse/hospital/admin-dashboard-history${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
   nurseHospitalConsultants: () => req("/nurse/hospital/consultants"),
   nurseHospitalSnapshots: () => req("/nurse/hospital/snapshots"),
-  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
-    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
+  nurseUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, { patientName, admissionDate } = {}) =>
+    req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
   mgrPayerTypes: () => req("/manager/payer-types"),
@@ -449,10 +457,10 @@ export const api = {
     const qs = params.toString();
     return req(`/fc/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  fcUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) =>
-    req(`/fc/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
-  fcUpdateAdmission: (bedId, { ipLast6, admissionType, departmentName, doctorId, departmentId, consultantGroupId, payerType }) =>
-    req(`/fc/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId, payer_type: payerType }) }),
+  fcUpdateBedStatus: (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, { patientName, admissionDate } = {}) =>
+    req(`/fc/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
+  fcUpdateAdmission: (bedId, { ipLast6, admissionType, patientName, admissionDate, departmentName, doctorId, departmentId, consultantGroupId, payerType }) =>
+    req(`/fc/beds/${bedId}/admission`, { method: "PATCH", body: JSON.stringify({ ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId, payer_type: payerType }) }),
   // ── Simple logins (FC, Pharmacy) — admin management ───────────────────────
   mgrSimpleLogins: (role) => req(`/manager/simple-logins?role=${role}`),
   mgrCreateSimpleLogin: (role, username, password, name) =>
@@ -578,6 +586,19 @@ export function fmtDateTime(d) {
   const date = new Date(ms);
   if (isNaN(date.getTime())) return "—";
   return date.toLocaleString([], { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+/** Formats a plain "YYYY-MM-DD" calendar date for display as DD/MM/YYYY.
+ *
+ *  Deliberately a string rearrangement, not a Date round-trip: `new Date("2026-08-16")`
+ *  parses as UTC midnight and then renders in the viewer's local timezone, which
+ *  shows the previous day for anyone west of UTC. There is no time-of-day here to
+ *  preserve, so there is nothing a Date buys us and one real bug it introduces.
+ *
+ *  Storage stays ISO — it sorts chronologically as a plain string and is what the
+ *  date input and the API both speak. This is a display concern only. */
+export function fmtDMY(isoDate) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate ?? "").trim());
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
 }
 export function fmtClock(mins) {
 

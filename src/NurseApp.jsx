@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { api, createSocket } from "./lib.js";
 import { Ic, icons, StatusBar, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
+import { normalizeQuery, wardIdsMatchingPatientName, PATIENT_NAME_MIN_QUERY } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
 import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
@@ -223,10 +224,17 @@ export default function NurseApp({ user, onLogout }) {
   // ward-name search narrowing), but doesn't navigate in automatically; the
   // user still clicks the card. WardPage's search box is pre-seeded with the
   // IP once opened, so it shows just that one bed.
+  //
+  // A 2+ character non-IP query is ALSO tried as a patient name, on top of the
+  // ward-name match. Both lookups need the hospital-wide bed list, so the fetch
+  // below triggers for either.
+  const isIpSearch = /^\d{6}$/.test(wardSearch.trim());
+  const nameQuery = isIpSearch ? "" : normalizeQuery(wardSearch);
+  const needsBedLookup = isIpSearch || nameQuery.length >= PATIENT_NAME_MIN_QUERY;
+
   useEffect(() => {
-    const ip = wardSearch.trim();
     setIpNotFound(false);
-    if (!/^\d{6}$/.test(ip)) { setIpMatch(null); return; }
+    if (!needsBedLookup) { setIpMatch(null); return; }
     if (bedDetails === null) {
       if (!bedDetailsLoadingRef.current) {
         bedDetailsLoadingRef.current = true;
@@ -234,10 +242,27 @@ export default function NurseApp({ user, onLogout }) {
       }
       return; // effect re-runs once bedDetails lands
     }
-    const bed = bedDetails.find((b) => b.ip_last6 === ip);
+    // Only an IP search reports "not found" — a name query that matches nothing
+    // still legitimately falls through to the ward-name filter.
+    if (!isIpSearch) { setIpMatch(null); return; }
+    const bed = bedDetails.find((b) => b.ip_last6 === wardSearch.trim());
     if (bed) setIpMatch({ wardId: bed.ward_id });
     else { setIpMatch(null); setIpNotFound(true); }
-  }, [wardSearch, bedDetails]);
+  }, [wardSearch, bedDetails, needsBedLookup, isIpSearch]);
+
+  const nameWardIds = useMemo(
+    () => wardIdsMatchingPatientName(bedDetails, nameQuery),
+    [bedDetails, nameQuery],
+  );
+
+  // Pre-seed the ward's own bed search only when the ward was found VIA a bed —
+  // by IP, or by a patient name that isn't also the ward's name. Seeding it with
+  // a ward-name query would filter every bed out and land the user on an
+  // apparently empty ward.
+  const seedSearch = (w) =>
+    isIpSearch || (nameWardIds.has(w.id) && !w.name.toLowerCase().includes(nameQuery))
+      ? wardSearch.trim()
+      : undefined;
 
   if (wards === null) return (
     <div className="preui">
@@ -314,7 +339,7 @@ export default function NurseApp({ user, onLogout }) {
           <input
             className="field"
             value={wardSearch}
-            placeholder="Search ward / IP…"
+            placeholder="Search ward / patient / IP…"
             style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
             onChange={(e) => setWardSearch(e.target.value)}
           />
@@ -353,10 +378,12 @@ export default function NurseApp({ user, onLogout }) {
           .filter((st) => stationFilter === "all" || String(st.id) === stationFilter)
           .map((st) => {
             const nq = wardSearch.trim().toLowerCase();
-            const isIpSearch = /^\d{6}$/.test(nq);
+            // Ward-name and patient-name matches are additive, so adding patient
+            // search never hides a ward the old search would have shown.
             const list = wards.filter((w) =>
               w.station_id === st.id && (wardFilter === "all" || String(w.id) === wardFilter) &&
-              (isIpSearch ? ipMatch?.wardId === w.id : (!nq || w.name.toLowerCase().includes(nq)))
+              (isIpSearch ? ipMatch?.wardId === w.id
+                          : (!nq || w.name.toLowerCase().includes(nq) || nameWardIds.has(w.id)))
             );
             if (list.length === 0) return null;
             const beds = list.reduce((s, w) => s + (w.total_beds ?? 0), 0);
@@ -371,7 +398,7 @@ export default function NurseApp({ user, onLogout }) {
                 <div className="card-grid">
                   {list.map((ward, i) => (
                     <WardCard key={ward.id} ward={ward} index={i}
-                      onOpen={(w, tab) => { saveWardScroll(); setOpenWard({ ward: w, tab, search: isIpSearch ? nq : undefined }); }} />
+                      onOpen={(w, tab) => { saveWardScroll(); setOpenWard({ ward: w, tab, search: seedSearch(ward) }); }} />
                   ))}
                 </div>
               </div>
@@ -382,13 +409,14 @@ export default function NurseApp({ user, onLogout }) {
           {wards
             .filter((w) => {
               const nq = wardSearch.trim().toLowerCase();
-              const isIpSearch = /^\d{6}$/.test(nq);
+              // Additive, as above — patient search widens the result, never narrows it.
               return (wardFilter === "all" || String(w.id) === wardFilter) &&
-                (isIpSearch ? ipMatch?.wardId === w.id : (!nq || w.name.toLowerCase().includes(nq)));
+                (isIpSearch ? ipMatch?.wardId === w.id
+                            : (!nq || w.name.toLowerCase().includes(nq) || nameWardIds.has(w.id)));
             })
             .map((ward, i) => (
               <WardCard key={ward.id} ward={ward} index={i}
-                onOpen={(w, tab) => { saveWardScroll(); setOpenWard({ ward: w, tab, search: /^\d{6}$/.test(wardSearch.trim()) ? wardSearch.trim() : undefined }); }} />
+                onOpen={(w, tab) => { saveWardScroll(); setOpenWard({ ward: w, tab, search: seedSearch(ward) }); }} />
             ))}
         </div>
       )}

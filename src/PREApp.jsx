@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, toastErr, createSocket } from "./lib.js";
+import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, fmtDMY, toastErr, createSocket } from "./lib.js";
 import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 import { OverstayPanel } from "./COOApp.jsx";
-import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus } from "./bedUtils.js";
+import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTotals, dischargeBadge, dischargeProgress, bedCurrentStatus, normalizeQuery, bedMatchesPatientName, wardIdsMatchingPatientName, PATIENT_NAME_MIN_QUERY } from "./bedUtils.js";
 import DischargeTab, { TransferSection } from "./DischargeTab.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard } from "./COOApp.jsx";
@@ -391,10 +391,16 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
   // navigate in automatically — the user still clicks the card themselves,
   // same as any other ward. WardPage's search box is pre-seeded with the IP
   // once opened, so it shows just that one bed.
+  // A 2+ character non-IP query is ALSO tried as a patient name, on top of the
+  // ward-name match it already does. Both lookups need the hospital-wide bed
+  // list, so the fetch below now triggers for either.
+  const isIpSearch = /^\d{6}$/.test(wardSearch.trim());
+  const nameQuery = isIpSearch ? "" : normalizeQuery(wardSearch);
+  const needsBedLookup = isIpSearch || nameQuery.length >= PATIENT_NAME_MIN_QUERY;
+
   useEffect(() => {
-    const ip = wardSearch.trim();
     setIpNotFound(false);
-    if (!/^\d{6}$/.test(ip)) { setIpMatch(null); return; }
+    if (!needsBedLookup) { setIpMatch(null); return; }
     if (bedDetails === null) {
       if (!bedDetailsLoadingRef.current) {
         bedDetailsLoadingRef.current = true;
@@ -402,10 +408,18 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
       }
       return; // effect re-runs once bedDetails lands
     }
-    const bed = bedDetails.find((b) => b.ip_last6 === ip);
+    // Only an IP search reports "not found" — a name query that matches nothing
+    // still legitimately falls through to the ward-name filter.
+    if (!isIpSearch) { setIpMatch(null); return; }
+    const bed = bedDetails.find((b) => b.ip_last6 === wardSearch.trim());
     if (bed) setIpMatch({ wardId: bed.ward_id });
     else { setIpMatch(null); setIpNotFound(true); }
-  }, [wardSearch, bedDetails]);
+  }, [wardSearch, bedDetails, needsBedLookup, isIpSearch]);
+
+  const nameWardIds = useMemo(
+    () => wardIdsMatchingPatientName(bedDetails, nameQuery),
+    [bedDetails, nameQuery],
+  );
 
   // Full-page ward view — replaces the grid entirely (no popup stack).
   if (openWard) return (
@@ -444,7 +458,7 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
           <input
             className="field"
             value={wardSearch}
-            placeholder="Search ward / IP…"
+            placeholder="Search ward / patient / IP…"
             style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
             onChange={(e) => setWardSearch(e.target.value)}
           />
@@ -476,11 +490,22 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
 
       {(data.blocks ?? [{ id: data.preBlockId, name: "", wards: data.wards }]).map((block, bi) => {
         const wq = wardSearch.trim().toLowerCase();
-        const isIpSearch = /^\d{6}$/.test(wq);
+        // A non-IP query keeps ward cards that match by ward name OR that hold a
+        // patient of that name — the two are additive, so adding patient search
+        // never hides a ward the old ward-name search would have shown.
         const visibleWards = block.wards.filter((w) =>
           (wardFilter === "all" || String(w.id) === wardFilter) &&
-          (isIpSearch ? ipMatch?.wardId === w.id : (!wq || w.ward.toLowerCase().includes(wq)))
+          (isIpSearch ? ipMatch?.wardId === w.id
+                      : (!wq || w.ward.toLowerCase().includes(wq) || nameWardIds.has(w.id)))
         );
+        // Pre-seed the ward's own bed search only when the ward was found VIA a
+        // bed — by IP, or by a patient name that isn't also the ward's name.
+        // Seeding it with a ward-name query would filter every bed out and land
+        // the user on an apparently empty ward.
+        const seedSearch = (w) =>
+          isIpSearch || (nameWardIds.has(w.id) && !w.ward.toLowerCase().includes(wq))
+            ? wardSearch.trim()
+            : undefined;
         if (visibleWards.length === 0) return null;
         return (
           <div key={block.id}>
@@ -559,11 +584,11 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
                     {!nonOp && (
                       <div className="row ward-card-btns" style={{ gap: 8, marginTop: "auto", flexWrap: "wrap" }}>
                         <button className="btn btn-primary" style={{ flex: "1 1 100px", padding: "9px 0", fontSize: 13 }}
-                          onClick={() => { saveWardScroll(); setOpenWard({ ward: w, tab: "manage", search: isIpSearch ? wardSearch.trim() : undefined }); }}>
+                          onClick={() => { saveWardScroll(); setOpenWard({ ward: w, tab: "manage", search: seedSearch(w) }); }}>
                           <Ic d={icons.bed} s={13} /> Manage Beds
                         </button>
                         <button className="btn btn-ghost" style={{ flex: "1 1 88px", padding: "9px 0", fontSize: 13 }}
-                          onClick={() => { saveWardScroll(); setOpenWard({ ward: w, tab: "discharge", search: isIpSearch ? wardSearch.trim() : undefined }); }}>
+                          onClick={() => { saveWardScroll(); setOpenWard({ ward: w, tab: "discharge", search: seedSearch(w) }); }}>
                           <Ic d={icons.clipboard} s={13} /> Discharges
                         </button>
                       </div>
@@ -1031,6 +1056,14 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   const [resNote, setResNote] = useState(bed.reservation_note || "");
   const [saving, setSaving] = useState(false);
   const [ipLast6, setIpLast6] = useState("");
+  const [patientName, setPatientName] = useState("");
+  // "YYYY-MM-DD" throughout — the native date input's own value format, which is
+  // also exactly what the API stores, so this never needs parsing or reformatting.
+  const [admissionDate, setAdmissionDate] = useState("");
+  // Server-supplied date rules: whether a future admission date is allowed, and
+  // the server's own today (IST). Both come from /meta rather than being derived
+  // from the browser clock, which is the user's timezone and can be wrong.
+  const [dateRules, setDateRules] = useState(null);
   const [admissionType, setAdmissionType] = useState("");
   const [consultantName, setConsultantName] = useState("");
   const [departmentName, setDepartmentName] = useState("");
@@ -1072,7 +1105,39 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
   useEffect(() => {
     api.doctors().then(r => setAllDoctors(r.doctors || [])).catch(() => { });
     api.consultantGroups().then(r => setAllGroups(r.groups || [])).catch(() => { });
+    api.meta().then(setDateRules).catch(() => { });
   }, []);
+
+  // Upper bound for the date picker. Left undefined (no bound) when the server
+  // allows future dates, or while /meta is still in flight — guessing a bound
+  // from the browser's clock could block a date the server would have accepted.
+  // The server validates regardless, so this is a convenience, not the guard.
+  const admissionDateMax = dateRules && !dateRules.allowFutureAdmissionDate
+    ? dateRules.todayIST
+    : undefined;
+  const admissionDateValid = /^\d{4}-\d{2}-\d{2}$/.test(admissionDate)
+    && (!admissionDateMax || admissionDate <= admissionDateMax);
+  const patientNameValid = patientName.trim().length > 0;
+
+  // Single source of truth for the Patient Information edit form's blocking
+  // errors — the Save button's disabled state, the field borders and the messages
+  // below all read these. Keeping the rule in one place is what stops the button
+  // and savePatientInfo's guards from drifting apart: they did once, and clearing
+  // an already-set date left Save enabled while the guard silently refused, which
+  // reads to the user as a broken button.
+  //
+  // Null (no error) when the field is blank AND was blank when Edit opened — that
+  // is the legacy admission case, which stays saveable so an unrelated correction
+  // isn't blocked behind data the user may not have.
+  const editSnap = patientInfoSnapshotRef.current;
+  const nameError = (editSnap?.patientName || patientName.trim()) && !patientNameValid
+    ? "Patient name is required — it can't be left blank."
+    : null;
+  // A native date input only ever yields "" or a well-formed YYYY-MM-DD, so a
+  // non-empty value failing validation can only mean it exceeded the max bound.
+  const dateError = (editSnap?.admissionDate || admissionDate) && !admissionDateValid
+    ? (admissionDate ? "Date of admission cannot be in the future." : "Date of admission is required — it can't be left blank.")
+    : null;
   // Bidirectional filtering: picking a department narrows the consultant/group
   // list to those with that department (below); picking a consultant/group
   // narrows the department list the same way (see availableDepartments in
@@ -1100,6 +1165,10 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     const groupIdInit = isGroupOwned ? (bed.consultant_group_id || null) : null;
     const deptIdInit = bed.department_id || null;
     const payerInit = bed.payer_type || "";
+    // Blank for every admission created before these fields existed. They stay
+    // blank — and stay saveable — until someone actually fills them in here.
+    const patientNameInit = bed.patient_name || "";
+    const admissionDateInit = bed.admission_date || "";
     setIpLast6(ipLast6Init);
     setAdmissionType(admissionTypeInit);
     setConsultantName(consultantNameInit);
@@ -1108,9 +1177,12 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     setSelectedGroupId(groupIdInit);
     setSelectedDeptId(deptIdInit);
     setEditPayer(payerInit);
+    setPatientName(patientNameInit);
+    setAdmissionDate(admissionDateInit);
     patientInfoSnapshotRef.current = {
       ipLast6: ipLast6Init, admissionType: admissionTypeInit,
       consultantName: consultantNameInit, departmentName: departmentNameInit,
+      patientName: patientNameInit, admissionDate: admissionDateInit,
       doctorId: doctorIdInit, groupId: groupIdInit, departmentId: deptIdInit, payer: payerInit,
     };
     setEditingPatientInfo(true);
@@ -1120,12 +1192,24 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     if (!/^\d{6}$/.test(ipLast6)) return;
     if (!admissionType || !selectedDeptId || (!selectedDoctorId && !selectedGroupId)) return;
 
+    const snap = patientInfoSnapshotRef.current || {};
+
+    // Same nameError/dateError the Save button reads, so the button can never be
+    // enabled for a state this refuses to save. See their definition for the rule:
+    // an existing value can't be cleared and an entered value must be complete,
+    // but an admission that predates these fields may still be saved with both
+    // blank so unrelated corrections aren't gated behind data the user lacks.
+    if (nameError || dateError) return;
+
     // Only send fields that actually changed from the snapshot taken when the
     // edit form opened — avoids resending untouched fields on every save.
-    const snap = patientInfoSnapshotRef.current || {};
     const patch = {};
     if (ipLast6 !== snap.ipLast6) patch.ipLast6 = ipLast6;
     if (admissionType !== snap.admissionType) patch.admissionType = admissionType;
+    // Compared against the snapshot, so a still-blank legacy field is simply never
+    // sent — which is exactly how the API is told to leave it alone.
+    if (patientName.trim() !== (snap.patientName || "")) patch.patientName = patientName.trim();
+    if (admissionDate !== (snap.admissionDate || "")) patch.admissionDate = admissionDate;
     if (consultantName !== snap.consultantName) patch.consultantName = consultantName;
     if (departmentName !== snap.departmentName) patch.departmentName = departmentName;
     // doctorId/consultantGroupId are sent together whenever the owner changed —
@@ -1330,6 +1414,8 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     if (!showActionsRow && needsDestination && !destination) return;
     if (!showActionsRow && needsResNote && !resNote.trim()) return;
     if (needsIp && !ipValid) return;
+    if (needsIp && !patientNameValid) return;
+    if (needsIp && !admissionDateValid) return;
     if (needsIp && !admissionType) return;
     if (needsIp && !selectedDeptId) return;
     if (needsIp && !selectedDoctorId && !selectedGroupId) return;
@@ -1344,8 +1430,14 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
     const doctorIdArg = needsIp ? (selectedDoctorId || null) : undefined;
     const departmentIdArg = needsIp ? (selectedDeptId || null) : undefined;
     const consultantGroupIdArg = needsIp ? (selectedGroupId || null) : undefined;
+    // Only sent on a fresh admission — a plain status change (e.g. Occupied →
+    // Vacant, or a reservation toggle) must not touch the admission's patient
+    // fields, and omitting them is how the API is told to leave them alone.
+    const admissionArg = needsIp
+      ? { patientName: patientName.trim(), admissionDate }
+      : {};
     try {
-      await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg, ipArg, admissionTypeArg, consultantArg, departmentArg, doctorIdArg, departmentIdArg, consultantGroupIdArg);
+      await onSave(bed.id, physical, reservation, payerArg, destinationArg, resNoteArg, ipArg, admissionTypeArg, consultantArg, departmentArg, doctorIdArg, departmentIdArg, consultantGroupIdArg, admissionArg);
       onToast?.("Status updated ✓");
     } catch {
       // error already shown as a toast by changeStatus in WardPage
@@ -1468,6 +1560,39 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
               placeholder="e.g. 123456" style={{ marginBottom: 14, borderColor: !/^\d{6}$/.test(ipLast6) ? "var(--red)" : undefined }}
               onChange={(e) => setIpLast6(e.target.value.replace(/\D/g, "").slice(0, 6))} />
 
+            {/* Marked required only once there is something to protect: on an
+                admission that predates these fields both start blank and may be
+                saved that way, so an unrelated correction isn't blocked behind
+                details the user may not have to hand. */}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
+              Patient Name {patientInfoSnapshotRef.current?.patientName && <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>}
+            </div>
+            <input className="field" value={patientName} maxLength={120}
+              placeholder="Not recorded — add it here"
+              style={{ marginBottom: nameError ? 4 : 14, borderColor: nameError ? "var(--red)" : undefined }}
+              onChange={(e) => setPatientName(e.target.value)} />
+            {/* Every state that disables Save has to say why here, or the button
+                just looks broken. These conditions mirror the disabled prop. */}
+            {nameError && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 14 }}>{nameError}</div>
+            )}
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
+              Date of Admission {patientInfoSnapshotRef.current?.admissionDate && <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>}
+            </div>
+            <input className="field" type="date" value={admissionDate} max={admissionDateMax}
+              style={{ marginBottom: admissionDate || dateError ? 4 : 14, borderColor: dateError ? "var(--red)" : undefined }}
+              onChange={(e) => setAdmissionDate(e.target.value)} />
+            {/* Same DD/MM/YYYY echo as the admission form — see the note there. */}
+            {admissionDate && admissionDateValid && (
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginBottom: 14, fontWeight: 600 }}>
+                {fmtDMY(admissionDate)} <span style={{ fontWeight: 500 }}>(DD/MM/YYYY)</span>
+              </div>
+            )}
+            {dateError && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginBottom: 14 }}>{dateError}</div>
+            )}
+
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 8 }}>
               Department &amp; Consultant <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
             </div>
@@ -1491,7 +1616,8 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
               <button className="btn btn-ghost" style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13 }}
                 disabled={savingPatientInfo} onClick={() => setEditingPatientInfo(false)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1, padding: "10px 0", borderRadius: 10, fontSize: 13 }}
-                disabled={savingPatientInfo || !/^\d{6}$/.test(ipLast6) || !admissionType || !selectedDeptId || (!selectedDoctorId && !selectedGroupId)}
+                disabled={savingPatientInfo || !/^\d{6}$/.test(ipLast6) || !admissionType || !selectedDeptId || (!selectedDoctorId && !selectedGroupId)
+                  || Boolean(nameError) || Boolean(dateError)}
                 onClick={savePatientInfo}>{savingPatientInfo ? "Saving…" : "Save"}</button>
             </div>
           </div>
@@ -1507,6 +1633,22 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
               <div className="pdlg-row" style={{ padding: "10px 0" }}>
                 <span className="k row" style={{ gap: 10 }}><Ic d={icons.user} s={16} /> IP/OPD</span>
                 <span className="v">{bed.ip_last6 || "Not recorded"}</span>
+              </div>
+            )}
+            {/* Always rendered for an occupied bed, blank or not — "Not recorded"
+                tells staff the value is genuinely missing (an admission older than
+                the field) rather than leaving them to wonder why the row vanished,
+                and it's the same wording the IP row above already uses. */}
+            {bed.physical_status === "OCCUPIED" && (
+              <div className="pdlg-row" style={{ padding: "10px 0" }}>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.user} s={16} /> Patient Name</span>
+                <span className="v">{bed.patient_name || "Not recorded"}</span>
+              </div>
+            )}
+            {bed.physical_status === "OCCUPIED" && (
+              <div className="pdlg-row" style={{ padding: "10px 0" }}>
+                <span className="k row" style={{ gap: 10 }}><Ic d={icons.clock} s={16} /> Date of Admission</span>
+                <span className="v">{fmtDMY(bed.admission_date) || "Not recorded"}</span>
               </div>
             )}
             {bed.physical_status === "OCCUPIED" && bed.payer_type && (
@@ -1643,6 +1785,45 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
             {!ipValid && (
               <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Enter exactly 6 digits.</div>
             )}
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 16, marginBottom: 10 }}>
+              Patient Name <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            <input className="field" value={patientName} maxLength={120}
+              placeholder="Full name as per records"
+              onChange={(e) => setPatientName(e.target.value)}
+              style={{ borderColor: !patientNameValid ? "var(--red)" : undefined }} />
+            {!patientNameValid && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>Enter the patient's name.</div>
+            )}
+
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 16, marginBottom: 10 }}>
+              Date of Admission <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
+            </div>
+            {/* type="date" gives both entry modes at once: typing, with the browser
+                enforcing the format, and the native calendar picker. Its value is
+                always YYYY-MM-DD, which is exactly what the API stores. */}
+            <input className="field" type="date" value={admissionDate} max={admissionDateMax}
+              onChange={(e) => setAdmissionDate(e.target.value)}
+              style={{ borderColor: !admissionDateValid ? "var(--red)" : undefined }} />
+            {/* A native date input renders in the browser/OS locale, which we can't
+                set from HTML — so on a US-locale machine the box itself reads
+                mm/dd/yyyy. Echoing the chosen date back as DD/MM/YYYY means the
+                user always sees which day they actually picked, whatever the box
+                shows. 05/08 vs 08/05 is not a mistake worth risking on a ward. */}
+            {admissionDateValid && (
+              <div style={{ fontSize: 11.5, color: "var(--ink-3)", marginTop: 5, fontWeight: 600 }}>
+                {fmtDMY(admissionDate)} <span style={{ fontWeight: 500 }}>(DD/MM/YYYY)</span>
+              </div>
+            )}
+            {!admissionDateValid && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 5 }}>
+                {admissionDate && admissionDateMax && admissionDate > admissionDateMax
+                  ? "Date of admission cannot be in the future."
+                  : "Select the date of admission."}
+              </div>
+            )}
+
             <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", letterSpacing: 0.8, textTransform: "uppercase", marginTop: 16, marginBottom: 10 }}>
               Department &amp; Consultant <span style={{ color: "var(--red)", fontWeight: 900 }}>*</span>
             </div>
@@ -1867,7 +2048,10 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
               Cancel
             </button>
             <button className="btn btn-primary" style={{ flex: 1.6, padding: "13px 0", borderRadius: 12, fontSize: 14.5 }}
-              disabled={saving || noChanges || (needsPayer && !payer) || (!showActionsRow && needsDestination && !destination) || (!showActionsRow && needsResNote && !resNote.trim()) || (needsIp && !ipValid) || (needsIp && !admissionType)}
+              disabled={saving || noChanges || (needsPayer && !payer) || (!showActionsRow && needsDestination && !destination) || (!showActionsRow && needsResNote && !resNote.trim()) || (needsIp && !ipValid) || (needsIp && !admissionType)
+                // Kept in step with handleSave's own guards — without these the
+                // button would look live, do nothing on click, and give no reason.
+                || (needsIp && !patientNameValid) || (needsIp && !admissionDateValid)}
               onClick={handleSave}>
               <Ic d={icons.save} s={16} /> {saving ? "Saving…" : "Update Status"}
             </button>
@@ -2035,8 +2219,12 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   });
 
   const q = search.trim().toLowerCase();
+  // Separate normalization for the name match: `q` keeps the raw spacing that
+  // bed names and IP digits are matched on, while patient names are compared
+  // with runs of whitespace collapsed, the same way they're stored.
+  const qName = normalizeQuery(search);
   const displayed = sortedBeds.filter(b => {
-    if (q && !b.bed_name.toLowerCase().includes(q) && !(b.ip_last6 && b.ip_last6.includes(q))) return false;
+    if (q && !b.bed_name.toLowerCase().includes(q) && !(b.ip_last6 && b.ip_last6.includes(q)) && !bedMatchesPatientName(b, qName)) return false;
     if (filter === "KIMS") return b.unit_type === "KIMS";
     if (filter === "Renova") return b.unit_type?.includes("Renova");
     if (filter === "Op") return !!b.operational_status;
@@ -2048,7 +2236,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   });
 
   // Optimistic update — snapshot restored on failure; unit_type preserved via spread
-  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) => {
+  const changeStatus = useCallback(async (bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, admission = {}) => {
     if (!cfg.updateBedStatus) return;  // read-only cfg (CONSULTANT) — nothing to save
     let snapshot;
     const stillOccRes = physicalStatus === "OCCUPIED" && reservationStatus === "RESERVED";
@@ -2061,8 +2249,10 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           payer_type: physicalStatus === "VACANT" ? null : (payerType ?? b.payer_type),
           destination: stillOccRes ? (destination ?? b.destination) : null,
           reservation_note: stillVacRes ? (reservationNote ?? b.reservation_note) : null,
-          ...(physicalStatus === "VACANT" ? { ip_last6: null, admission_type: null, consultant_name: null, department_name: null, doctor_id: null, department_id: null, discharge_tracking: null } : {}),
+          ...(physicalStatus === "VACANT" ? { ip_last6: null, patient_name: null, admission_date: null, admission_type: null, consultant_name: null, department_name: null, doctor_id: null, department_id: null, discharge_tracking: null } : {}),
           ...(ipLast6 ? { ip_last6: ipLast6 } : {}),
+          ...(admission.patientName ? { patient_name: admission.patientName } : {}),
+          ...(admission.admissionDate ? { admission_date: admission.admissionDate } : {}),
           ...(admissionType ? { admission_type: admissionType } : {}),
           ...(consultantName !== undefined ? { consultant_name: consultantName } : {}),
           ...(departmentName !== undefined ? { department_name: departmentName } : {}),
@@ -2074,7 +2264,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         : b);
     });
     try {
-      await cfg.updateBedStatus(bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId);
+      await cfg.updateBedStatus(bedId, physicalStatus, reservationStatus, payerType, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, admission);
       // Only on confirmed success — a failed save (caught below) isn't a sign of
       // real progress, so it shouldn't reset the alarm's idle timer. `onBedSaved`
       // is undefined for every role besides PRE (Doctor/Nurse/FC don't pass it),
@@ -2130,7 +2320,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         <input
           className="field"
           value={search}
-          placeholder="Search bed or IP…"
+          placeholder="Search bed / patient / IP…"
           style={{ paddingLeft: 36, paddingRight: search ? 36 : 13 }}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -2183,7 +2373,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         <Ic d={icons.search} s={24} />
         <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>No beds match</div>
         <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
-          {q ? `No bed or IP matching "${search.trim()}" in this filter.` : "No beds in this filter."}
+          {q ? `No bed, IP or patient matching "${search.trim()}" in this filter.` : "No beds in this filter."}
         </div>
         {(q || filter !== "ALL") && (
           <button className="btn btn-ghost" style={{ marginTop: 12, fontSize: 12, padding: "8px 14px" }}
@@ -2251,7 +2441,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           payerTypes={payerTypes}
           destinations={destinations}
           departments={departments}
-          onSave={async (bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId) => {
+          onSave={async (bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, admission = {}) => {
             const stillOccRes = physical === "OCCUPIED" && reservation === "RESERVED";
             const stillVacRes = physical === "VACANT" && reservation === "RESERVED";
             setEditingBed(prev => ({
@@ -2260,6 +2450,8 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
               destination: stillOccRes ? (destination ?? prev.destination) : null,
               reservation_note: stillVacRes ? (reservationNote ?? prev.reservation_note) : null,
               ...(ipLast6 ? { ip_last6: ipLast6 } : {}),
+              ...(admission.patientName ? { patient_name: admission.patientName } : {}),
+              ...(admission.admissionDate ? { admission_date: admission.admissionDate } : {}),
               ...(admissionType ? { admission_type: admissionType } : {}),
               ...(consultantName !== undefined ? { consultant_name: consultantName } : {}),
               ...(departmentName !== undefined ? { department_name: departmentName } : {}),
@@ -2268,7 +2460,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
               ...(consultantGroupId ? { consultant_group_id: consultantGroupId, owner_type: "GROUP" } : {}),
               ...(doctorId ? { owner_type: "DOCTOR" } : {}),
             }));
-            await changeStatus(bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId);
+            await changeStatus(bedId, physical, reservation, payer, destination, reservationNote, ipLast6, admissionType, consultantName, departmentName, doctorId, departmentId, consultantGroupId, admission);
           }}
           onClose={() => setEditingBed(null)}
           onChanged={load}

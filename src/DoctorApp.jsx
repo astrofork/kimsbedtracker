@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { bedStateColor } from "./bedUtils.js";
+import { bedStateColor, normalizeQuery, wardIdsMatchingPatientName } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow, BackBtn } from "./PREApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard } from "./COOApp.jsx";
@@ -121,7 +121,7 @@ function WardCard({ w, i = 0, onOpen, note }) {
 }
 
 // ── Block detail ─────────────────────────────────────────────────────────────────
-function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipIndex }) {
+function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipIndex, bedRows }) {
   const [data,      setData]      = useState(null);
   const [error,     setError]     = useState(null);
   const [reviewing, setReviewing] = useState(false);
@@ -157,6 +157,15 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
     if (data?.wards?.some((w) => w.id === bed.ward_id)) setIpMatch({ wardId: bed.ward_id });
     else onOpenWard({ id: bed.ward_id, name: bed.ward, unit_type: bed.unit_type, _search: ip });
   }, [wardSearch, onOpenWard, data, ipIndex]);
+
+  // A 2+ character non-IP query is also matched against patient names, on top of
+  // the ward-name match. Unlike the IP path this never auto-navigates: a name can
+  // legitimately match several patients across several wards, so the user picks.
+  const nameQuery = /^\d{6}$/.test(wardSearch.trim()) ? "" : normalizeQuery(wardSearch);
+  const nameWardIds = useMemo(
+    () => wardIdsMatchingPatientName(bedRows, nameQuery),
+    [bedRows, nameQuery],
+  );
 
   // On phones, hide the app top bar while inside a block — the back button is the
   // way out, and the reclaimed space goes to the ward cards. (CSS: body.ward-focus)
@@ -249,7 +258,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
           {searchRow({
             value: wardSearch,
             onChange: setWardSearch,
-            placeholder: "Search ward / IP…",
+            placeholder: "Search ward / patient / IP…",
             select: data.wards.length > 1 && (
               <select className="field" aria-label="Filter by ward" value={wardFilter}
                 onChange={(e) => setWardFilter(e.target.value)}
@@ -263,13 +272,20 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
             {data.wards.filter((w) => {
               const dq = wardSearch.trim().toLowerCase();
               const isIpSearch = /^\d{6}$/.test(dq);
+              // Ward-name and patient-name matches are additive — patient search
+              // widens the result, it never hides a ward the old search showed.
               return (wardFilter === "all" || String(w.id) === wardFilter) &&
-                (isIpSearch ? ipMatch?.wardId === w.id : (!dq || w.name.toLowerCase().includes(dq)));
+                (isIpSearch ? ipMatch?.wardId === w.id
+                            : (!dq || w.name.toLowerCase().includes(dq) || nameWardIds.has(w.id)));
             }).map((w, i) => {
               const dq = wardSearch.trim();
+              // Seed the ward's bed search only when the ward was found VIA a bed
+              // — seeding a ward-name query would filter every bed out.
+              const seed = /^\d{6}$/.test(dq)
+                || (nameWardIds.has(w.id) && !w.name.toLowerCase().includes(nameQuery));
               return (
                 <WardCard key={w.id} w={w} i={i}
-                  onOpen={() => onOpenWard(/^\d{6}$/.test(dq) ? { ...w, _search: dq } : w)} />
+                  onOpen={() => onOpenWard(seed ? { ...w, _search: dq } : w)} />
               );
             })}
           </div>
@@ -280,7 +296,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────────
-function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard, ipIndex, search, setSearch, blockFilter, setBlockFilter }) {
+function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard, ipIndex, bedRows, search, setSearch, blockFilter, setBlockFilter }) {
   // Every ward this doctor can open, flattened across their blocks and tagged
   // with the block it came from (/doctor/me ships the roster up front).
   const allWards = useMemo(
@@ -298,6 +314,13 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // else is a plain ward-name match. Either way the output is ward cards, so an
   // IP goes straight to its ward in one click instead of block → ward.
   const ipBed = isIpSearch && ipIndex ? ipIndex.get(q) : undefined;
+  // Patient-name matches join the existing ward/block name matches as a third
+  // additive criterion — a name search surfaces the wards holding that patient.
+  const nameQuery = isIpSearch ? "" : normalizeQuery(search);
+  const nameWardIds = useMemo(
+    () => wardIdsMatchingPatientName(bedRows, nameQuery),
+    [bedRows, nameQuery],
+  );
   const results = useMemo(() => {
     if (!searching) return [];
     const scoped = allWards.filter((w) => blockFilter === "all" || String(w._blockId) === blockFilter);
@@ -306,14 +329,15 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
       : scoped.filter((w) =>
         w.name?.toLowerCase().includes(ql) ||
         w._blockName?.toLowerCase().includes(ql) ||
-        w.block_name?.toLowerCase().includes(ql)
+        w.block_name?.toLowerCase().includes(ql) ||
+        nameWardIds.has(w.id)
       );
     // A ward can belong to more than one Doctor Block, so it can appear twice in
     // the flattened list — show it once (dedupe after filtering, so the block
     // filter still finds it under either block).
     const seen = new Set();
     return matched.filter((w) => !seen.has(Number(w.id)) && seen.add(Number(w.id)));
-  }, [searching, allWards, blockFilter, isIpSearch, ipBed, ql]);
+  }, [searching, allWards, blockFilter, isIpSearch, ipBed, ql, nameWardIds]);
 
   const ipStillLoading = isIpSearch && ipIndex === null;
 
@@ -359,7 +383,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
       {showSearch && me.blocks.length > 0 && searchRow({
         value: search,
         onChange: setSearch,
-        placeholder: "Search ward / IP…",
+        placeholder: "Search ward / patient / IP…",
         select: me.blocks.length > 1 && (
           <select className="field" aria-label="Filter by block" value={blockFilter}
             onChange={(e) => setBlockFilter(e.target.value)}
@@ -392,7 +416,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                 {isIpSearch ? `No patient with IP ${q} in your wards` : `No ward matches “${q}”`}
               </div>
               <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-                {isIpSearch ? "Only wards in your Doctor Blocks are searched." : "Try a ward or block name, or a 6-digit IP."}
+                {isIpSearch ? "Only wards in your Doctor Blocks are searched." : "Try a ward, block or patient name, or a 6-digit IP."}
               </div>
             </div>
           ) : (
@@ -404,7 +428,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                       ? <><Ic d={icons.bed} s={11} /> Bed {ipBed.bed_name} · IP {q} · {w._blockName}</>
                       : <span style={{ color: "var(--ink-3)" }}>{w._blockName}</span>
                   }
-                  onOpen={() => onOpenWard({ ...w, _search: isIpSearch ? q : undefined })} />
+                  onOpen={() => onOpenWard({ ...w, _search: isIpSearch || (nameWardIds.has(w.id) && !w.name?.toLowerCase().includes(nameQuery)) ? q : undefined })} />
               ))}
             </div>
           )}
@@ -610,14 +634,14 @@ export default function DoctorApp({ user, onLogout }) {
           onBack={() => setWard(null)}
         />
       ) : blockId ? (
-        <BlockDetail blockId={blockId} reloadKey={reloadKey} onBack={backToBlocks} onOpenWard={openWard} showToast={showToast} ipIndex={ipIndex} />
+        <BlockDetail blockId={blockId} reloadKey={reloadKey} onBack={backToBlocks} onOpenWard={openWard} showToast={showToast} ipIndex={ipIndex} bedRows={bedDetails} />
       ) : tab === "dashboard" ? (
         <LiveBedDashboard refreshKey={reloadKey} userName={user.name || user.username || "Doctor"} scope="doctor" />
       ) : tab === "discharges" ? (
         <DischargesPage role="DOCTOR" />
       ) : (
         <Dashboard me={me} user={user} onOpenBlock={openBlock} showSummary={tab === "dash"}
-          showSearch={tab === "entry"} onOpenWard={openWard} ipIndex={ipIndex}
+          showSearch={tab === "entry"} onOpenWard={openWard} ipIndex={ipIndex} bedRows={bedDetails}
           search={entrySearch} setSearch={setEntrySearch}
           blockFilter={entryBlockFilter} setBlockFilter={setEntryBlockFilter} />
       )}
