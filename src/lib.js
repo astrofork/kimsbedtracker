@@ -62,11 +62,42 @@ async function req(path, opts = {}) {
   return data;
 }
 
+// ── Reference-data cache ─────────────────────────────────────────────────────
+// Payer types, destinations, departments, doctors and consultant groups are
+// hospital-wide lists: the same answer for every ward and every bed, changed
+// only by an admin editing Setup. They were re-fetched on every mount, so
+// opening a ward cost 3 requests and opening a bed cost 3 more — visiting ten
+// wards meant ~30 identical round-trips. A 304 does not help here: the browser
+// still pays the full round-trip (~200ms each) to be told nothing changed.
+//
+// The PROMISE is cached rather than the resolved value, so several components
+// mounting at once share ONE request instead of racing. A rejected request is
+// evicted so a transient failure is never cached permanently.
+const refCache = new Map();
+
+function cachedGet(path) {
+  if (!refCache.has(path)) {
+    refCache.set(path, req(path).catch((e) => { refCache.delete(path); throw e; }));
+  }
+  return refCache.get(path);
+}
+
+/** Drop cached reference data. Called on logout / session-expiry (the next user
+ *  may have a different role, and these lists are role-scoped), and whenever the
+ *  server signals a payer-type edit — see getSocket() below. */
+export function clearRefCache(path) {
+  if (path) refCache.delete(path); else refCache.clear();
+}
+
 export const api = {
-  meta: () => req("/meta"),
-  departments: () => req("/departments"),
-  doctors: (departmentId) => req("/doctors" + (departmentId ? `?department_id=${departmentId}` : "")),
-  consultantGroups: () => req("/consultant-groups"),
+  meta: () => cachedGet("/meta"),
+  departments: () => cachedGet("/departments"),
+  // Only the unfiltered list is cached — the filtered form is keyed by
+  // department and is not on the hot path that this cache exists for.
+  doctors: (departmentId) => (departmentId
+    ? req(`/doctors?department_id=${departmentId}`)
+    : cachedGet("/doctors")),
+  consultantGroups: () => cachedGet("/consultant-groups"),
   login: (username, password) =>
     req("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   preMe: () => req("/pre/me"),
@@ -181,8 +212,8 @@ export const api = {
     const qs = params.toString();
     return req(`/doctor/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  doctorPayerTypes: () => req("/doctor/payer-types"),
-  doctorDestinations: () => req("/doctor/destinations"),
+  doctorPayerTypes: () => cachedGet("/doctor/payer-types"),
+  doctorDestinations: () => cachedGet("/doctor/destinations"),
   // The trailing `admission` object is where new admission-time fields go from
   // here on. The positional list ahead of it is already at its practical limit —
   // adding a 14th and 15th slot for patient name/date would make every call site
@@ -227,8 +258,8 @@ export const api = {
     const qs = params.toString();
     return req(`/pre/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  prePayerTypes: () => req("/pre/payer-types"),
-  preDestinations: () => req("/pre/destinations"),
+  prePayerTypes: () => cachedGet("/pre/payer-types"),
+  preDestinations: () => cachedGet("/pre/destinations"),
   preReviewWard: (wardId) => req(`/pre/wards/${wardId}/review`, { method: "POST" }),
   // Admin-style dashboard, scoped server-side to this PRE user's own wards.
   preLiveWards: () => req("/pre/live-wards"),
@@ -259,8 +290,8 @@ export const api = {
     const qs = params.toString();
     return req(`/nurse/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  nursePayerTypes: () => req("/nurse/payer-types"),
-  nurseDestinations: () => req("/nurse/destinations"),
+  nursePayerTypes: () => cachedGet("/nurse/payer-types"),
+  nurseDestinations: () => cachedGet("/nurse/destinations"),
   nurseReviewWard: (wardId) => req(`/nurse/wards/${wardId}/review`, { method: "POST" }),
   // Admin-style dashboard, scoped server-side to this nurse's own wards.
   nurseLiveWards: () => req("/nurse/live-wards"),
@@ -276,12 +307,12 @@ export const api = {
     req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
-  mgrPayerTypes: () => req("/manager/payer-types"),
+  mgrPayerTypes: () => cachedGet("/manager/payer-types"),
   mgrCreatePayerType: (name) => req("/manager/payer-types", { method: "POST", body: JSON.stringify({ name }) }),
   mgrUpdatePayerType: (id, data) => req(`/manager/payer-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderPayerType: (id, direction) => req(`/manager/payer-types/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
   mgrDeletePayerType: (id) => req(`/manager/payer-types/${id}`, { method: "DELETE" }),
-  mgrDestinations: () => req("/manager/destinations"),
+  mgrDestinations: () => cachedGet("/manager/destinations"),
   mgrCreateDestination: (name) => req("/manager/destinations", { method: "POST", body: JSON.stringify({ name }) }),
   mgrUpdateDestination: (id, data) => req(`/manager/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderDestination: (id, direction) => req(`/manager/destinations/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
@@ -366,7 +397,7 @@ export const api = {
   consultantLiveWards: () => req("/consultant/live-wards"),
   consultantBedDetails: () => req("/consultant/bed-details"),
   consultantAdminDashboard: (unit) => req(`/consultant/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
-  consultantPayerTypes: () => req("/consultant/payer-types"),
+  consultantPayerTypes: () => cachedGet("/consultant/payer-types"),
   consultantAdminDashboardHistory: (u) => req(`/consultant/admin-dashboard-history${u && u !== "TOTAL" ? `?unit=${encodeURIComponent(u)}` : ""}`),
   consultantConsultants: () => req("/consultant/consultants"),
   consultantSnapshots: () => req("/consultant/snapshots"),
@@ -429,7 +460,7 @@ export const api = {
   pharmacyAdminDashboard: (u) => req(`/pharmacy/admin-dashboard${u ? "?unit=" + u : ""}`),
   pharmacyAdminDashboardHistory: (u) => req(`/pharmacy/admin-dashboard-history${u ? "?unit=" + u : ""}`),
   pharmacyConsultants: () => req("/pharmacy/consultants"),
-  pharmacyPayerTypes: () => req("/pharmacy/payer-types"),
+  pharmacyPayerTypes: () => cachedGet("/pharmacy/payer-types"),
   pharmacySnapshots: () => req("/pharmacy/snapshots"),
   pharmacyOverstay: () => req("/pharmacy/overstay"),
   // ── FC reopen requests ────────────────────────────────────────────────────
@@ -444,12 +475,12 @@ export const api = {
   fcAdminDashboard: (u) => req(`/fc/admin-dashboard${u ? "?unit=" + u : ""}`),
   fcAdminDashboardHistory: (u) => req(`/fc/admin-dashboard-history${u ? "?unit=" + u : ""}`),
   fcConsultants: () => req("/fc/consultants"),
-  fcPayerTypes: () => req("/fc/payer-types"),
+  fcPayerTypes: () => cachedGet("/fc/payer-types"),
   fcSnapshots: () => req("/fc/snapshots"),
   fcOverstay: () => req("/fc/overstay"),
   // ── FC — Bed Entry (hospital-wide, operational wards only) ───────────────
   fcWards: () => req("/fc/wards"),
-  fcDestinations: () => req("/fc/destinations"),
+  fcDestinations: () => cachedGet("/fc/destinations"),
   fcBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
     if (opts.physical_status) params.set("physical_status", opts.physical_status);
@@ -506,10 +537,23 @@ export function getSocket() {
         }));
       }
     });
+    // Payer-type CRUD reuses bed:update carrying a `payerTypeId` marker
+    // (manager.ts:786-812) — the one server signal that a cached reference list
+    // is now stale. Attached here, on the single shared connection, so every
+    // screen is covered without each one having to remember to do it. Renaming
+    // or removing a type also rewrites payer breakdowns elsewhere, so the whole
+    // cache is dropped rather than one entry; these edits are rare enough that
+    // the extra refetch costs nothing.
+    sharedSocket.on("bed:update", (p) => {
+      if (p && p.payerTypeId != null) clearRefCache();
+    });
   }
   return sharedSocket;
 }
 export function disconnectSocket() {
+  // The next login may be a different user with a different role, and these
+  // lists are role-scoped — so the cache must not survive the session.
+  clearRefCache();
   if (sharedSocket) { sharedSocket.disconnect(); sharedSocket = null; }
 }
 
