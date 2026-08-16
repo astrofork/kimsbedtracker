@@ -70,17 +70,38 @@ export default function PREApp({ user, meta, onLogout }) {
   // connection (see getSocket() in lib.js) — .off() each listener on
   // cleanup, never .disconnect(), since other mounted screens (e.g. an open
   // WardPage) are using the same connection.
+  // True while Entry has a ward open (WardPage replaces the grid entirely).
+  // A ref, not state, so flipping it never re-runs the socket effect below.
+  const wardOpenRef = useRef(false);
+  const setWardOpen = useCallback((v) => { wardOpenRef.current = v; }, []);
+
+  // Refetching /me is only worth it for something currently on screen. While a
+  // ward is open, Entry renders WardPage ALONE — data.wards and data.summary are
+  // not rendered at all, and WardPage loads its own beds. The one thing from /me
+  // that still matters there is data.alarm, which drives the beep, the banner and
+  // the nav dot — so alarm-bearing events are never skipped. Coming back out
+  // calls onRefresh() (see Entry's onBack), which reloads before the grid is
+  // shown again, so the counts a user actually sees are never stale.
+  const ALARM_EVENTS = ["round:submit", "alarm:active"];
+
   useEffect(() => {
     const socket = getSocket();
     // Coalesced: PRE joins "overview", so it receives the scheduler's
     // per-block alarm:active burst every 30s too. See coalesce().
     const refresh = coalesce(() => { loadRef.current(); setLiveKey(k => k + 1); });
     const events = ["bed:update", "discharge:update", "discharge:overstay", "round:submit", "alarm:active", "ward:operational"];
-    for (const ev of events) socket.on(ev, refresh);
+    const handlers = events.map((ev) => {
+      const affectsAlarm = ALARM_EVENTS.includes(ev);
+      const h = () => { if (wardOpenRef.current && !affectsAlarm) return; refresh(); };
+      socket.on(ev, h);
+      return [ev, h];
+    });
     // Only a RECONNECT refreshes — the first connect would just duplicate the
     // mount-time load() a few hundred ms later. See onReconnect().
+    // Deliberately NOT gated on wardOpenRef: after a disconnect nothing local can
+    // be trusted, so resync regardless of what is on screen.
     const offReconnect = onReconnect(socket, refresh);
-    return () => { for (const ev of events) socket.off(ev, refresh); offReconnect(); refresh.cancel(); };
+    return () => { for (const [ev, h] of handlers) socket.off(ev, h); offReconnect(); refresh.cancel(); };
   }, []);
 
   const alarmActive = data?.alarm?.alarmActive;
@@ -254,7 +275,7 @@ export default function PREApp({ user, meta, onLogout }) {
             <LiveBedDashboard data={dashboardData} userName={user.username || data.pre} scope="pre" />
           </>
         )}
-        {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} onEngage={acknowledgeAlarm} />}
+        {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} onEngage={acknowledgeAlarm} onWardOpen={setWardOpen} />}
         {tab === "discharges" && <DischargesPage role="PRE" />}
         {tab === "overstay" && <OverstayPanel loadFn={api.preOverstay} />}
 
@@ -371,7 +392,7 @@ function Home({ data, setTab, alarmActive }) {
 // ══════════════════════════════════════════════════════════════════════════════
 //  ENTRY TAB — ward cards with live counts + View/Manage beds
 // ══════════════════════════════════════════════════════════════════════════════
-function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage }) {
+function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage, onWardOpen }) {
   const [openWard, setOpenWard] = useState(null); // { ward, tab, search? } | null
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [wardSearch, setWardSearch] = useState("");
@@ -390,6 +411,14 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
   // saveWardScroll() must be called at each place that OPENS a ward, before
   // setOpenWard — see useScrollRestore's doc comment for why.
   const saveWardScroll = useScrollRestore(!!openWard);
+
+  // Tell PREApp whether the ward grid is on screen, so its socket handler can
+  // skip refetching /me for data nobody is looking at. Cleared on unmount too —
+  // switching tabs unmounts Entry without ever running the openWard=null branch.
+  useEffect(() => {
+    onWardOpen?.(!!openWard);
+    return () => onWardOpen?.(false);
+  }, [openWard, onWardOpen]);
 
   // A 6-digit search value is treated as an IP lookup instead of a ward-name
   // filter — narrows the ward grid down to the one matching ward's card (same
