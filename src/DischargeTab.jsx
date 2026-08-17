@@ -152,8 +152,8 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
     // opacity multiplied against text that was already --ink-3 dropped it to
     // roughly 1.5:1 against the box, i.e. unreadable. The lock chip on the right
     // already signals the state, so the text itself doesn't need to fade.
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: isLast ? "none" : "1px solid var(--line)", gap: 10, flexWrap: "wrap" }}>
-      <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+    <div className="dc-step" style={{ borderBottom: isLast ? "none" : "1px solid var(--line)" }}>
+      <div className="dc-step-main">
         <div style={{ fontSize: 12.5, fontWeight: 600, color: locked ? "var(--ink-2)" : "var(--ink)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {step.label}
           {delayed && (
@@ -170,18 +170,27 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
             <Ic d={patientLeft ? icons.check : icons.alert} s={11} /> {patientLeft ? "Patient has left" : "Patient has NOT left"}
           </div>
         )}
+        {/* Who owns this step reads as a caption on the step itself. It used to
+            sit under the button in the right-hand column, where a wrapped row
+            stranded it bottom-right, far from the phase it describes. */}
+        <div style={{ marginTop: 3 }}>
+          {(status === "COMPLETED" || status === "NOT_APPLICABLE") && actor ? (
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-2)" }} title={fmtDateTime(actor.at)}>
+              {status === "NOT_APPLICABLE" ? "Marked N/A" : "Completed"} by {actor.name || "Unknown"}
+              {actor.role && ` (${ROLE_SHORT[actor.role] || actor.role})`}
+            </span>
+          ) : (
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
+          )}
+        </div>
       </div>
-      {/* marginLeft: auto keeps this block pinned to the right edge even when
-          flex-wrap drops it onto its own line on narrow (phone) widths — without
-          it, a lone wrapped flex item falls back to flex-start instead of
-          honoring the parent's justify-content: space-between. */}
-      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, marginLeft: "auto" }}>
+      <div className="dc-step-side">
         {locked ? (
           <span title={lockedTitle} style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 4 }}>
             <Ic d={icons.ban} s={12} /> After {lockedOn}
           </span>
         ) : canAct && pickingLeft ? (
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="dc-step-actions">
             <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
               onClick={async () => {
                 if (systemCheckoutDone) {
@@ -205,7 +214,7 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
               onClick={() => setPickingLeft(false)}>Cancel</button>
           </div>
         ) : canAct ? (
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="dc-step-actions">
             {status === "PENDING" && step.allowNA && (
               <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
                 onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</button>
@@ -226,14 +235,6 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
             )}
           </div>
         ) : null}
-        {(status === "COMPLETED" || status === "NOT_APPLICABLE") && actor ? (
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-2)" }} title={fmtDateTime(actor.at)}>
-            {status === "NOT_APPLICABLE" ? "Marked N/A" : "Completed"} by {actor.name || "Unknown"}
-            {actor.role && ` (${ROLE_SHORT[actor.role] || actor.role})`}
-          </span>
-        ) : (
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
-        )}
       </div>
       {confirmDialog}
       {loungeNoteOpen && (
@@ -752,62 +753,52 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
         )
       ) : (
         <>
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            background: "var(--panel-2)", borderRadius: 10, padding: "10px 12px", marginBottom: 12,
-          }}>
+          {/* Three top-aligned grid cells, so the labels share one line and the
+              values share the next. Cells are direct grid children rather than
+              a nested flex row — nesting reintroduced the unequal-height
+              centring that staggered the labels on phones. */}
+          <div className="dc-head">
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>Status</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: STATUS_COLOR[tracking.status] }}>{tracking.status.replace("_", " ")}</div>
+              <div className="dc-k">Status</div>
+              <div className="dc-v" style={{ fontSize: 14, fontWeight: 700, color: STATUS_COLOR[tracking.status] }}>
+                {tracking.status.replace("_", " ")}
+              </div>
             </div>
             {tracking.status === "PLANNED" && (
-              <div className="dim" style={{ fontSize: 12, textAlign: "right" }}>
-                {tracking.planned_date}{tracking.planned_time ? ` · ${tracking.planned_time}` : ""}
+              <div className="dc-head-time" style={{ cursor: "default" }}>
+                <div className="dc-k">Planned</div>
+                <div className="dc-v sm dim">
+                  {tracking.planned_date}{tracking.planned_time ? ` · ${tracking.planned_time}` : ""}
+                </div>
               </div>
             )}
             {/* Once running, the planned date stops being useful — what everyone
                 needs is the live estimate and whether the flow is slipping. */}
-            {(workflow?.expectedTime != null || workflow?.eta != null) && (
-              <div style={{ display: "flex", gap: 16, alignItems: "flex-start", cursor: "pointer" }}
-                onClick={() => setExpandTime(v => !v)}>
-                {workflow.expectedTime != null && (() => {
-                  const now = Date.now();
-                  const overdue = now > workflow.expectedTime;
-                  const overdueMs = overdue ? now - workflow.expectedTime : 0;
-                  const overdueMins = Math.floor(overdueMs / 60000);
-                  return (
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
-                        Est. discharge
-                      </div>
-                      <div style={{ fontSize: expandTime ? 11.5 : 15, fontWeight: 800, lineHeight: 1.15, color: overdue ? "var(--red)" : "var(--ink)" }}>
-                        {expandTime ? fmtDateTime(workflow.expectedTime) : fmtClock(workflow.expectedTime)}
-                      </div>
-                      {overdue && (
-                        <span style={{
-                          display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
-                          padding: "2px 7px", borderRadius: 99, background: "var(--red-bg)", color: "var(--red)",
-                        }}>Delayed {fmtMins(overdueMins)}</span>
-                      )}
-                    </div>
-                  );
-                })()}
-                {workflow.eta != null && (
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
-                      Expected time
-                    </div>
-                    <div style={{ fontSize: expandTime ? 11.5 : 15, fontWeight: 800, lineHeight: 1.15 }}>
-                      {expandTime ? fmtDateTime(workflow.eta) : fmtClock(workflow.eta)}
-                    </div>
-                    {tone && (
-                      <span style={{
-                        display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
-                        padding: "2px 7px", borderRadius: 99, background: tone.bg, color: tone.color,
-                      }}>{tone.label}</span>
-                    )}
+            {workflow?.expectedTime != null && (() => {
+              const now = Date.now();
+              const overdue = now > workflow.expectedTime;
+              const overdueMins = overdue ? Math.floor((now - workflow.expectedTime) / 60000) : 0;
+              return (
+                <div className="dc-head-time" onClick={() => setExpandTime(v => !v)}>
+                  <div className="dc-k">Est.</div>
+                  <div className={"dc-v" + (expandTime ? " sm" : "")} style={{ color: overdue ? "var(--red)" : "var(--ink)" }}>
+                    {expandTime ? fmtDateTime(workflow.expectedTime) : fmtClock(workflow.expectedTime)}
                   </div>
-                )}
+                  {overdue && (
+                    <span className="dc-chip" style={{ background: "var(--red-bg)", color: "var(--red)" }}>
+                      Delayed {fmtMins(overdueMins)}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+            {workflow?.eta != null && (
+              <div className="dc-head-time" onClick={() => setExpandTime(v => !v)}>
+                <div className="dc-k">Expected</div>
+                <div className={"dc-v" + (expandTime ? " sm" : "")}>
+                  {expandTime ? fmtDateTime(workflow.eta) : fmtClock(workflow.eta)}
+                </div>
+                {tone && <span className="dc-chip" style={{ background: tone.bg, color: tone.color }}>{tone.label}</span>}
               </div>
             )}
           </div>
@@ -855,12 +846,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                   alone would look right in light mode and vanish in dark. */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 8 }}>
                 {GROUPS.map((g) => (
-                  <div key={g.id} style={{
-                    background: "var(--panel-2)",
-                    border: "1px solid var(--line)",
-                    borderRadius: "var(--radius)",
-                    padding: "2px 12px",
-                  }}>
+                  <div key={g.id} className="dc-group">
                     {g.steps.map((step, i) => {
                       const status = tracking[step.key.toLowerCase() + "_status"] || "PENDING";
                       // Explicit dependency (parallel fan-out) overrides the default

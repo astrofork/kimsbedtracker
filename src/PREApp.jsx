@@ -1520,7 +1520,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
         </span>
       </div>
 
-      <div className="card" style={{ padding: "16px 18px" }}>
+      <div className="card dc-shell">
         <DischargeTab bed={bed} role={cfg.role} onChanged={onChanged} />
       </div>
     </div>

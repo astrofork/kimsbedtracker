@@ -217,7 +217,7 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
       <div style={{ fontWeight: 800, fontSize: 24, letterSpacing: "-.02em", marginBottom: 18 }}>
         Discharge — {openBed.bed_name}
       </div>
-      <div className="card" style={{ padding: "16px 18px" }}>
+      <div className="card dc-shell">
         <DischargeTab bed={openBed} role={role} onChanged={load} onRequestReopen={onRequestReopen} />
       </div>
     </div>
