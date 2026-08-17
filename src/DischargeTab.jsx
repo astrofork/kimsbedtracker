@@ -97,20 +97,24 @@ function MoveToLoungeNotePopup({ onCancel, onConfirm, saving }) {
   );
 }
 
-/** A compact step action. While saving it keeps its label in the layout —
-    hidden, not removed — and centres a spinner over it, so neither the button
-    nor the row changes width mid-save. */
-function ActBtn({ kind = "ghost", spinning, disabled, onClick, style, children }) {
+/** A compact step action. While saving it swaps its label for a ring spinner
+    plus a progress verb ("Marking…"), and freezes the width it had at rest so
+    the button — and therefore the row — never collapses mid-save. Narrow ghost
+    actions pass no busyLabel and show the ring alone, which keeps them from
+    ballooning past their resting size. */
+function ActBtn({ kind = "ghost", spinning, busyLabel, disabled, onClick, style, children }) {
+  const ref = useRef(null);
+  const [restWidth, setRestWidth] = useState();
+  useEffect(() => {
+    if (!spinning && ref.current) setRestWidth(ref.current.getBoundingClientRect().width);
+  }, [spinning, children]);
   return (
-    <button className={`btn btn-${kind} dc-act`} disabled={disabled}
+    <button ref={ref} className={`btn btn-${kind} dc-act`} disabled={disabled}
       aria-busy={spinning || undefined} onClick={onClick}
-      style={{ fontSize: 11, padding: "6px 10px", ...style }}>
-      <span className={"dc-act-label" + (spinning ? " is-hidden" : "")}>{children}</span>
-      {spinning && (
-        <span className="dc-act-spin" aria-hidden="true">
-          <span className="spin"><Ic d={icons.refresh} s={12} /></span>
-        </span>
-      )}
+      style={{ fontSize: 11, padding: "6px 10px", minWidth: restWidth, ...style }}>
+      {spinning ? (
+        <><span className="dc-spinner" aria-hidden="true" />{busyLabel}</>
+      ) : children}
     </button>
   );
 }
@@ -212,7 +216,7 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, saving, loc
           </span>
         ) : canAct && pickingLeft ? (
           <div className="dc-step-actions">
-            <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"}
+            <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"} busyLabel="Marking…"
               onClick={async () => {
                 if (systemCheckoutDone) {
                   const ok = await confirm({
@@ -240,7 +244,7 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, saving, loc
                 onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</ActBtn>
             )}
             {status !== "COMPLETED" && status !== "NOT_APPLICABLE" && (
-              <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"}
+              <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"} busyLabel="Marking…"
                 onClick={() => step.needsPatientLeft ? setPickingLeft(true) : onSetStatus(step.key, "COMPLETED")}>
                 Mark Completed
               </ActBtn>
@@ -659,29 +663,45 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   // load(). Responses can come back out of order, so a slow early reply would
   // otherwise overwrite a fresh later one. Only the newest load may write state.
   const loadSeq = useRef(0);
+  const loadTail = useRef(null);
   const load = useCallback(async () => {
     const seq = ++loadSeq.current;
-    try {
-      const r = await api.dischargeForBed(bed.id);
-      if (seq !== loadSeq.current) return;
-      setAdmission(r.admission);
-      setTracking(r.tracking);
-      setWorkflow(r.workflow ?? null);
-      setStepActors(r.stepActors ?? {});
-    } catch (e) {
-      if (seq !== loadSeq.current) return;
-      const msg = toastErr(e);
-      if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
-        setAdmission(null);
-        setTracking(null);
-        setWorkflow(null);
-        setStepActors({});
-        onChanged?.();
-      } else {
-        setError(msg);
+    const run = (async () => {
+      try {
+        const r = await api.dischargeForBed(bed.id);
+        if (seq !== loadSeq.current) return;
+        setAdmission(r.admission);
+        setTracking(r.tracking);
+        setWorkflow(r.workflow ?? null);
+        setStepActors(r.stepActors ?? {});
+      } catch (e) {
+        if (seq !== loadSeq.current) return;
+        const msg = toastErr(e);
+        if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
+          setAdmission(null);
+          setTracking(null);
+          setWorkflow(null);
+          setStepActors({});
+          onChanged?.();
+        } else {
+          setError(msg);
+        }
       }
-    }
+    })();
+    loadTail.current = run;
+    return run;
   }, [bed.id, onChanged]);
+
+  // Waiting on your OWN load() is not enough: the socket's live reload fires on
+  // the same save and starts a newer one, which makes yours a no-op above. The
+  // spinner would then clear while the row still showed its old status — the
+  // button visibly flashed back to "Mark Completed" before flipping to "Reopen".
+  // This resolves only once no newer load is still running, so a caller always
+  // returns to fresh state.
+  const loadSettled = useCallback(async () => {
+    let seen;
+    do { seen = loadTail.current; await seen; } while (loadTail.current !== seen);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -713,7 +733,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
     };
   }, [bed.id]);
 
-  const refresh = async () => { setSection(null); await load(); onChanged?.(); };
+  const refresh = async () => { setSection(null); await load(); await loadSettled(); onChanged?.(); };
 
   // Per-step, not per-page: independent phases (Discharge Summary / Drug Return /
   // Physical Checkout, and the Pharmacy Clearance + Procedure Reconciliation

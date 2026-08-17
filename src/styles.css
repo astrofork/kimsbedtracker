@@ -2445,19 +2445,25 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   align-items:flex-end;gap:4px;margin-left:auto;max-width:50%;}
 .dc-step-by{font-size:10px;font-weight:700;color:var(--ink-2);text-align:right;}
 
-/* Saving state. The label keeps its box (visibility, not display:none) so the
-   button holds its width and the row never reflows mid-save; the spinner is
-   absolutely centred over it.
+/* Saving state. A real ring spinner, not a rotating arrow glyph: border-top is
+   left transparent so the ring reads as a gap chasing itself. currentColor makes
+   it inherit the button's own text colour, so it works on both the solid primary
+   and the ghost variant without a second rule.
    The opacity override is load-bearing: a saving button is also `disabled`, and
-   .btn:disabled drops it to .45 — which fades the spinner with it, since a child
-   cannot undo an ancestor's opacity. A spinning control reads as working, not
-   unavailable, so it stays near full strength. */
-.dc-act{position:relative;}
-.dc-act .dc-act-label.is-hidden{visibility:hidden;}
-.dc-act-spin{position:absolute;inset:0;display:flex;align-items:center;
-  justify-content:center;}
+   .btn:disabled drops it to .45 — which would fade the spinner with it, since a
+   child cannot undo an ancestor's opacity. A spinning control reads as working,
+   not unavailable, so it stays near full strength. */
+.dc-act{gap:6px;}
 .dc-act[aria-busy="true"]{cursor:progress;}
 .dc-act[aria-busy="true"]:disabled{opacity:.9;}
+.dc-spinner{width:11px;height:11px;flex:none;border-radius:50%;
+  border:2px solid currentColor;border-top-color:transparent;
+  animation:spin .6s linear infinite;}
+
+@media (prefers-reduced-motion:reduce){
+  /* Still communicates "busy" without the rotation. */
+  .dc-spinner{animation-duration:2.4s;}
+}
 .dc-step-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
 
 /* These are compact inline chips sitting beside 11px text, not primary CTAs.
