@@ -350,24 +350,37 @@ export default function PharmacyApp({ user, onLogout }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (tab === "requests") loadRequests(); }, [tab, loadRequests]);
 
+  // load() feeds the "My Transactions" buckets, which render only on that tab —
+  // and the app opens on "beds". Refetching them for a screen nobody is on is
+  // waste, so the refresh is remembered and replayed when the tab is opened.
+  const pharmStaleRef = useRef(false);
+  useEffect(() => {
+    if (tab === "dashboard" && pharmStaleRef.current) { pharmStaleRef.current = false; load(); }
+  }, [tab, load]);
+
   useEffect(() => {
     const socket = getSocket();
     // Server-bucketed-by-step lists (like FC's billing pipeline) — bucket
     // membership is business logic computed server-side, so this stays a
     // refetch rather than a client-side patch.
-    const refresh = coalesce(() => { loadRef.current(); setLiveKey(k => k + 1); });
+    const refresh = coalesce(() => { pharmStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
+    // Skipped while the buckets are off screen — see pharmStaleRef above. The
+    // MASTER_PHARMACY "Reopen Requests" dot is fed by its own
+    // pharmacy:reopen-request event below, which is never gated.
+    const gated = () => { if (tabRef.current !== "dashboard") { pharmStaleRef.current = true; return; } refresh(); };
     const onReopenRequest = () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); };
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
-    socket.on("bed:update", refresh);
+    socket.on("discharge:update", gated);
+    socket.on("discharge:overstay", gated);
+    socket.on("bed:update", gated);
     socket.on("pharmacy:reopen-request", onReopenRequest);
     // Only a RECONNECT refreshes — the first connect would duplicate the
     // mount-time load() a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
     const offReconnect = onReconnect(socket, refresh);
     return () => {
-      socket.off("discharge:update", refresh);
-      socket.off("discharge:overstay", refresh);
-      socket.off("bed:update", refresh);
+      socket.off("discharge:update", gated);
+      socket.off("discharge:overstay", gated);
+      socket.off("bed:update", gated);
       socket.off("pharmacy:reopen-request", onReopenRequest);
       offReconnect(); refresh.cancel();
     };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
+import { api, toastErr, getSocket } from "./lib.js";
 import { Ic, icons, ThemeToggle, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
@@ -514,22 +514,18 @@ function MyPatientsPage() {
 export default function ConsultantApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
-  const [liveKey, setLiveKey] = useState(0);
   // Lives here, above the tab switch, so it survives navigating away from and
   // back to the Dashboard tab — see useLiveBedDashboardData.
   const dashboardData = useLiveBedDashboardData("consultant", tab === "dashboard");
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2600); }, []);
 
-  // Live reload trigger for dashboard
-  useEffect(() => {
-    const socket = getSocket();
-    const bump = coalesce(() => setLiveKey((k) => k + 1));
-    const events = ["bed:update", "discharge:update", "discharge:overstay"];
-    for (const ev of events) socket.on(ev, bump);
-    // Only a RECONNECT bumps — the first connect would duplicate the initial load.
-    const offReconnect = onReconnect(socket, bump);
-    return () => { for (const ev of events) socket.off(ev, bump); offReconnect(); bump.cancel(); };
-  }, []);
+  // NOTE: there used to be a second socket effect here subscribing to
+  // bed:update / discharge:update / discharge:overstay purely to bump a
+  // `liveKey` counter. Nothing ever read that counter, so every bed change
+  // anywhere in the hospital re-rendered this whole component for nothing.
+  // The dashboard already refreshes itself through useLiveBedDashboardData
+  // above, and the patient list is patched in place by the consultant:
+  // patient-update handler further up — neither needed the bump.
 
   const menu = [
     { key: "dashboard",   icon: icons.home,        label: "Dashboard" },
