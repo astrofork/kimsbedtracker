@@ -114,7 +114,13 @@ export function clearWardBeds(wardId) {
 }
 
 export const api = {
-  meta: () => cachedGet("/meta"),
+  // NOT cached, unlike the lists below. /meta carries `todayIST`, which the
+  // admission-date picker uses as its upper bound — a session-long cache pins
+  // that to whatever "today" was at login, so a tab left open across midnight
+  // (routine on a 12-hour shift) started refusing today's date. /meta is also
+  // not on the hot path this cache exists for: it's a handful of calls per
+  // session, not three per ward and three per bed.
+  meta: () => req("/meta"),
   departments: () => cachedGet("/departments"),
   // Only the unfiltered list is cached — the filtered form is keyed by
   // department and is not on the hot path that this cache exists for.
@@ -561,15 +567,24 @@ export function getSocket() {
         }));
       }
     });
-    // Payer-type CRUD reuses bed:update carrying a `payerTypeId` marker
-    // (manager.ts:786-812) — the one server signal that a cached reference list
-    // is now stale. Attached here, on the single shared connection, so every
-    // screen is covered without each one having to remember to do it. Renaming
-    // or removing a type also rewrites payer breakdowns elsewhere, so the whole
-    // cache is dropped rather than one entry; these edits are rare enough that
-    // the extra refetch costs nothing.
+    // Reference-list CRUD reuses bed:update carrying a marker naming what moved:
+    // `payerTypeId` (manager.ts payer-type routes), `destinationId` (destination
+    // routes), or `refData` (doctors / departments / consultant groups, see
+    // emitRefDataChanged). Attached here, on the single shared connection, so
+    // every screen is covered without each one having to remember to do it.
+    //
+    // All three drop the WHOLE cache rather than one entry: renaming a payer type
+    // rewrites payer breakdowns elsewhere, and a consultant edit moves both the
+    // doctor list and the groups that contain them. These edits are rare enough
+    // that the extra refetch costs nothing, and being narrower here would risk
+    // leaving a related list stale.
+    //
+    // Missing any of these means the cache silently serves a list the admin has
+    // already changed — a new consultant stayed unselectable for everyone
+    // already logged in until they logged out and back in.
     sharedSocket.on("bed:update", (p) => {
-      if (p && p.payerTypeId != null) clearRefCache();
+      if (!p) return;
+      if (p.payerTypeId != null || p.destinationId != null || p.refData != null) clearRefCache();
     });
 
     // Keep the ward-beds cache correct — see the block comment on wardBeds.
@@ -599,10 +614,14 @@ export function getSocket() {
     sharedSocket.on("ward:operational", (p) => clearWardBeds(wardOf(p)));
 
     // A reconnect means events were missed while offline (socket.io does not
-    // replay them), so no cached ward can be trusted.
+    // replay them), so nothing cached can be trusted — including the reference
+    // lists. The invalidation markers above are the ONLY signal that those went
+    // stale, and a marker sent while this client was disconnected is gone for
+    // good, so a reference edit made during the gap would otherwise survive
+    // until logout. Dropping both caches on reconnect closes that window.
     let hasConnected = sharedSocket.connected;
     sharedSocket.on("connect", () => {
-      if (hasConnected) clearWardBeds(); else hasConnected = true;
+      if (hasConnected) { clearWardBeds(); clearRefCache(); } else hasConnected = true;
     });
   }
   return sharedSocket;
