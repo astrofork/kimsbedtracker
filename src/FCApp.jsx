@@ -386,6 +386,16 @@ export default function FCApp({ user, onLogout }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (tab === "requests") loadRequests(); }, [tab, loadRequests]);
 
+  // Opening a ward replaces the whole Bed Entry pane with WardPage, which loads
+  // its own beds — neither the billing pipeline nor the ward counts are on
+  // screen while it is up. Rather than refetch both on every bed event for
+  // nobody, remember that a refresh is owed and do it on the way out.
+  // The MASTER_FC "Reopen Requests" dot IS still visible in the nav, but it is
+  // driven by its own fc:reopen-request event below, which is never gated.
+  const wardOpenRef = useRef(false);
+  const fcStaleRef = useRef(false);
+  useEffect(() => { wardOpenRef.current = !!openWard; }, [openWard]);
+
   useEffect(() => {
     const socket = getSocket();
     // load() is the billing pipeline — a server-bucketed list where which
@@ -394,22 +404,30 @@ export default function FCApp({ user, onLogout }) {
     // membership can't be safely re-derived from a single changed field on
     // the client, so it stays a refetch even though the tracking row itself
     // is available — same for loadWards()'s aggregate ward counts.
-    const refresh = coalesce(() => { loadRef.current(); loadWardsRef.current(); setLiveKey(k => k + 1); });
+    const refresh = coalesce(() => { fcStaleRef.current = false; loadRef.current(); loadWardsRef.current(); setLiveKey(k => k + 1); });
+    // Skipped while a ward is open — see wardOpenRef above. Everything the
+    // refetch feeds is off screen then; going back replays it if anything
+    // actually happened.
+    const gated = () => { if (wardOpenRef.current) { fcStaleRef.current = true; return; } refresh(); };
     const onBedUpdate = (p) => {
-      refresh();
+      gated();
+      // The bed-details list backs Entry search, not the ward grid — patching it
+      // costs no request, so it stays live even while a ward is open.
       if (p?.bed && p.bed.id != null) patchBedDetail(p.bed);
     };
     const onReopenRequest = () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); };
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
+    socket.on("discharge:update", gated);
+    socket.on("discharge:overstay", gated);
     socket.on("bed:update", onBedUpdate);
     socket.on("fc:reopen-request", onReopenRequest);
     // Only a RECONNECT refreshes — the first connect would duplicate the
     // mount-time load() a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted, whatever is
+    // on screen.
     const offReconnect = onReconnect(socket, refresh);
     return () => {
-      socket.off("discharge:update", refresh);
-      socket.off("discharge:overstay", refresh);
+      socket.off("discharge:update", gated);
+      socket.off("discharge:overstay", gated);
       socket.off("bed:update", onBedUpdate);
       socket.off("fc:reopen-request", onReopenRequest);
       offReconnect(); refresh.cancel();
@@ -538,7 +556,12 @@ export default function FCApp({ user, onLogout }) {
             initialTab={openWard.tab}
             initialSearch={openWard.search}
             cfg={FC_CFG}
-            onBack={() => { setOpenWard(null); loadWards(); }}
+            onBack={() => {
+              setOpenWard(null);
+              // Replay only what was skipped while inside — walking in and
+              // straight back out costs nothing.
+              if (fcStaleRef.current) { fcStaleRef.current = false; loadWards(); load(); }
+            }}
           />
         ) : wards === null ? (
           <div className="empty" style={{ paddingTop: 80 }}>

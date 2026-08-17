@@ -527,6 +527,11 @@ export default function DoctorApp({ user, onLogout }) {
   // See useScrollRestore's doc comment for why this has to happen before
   // setWard, not reactively after.
   const openWard = useCallback((w) => { saveWardScroll(); setWard(w); }, [saveWardScroll]);
+  // Mirrors `ward` for the socket handler, which must not re-subscribe when it
+  // changes. docStaleRef records a refresh skipped while a ward was open.
+  const wardOpenRef = useRef(false);
+  const docStaleRef = useRef(false);
+  useEffect(() => { wardOpenRef.current = !!ward; }, [ward]);
   const [reloadKey,   setReloadKey]   = useState(0);
   // Lives here, above the dash/dashboard/entry/discharges tab switch, so it
   // survives navigating away from and back to the Dashboard tab — see
@@ -598,19 +603,25 @@ export default function DoctorApp({ user, onLogout }) {
     // patchBedDetail directly instead, no refetch needed.
     let t = null;
     const refetchBeds = () => { clearTimeout(t); t = setTimeout(() => loadBedDetails(), 400); };
-    const onWardSummary = coalesce(() => { loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); });
+    const onWardSummary = coalesce(() => { docStaleRef.current = false; loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); });
+    // Skipped while a ward is open: WardPage replaces the block/ward view and
+    // loads its own beds, so /doctor/me's summary is off screen. Remember the
+    // refresh and replay it on the way out. The bed-details list is NOT gated —
+    // it backs Entry search and patching it costs no request.
+    const gatedSummary = () => { if (wardOpenRef.current) { docStaleRef.current = true; return; } onWardSummary(); };
     const onBedUpdate = (p) => {
-      onWardSummary();
+      gatedSummary();
       if (p?.bed && p.bed.id != null) patchBedDetail(p.bed);
       else refetchBeds();
     };
-    const onOther = () => { onWardSummary(); refetchBeds(); };
+    const onOther = () => { gatedSummary(); refetchBeds(); };
     socket.on("bed:update", onBedUpdate);
     socket.on("discharge:update", onOther);
     socket.on("discharge:overstay", onOther);
     // Only a RECONNECT refreshes — the first connect would duplicate the
     // mount-time loads a few hundred ms later. See onReconnect().
-    const offReconnect = onReconnect(socket, onOther);
+    // Never gated: after a disconnect nothing local can be trusted.
+    const offReconnect = onReconnect(socket, () => { onWardSummary(); refetchBeds(); });
     return () => {
       clearTimeout(t);
       socket.off("bed:update", onBedUpdate);
@@ -669,7 +680,11 @@ export default function DoctorApp({ user, onLogout }) {
           initialTab="manage"
           initialSearch={ward._search}
           cfg={DOCTOR_CFG}
-          onBack={() => setWard(null)}
+          onBack={() => {
+            setWard(null);
+            // Replay only what was skipped while inside the ward.
+            if (docStaleRef.current) { docStaleRef.current = false; loadRef.current(); setReloadKey((k) => k + 1); }
+          }}
         />
       ) : blockId ? (
         <BlockDetail blockId={blockId} reloadKey={reloadKey} onBack={backToBlocks} onOpenWard={openWard} showToast={showToast} ipIndex={ipIndex} bedRows={bedDetails} />

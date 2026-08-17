@@ -205,26 +205,37 @@ export default function NurseApp({ user, onLogout }) {
   // correct response here; there's no single row to merge into a card.
   // Shared connection (getSocket()) — .off() each listener on cleanup,
   // never .disconnect(), since other mounted screens share it.
+  // Opening a ward replaces this ward list with WardPage, which loads its own
+  // beds — the aggregate counts are off screen then, and the nav carries no
+  // badge fed by them. Remember that a refresh is owed and do it on the way out
+  // instead of refetching for nobody.
+  const wardOpenRef = useRef(false);
+  const nurseStaleRef = useRef(false);
+  useEffect(() => { wardOpenRef.current = !!openWard; }, [openWard]);
+
   useEffect(() => {
     const socket = getSocket();
-    const refresh = coalesce(() => { loadRef.current(); setLiveKey(k => k + 1); });
+    const refresh = coalesce(() => { nurseStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
+    // Skipped while a ward is open — see wardOpenRef above.
+    const gated = () => { if (wardOpenRef.current) { nurseStaleRef.current = true; return; } refresh(); };
     const onBedUpdate = (payload) => {
       const { bedId, wardId } = payload ?? {};
       // Ward-level edits (rename/delete/operational toggle) only carry wardId,
       // bed-level edits only carry bedId — require at least one, not both.
       if (!bedId && !wardId) return;
-      refresh();
+      gated();
     };
     socket.on("bed:update", onBedUpdate);
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
+    socket.on("discharge:update", gated);
+    socket.on("discharge:overstay", gated);
     // Only a RECONNECT refreshes — the first connect would duplicate the
     // mount-time load() a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
     const offReconnect = onReconnect(socket, refresh);
     return () => {
       socket.off("bed:update", onBedUpdate);
-      socket.off("discharge:update", refresh);
-      socket.off("discharge:overstay", refresh);
+      socket.off("discharge:update", gated);
+      socket.off("discharge:overstay", gated);
       offReconnect(); refresh.cancel();
     };
   }, []); // socket shared across the app; loadRef keeps the callback fresh
@@ -328,7 +339,11 @@ export default function NurseApp({ user, onLogout }) {
           initialTab={openWard.tab}
           initialSearch={openWard.search}
           cfg={NURSE_CFG}
-          onBack={() => { setOpenWard(null); load(); }}
+          onBack={() => {
+            setOpenWard(null);
+            // Replay only what was skipped while inside.
+            if (nurseStaleRef.current) { nurseStaleRef.current = false; load(); }
+          }}
         />
       ) : navTab === "wards" ? (<>
       {/* Occupancy summary bar */}
