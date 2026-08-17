@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, fmtDMY, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
+import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, fmtDMY, toastErr, getSocket, onReconnect, coalesce, getWardBeds, setWardBeds } from "./lib.js";
 import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 import { OverstayPanel } from "./COOApp.jsx";
@@ -84,15 +84,24 @@ export default function PREApp({ user, meta, onLogout }) {
   // shown again, so the counts a user actually sees are never stale.
   const ALARM_EVENTS = ["round:submit", "alarm:active"];
 
+  // Set when an event that WOULD have refreshed the grid arrives while a ward is
+  // open. Coming back then reloads only if something actually happened — walking
+  // into a ward and straight back out costs no request at all, while a grid that
+  // genuinely moved is never shown stale.
+  const gridStaleRef = useRef(false);
+
   useEffect(() => {
     const socket = getSocket();
     // Coalesced: PRE joins "overview", so it receives the scheduler's
     // per-block alarm:active burst every 30s too. See coalesce().
-    const refresh = coalesce(() => { loadRef.current(); setLiveKey(k => k + 1); });
+    const refresh = coalesce(() => { gridStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
     const events = ["bed:update", "discharge:update", "discharge:overstay", "round:submit", "alarm:active", "ward:operational"];
     const handlers = events.map((ev) => {
       const affectsAlarm = ALARM_EVENTS.includes(ev);
-      const h = () => { if (wardOpenRef.current && !affectsAlarm) return; refresh(); };
+      const h = () => {
+        if (wardOpenRef.current && !affectsAlarm) { gridStaleRef.current = true; return; }
+        refresh();
+      };
       socket.on(ev, h);
       return [ev, h];
     });
@@ -102,6 +111,14 @@ export default function PREApp({ user, meta, onLogout }) {
     // be trusted, so resync regardless of what is on screen.
     const offReconnect = onReconnect(socket, refresh);
     return () => { for (const [ev, h] of handlers) socket.off(ev, h); offReconnect(); refresh.cancel(); };
+  }, []);
+
+  // Handed to Entry as its onBack refresh. Reloads only when the grid actually
+  // went stale while the user was inside a ward (see gridStaleRef above).
+  const refreshGridIfStale = useCallback(() => {
+    if (!gridStaleRef.current) return;
+    gridStaleRef.current = false;
+    loadRef.current();
   }, []);
 
   const alarmActive = data?.alarm?.alarmActive;
@@ -275,7 +292,7 @@ export default function PREApp({ user, meta, onLogout }) {
             <LiveBedDashboard data={dashboardData} userName={user.username || data.pre} scope="pre" />
           </>
         )}
-        {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={load} onEngage={acknowledgeAlarm} onWardOpen={setWardOpen} />}
+        {tab === "entry" && <Entry data={data} submitRound={submitRound} submitting={submitting} alarmActive={alarmActive} onRefresh={refreshGridIfStale} onEngage={acknowledgeAlarm} onWardOpen={setWardOpen} />}
         {tab === "discharges" && <DischargesPage role="PRE" />}
         {tab === "overstay" && <OverstayPanel loadFn={api.preOverstay} />}
 
@@ -2177,14 +2194,26 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
       if (loadTokenRef.current !== myToken) return; // a newer ward's load has since started
       // Annotate beds with ward-level unit_type so filter + badges work uniformly
       const unitType = ward.unit_type || null;
-      setBeds((result.beds || []).map(b => ({ ...b, unit_type: unitType })));
+      const annotated = (result.beds || []).map(b => ({ ...b, unit_type: unitType }));
+      setBeds(annotated);
       setLoadedAt(new Date());
+      // Share it across mounts so re-entering this ward costs nothing while it
+      // stays provably current — lib.js drops it the moment anything could have
+      // changed it.
+      setWardBeds(ward.id, annotated);
     }
     catch (e) { if (loadTokenRef.current === myToken) showToast(toastErr(e)); }
     finally { if (loadTokenRef.current === myToken) setLoading(false); }
   }, [ward.id, ward.unit_type, showToast]);
 
-  useEffect(() => { load(); }, [load]);
+  // Re-entering a ward that nothing has happened to since the last visit costs
+  // NO request: the cached array is only kept while lib.js can prove it is
+  // current (see getWardBeds). Anything else falls through to a normal load.
+  useEffect(() => {
+    const cached = getWardBeds(ward.id);
+    if (cached) { setBeds(cached); setLoadedAt(new Date()); return; }
+    load();
+  }, [load, ward.id]);
 
   // Only the very FIRST load has nothing to show yet — every load after that is
   // a background refresh of a grid that's already on screen. Gating the

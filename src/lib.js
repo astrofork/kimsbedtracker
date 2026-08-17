@@ -89,6 +89,30 @@ export function clearRefCache(path) {
   if (path) refCache.delete(path); else refCache.clear();
 }
 
+// ── Ward beds cache ──────────────────────────────────────────────────────────
+// Re-entering a ward re-fetched its entire bed list even when nothing about that
+// ward had changed since the last visit. The list is cached per ward and kept
+// honest by the SAME socket events the screens already react to, so it can never
+// be served stale:
+//
+//   • bed:update carrying the full row  -> patch that one bed; cache stays valid
+//   • bed:update with no row, discharge:update, ward:operational
+//                                       -> DROP that ward, so the next visit
+//                                          refetches instead of guessing
+//   • any such payload with no wardId   -> could touch any ward, so drop all
+//   • a RECONNECT                       -> events were missed while offline,
+//                                          nothing local is trustworthy, drop all
+//
+// An entry therefore only survives while we can prove nothing happened to it.
+// Showing a stale bed on a ward is far worse than paying for one more request.
+const wardBeds = new Map();
+
+export function getWardBeds(wardId) { return wardBeds.get(Number(wardId)) ?? null; }
+export function setWardBeds(wardId, beds) { wardBeds.set(Number(wardId), beds); }
+export function clearWardBeds(wardId) {
+  if (wardId == null) wardBeds.clear(); else wardBeds.delete(Number(wardId));
+}
+
 export const api = {
   meta: () => cachedGet("/meta"),
   departments: () => cachedGet("/departments"),
@@ -547,13 +571,47 @@ export function getSocket() {
     sharedSocket.on("bed:update", (p) => {
       if (p && p.payerTypeId != null) clearRefCache();
     });
+
+    // Keep the ward-beds cache correct — see the block comment on wardBeds.
+    // Attached to the one shared connection so the cache is maintained even
+    // while no ward screen is mounted, which is exactly when it would otherwise
+    // drift out of date without anyone noticing.
+    const wardOf = (p) => (p && p.wardId != null ? Number(p.wardId) : undefined);
+    sharedSocket.on("bed:update", (p) => {
+      const wid = wardOf(p);
+      if (wid === undefined) { clearWardBeds(); return; }   // unscoped: drop all
+      const cached = wardBeds.get(wid);
+      if (!cached) return;
+      if (p?.bed && p.bed.id != null) {
+        const idx = cached.findIndex((b) => b.id === p.bed.id);
+        // A bed we have never loaded is not ours to invent — drop the ward and
+        // let the next visit fetch it. Mirrors WardPage's patchBed exactly,
+        // including carrying over unit_type (a client-side annotation).
+        if (idx === -1) { clearWardBeds(wid); return; }
+        const next = cached.slice();
+        next[idx] = { ...p.bed, unit_type: cached[idx].unit_type };
+        wardBeds.set(wid, next);
+        return;
+      }
+      clearWardBeds(wid);   // no row attached: we cannot know what changed
+    });
+    sharedSocket.on("discharge:update", (p) => clearWardBeds(wardOf(p)));
+    sharedSocket.on("ward:operational", (p) => clearWardBeds(wardOf(p)));
+
+    // A reconnect means events were missed while offline (socket.io does not
+    // replay them), so no cached ward can be trusted.
+    let hasConnected = sharedSocket.connected;
+    sharedSocket.on("connect", () => {
+      if (hasConnected) clearWardBeds(); else hasConnected = true;
+    });
   }
   return sharedSocket;
 }
 export function disconnectSocket() {
   // The next login may be a different user with a different role, and these
-  // lists are role-scoped — so the cache must not survive the session.
+  // lists are role-scoped — so neither cache may survive the session.
   clearRefCache();
+  clearWardBeds();
   if (sharedSocket) { sharedSocket.disconnect(); sharedSocket = null; }
 }
 
