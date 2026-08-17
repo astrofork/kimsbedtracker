@@ -447,9 +447,10 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
             </div>
           ) : (
             <div className="card-grid">
-              {me.blocks.map((b, i) => (
-                <div key={b.id} className="doc-block slide-up" role="button" tabIndex={0}
-                  style={{ animationDelay: i * 0.03 + "s" }}
+              {me.blocks.map((b) => (
+                // Renders instantly, like the ward cards it leads to — same
+                // staggered slide-up, same "looks like it is still loading".
+                <div key={b.id} className="doc-block" role="button" tabIndex={0}
                   onClick={() => onOpenBlock(b.id)}
                   onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpenBlock(b.id)}>
                   <div className="doc-block-top">
