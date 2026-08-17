@@ -110,6 +110,9 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
   );
   const canDirectReopen = !(role === "PHARMACY" && isPharmacyStep) && !(role === "FC" && isBillingStep) && !drugReturnReopenBlocked;
   const showPatientLeft = step.needsPatientLeft && status === "COMPLETED";
+  // Finished AND we know who finished it — the only case that shows a byline
+  // instead of the "who may act" role hint.
+  const done = (status === "COMPLETED" || status === "NOT_APPLICABLE") && !!actor;
 
   // SLA line — all values come from the backend's `workflow.phases`; this only
   // formats them. Delayed steps get a red overdue counter, running steps show
@@ -170,19 +173,14 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
             <Ic d={patientLeft ? icons.check : icons.alert} s={11} /> {patientLeft ? "Patient has left" : "Patient has NOT left"}
           </div>
         )}
-        {/* Who owns this step reads as a caption on the step itself. It used to
-            sit under the button in the right-hand column, where a wrapped row
-            stranded it bottom-right, far from the phase it describes. */}
-        <div style={{ marginTop: 3 }}>
-          {(status === "COMPLETED" || status === "NOT_APPLICABLE") && actor ? (
-            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-2)" }} title={fmtDateTime(actor.at)}>
-              {status === "NOT_APPLICABLE" ? "Marked N/A" : "Completed"} by {actor.name || "Unknown"}
-              {actor.role && ` (${ROLE_SHORT[actor.role] || actor.role})`}
-            </span>
-          ) : (
+        {/* Who MAY act reads as a caption on the step itself. (Who DID act is a
+            different thing and stays in the right column under the button that
+            produced it.) */}
+        {!done && (
+          <div style={{ marginTop: 3 }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
       <div className="dc-step-side">
         {locked ? (
@@ -235,6 +233,15 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
             )}
           </div>
         ) : null}
+        {/* Byline sits directly under the Reopen / Request Reopen button that
+            acts on it. The column is align-items:flex-end, so it stays flush
+            right whether or not a button rendered above it. */}
+        {done && (
+          <span className="dc-step-by" title={fmtDateTime(actor.at)}>
+            {status === "NOT_APPLICABLE" ? "Marked N/A" : "Completed"} by {actor.name || "Unknown"}
+            {actor.role && ` (${ROLE_SHORT[actor.role] || actor.role})`}
+          </span>
+        )}
       </div>
       {confirmDialog}
       {loungeNoteOpen && (

@@ -2438,8 +2438,12 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 /* margin-left:auto holds the right edge when this block DOES wrap onto its own
    line — a lone wrapped flex item otherwise falls back to flex-start and
    ignores the parent's justify-content. */
+/* max-width caps how much a long "Completed by <name> (ROLE)" byline can claim.
+   Without it the byline sets this column's max-content width, which shoves the
+   text block past its 150px floor and wraps the whole row. */
 .dc-step-side{flex:0 0 auto;display:flex;flex-direction:column;
-  align-items:flex-end;gap:4px;margin-left:auto;}
+  align-items:flex-end;gap:4px;margin-left:auto;max-width:50%;}
+.dc-step-by{font-size:10px;font-weight:700;color:var(--ink-2);text-align:right;}
 .dc-step-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
 
 /* These are compact inline chips sitting beside 11px text, not primary CTAs.
