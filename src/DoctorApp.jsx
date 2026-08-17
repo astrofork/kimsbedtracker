@@ -81,7 +81,8 @@ function searchRow({ value, onChange, placeholder, select }) {
 function WardCard({ w, i = 0, onOpen, note }) {
   const o = occOf(w);
   return (
-    <div className="doc-ward slide-up tap" style={{ animationDelay: i * 0.03 + "s" }}
+    // Renders instantly, like BedGridCard — see the note in PREApp's ward grid.
+    <div className="doc-ward tap"
       role="button" tabIndex={0}
       onClick={() => w.operational !== false && onOpen()}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && w.operational !== false && onOpen()}>

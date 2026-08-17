@@ -52,7 +52,7 @@ export function WardCard({ ward, index, onOpen }) {
   const total = ward.total_beds ?? 0;
 
   const warningBlock = (msg, title) => (
-    <div className="ward-card slide-up" style={{ animationDelay: index * 0.03 + "s", padding: 16, opacity: 0.8 }}>
+    <div className="ward-card" style={{ padding: 16, opacity: 0.8 }}>
       <div className="row between" style={{ marginBottom: 14 }}>
         <div>
           {(ward.block_name || ward.floor_name) && (
@@ -80,8 +80,10 @@ export function WardCard({ ward, index, onOpen }) {
     return warningBlock("Contact your manager to assign beds to your account for this ward.", "No access");
 
   return (
-    <div className="ward-card slide-up" style={{
-      animationDelay: index * 0.03 + "s", padding: 16,
+    // Renders instantly, like BedGridCard — see the note in PREApp's ward grid.
+    // Shared by Nurse AND FC (FCApp imports this component).
+    <div className="ward-card" style={{
+      padding: 16,
       display: "flex", flexDirection: "column",
       borderColor: "var(--st-v)",
     }}>

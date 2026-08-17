@@ -446,7 +446,8 @@ function MyPatientsPage() {
                     specific to this consultant's patients), and Manage Beds /
                     Discharges buttons (Consultant is read-only). */}
                 {pagedWardGroups.map((g) => (
-                  <div className="ward-card slide-up" key={g.key}
+                  // Renders instantly, like BedGridCard — see PREApp's ward grid.
+                  <div className="ward-card" key={g.key}
                     style={{ padding: 16, cursor: "pointer" }}
                     onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
                     <div className="row between">

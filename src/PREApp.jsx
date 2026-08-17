@@ -574,9 +574,14 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
                 const entered = w.vacant !== null;
                 const nonOp = w.operational === false;
                 return (
-                  <div className="ward-card slide-up" key={w.id}
+                  // Renders instantly, like BedGridCard. The staggered slide-up
+                  // (0.03s per card on top of a 0.35s animation with fill-mode
+                  // `both`) left later cards fully invisible for most of a
+                  // second, so a grid whose data was already in hand looked like
+                  // it was still loading — and it replayed on every return from
+                  // a ward, which unmounts and remounts the whole grid.
+                  <div className="ward-card" key={w.id}
                     style={{
-                      animationDelay: i * 0.03 + "s",
                       borderColor: nonOp ? "var(--line)" : entered ? "var(--st-v)" : "var(--line)",
                       padding: 16,
                       display: "flex", flexDirection: "column",
