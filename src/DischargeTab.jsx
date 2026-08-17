@@ -97,7 +97,25 @@ function MoveToLoungeNotePopup({ onCancel, onConfirm, saving }) {
   );
 }
 
-function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking, actor }) {
+/** A compact step action. While saving it keeps its label in the layout —
+    hidden, not removed — and centres a spinner over it, so neither the button
+    nor the row changes width mid-save. */
+function ActBtn({ kind = "ghost", spinning, disabled, onClick, style, children }) {
+  return (
+    <button className={`btn btn-${kind} dc-act`} disabled={disabled}
+      aria-busy={spinning || undefined} onClick={onClick}
+      style={{ fontSize: 11, padding: "6px 10px", ...style }}>
+      <span className={"dc-act-label" + (spinning ? " is-hidden" : "")}>{children}</span>
+      {spinning && (
+        <span className="dc-act-spin" aria-hidden="true">
+          <span className="spin"><Ic d={icons.refresh} s={12} /></span>
+        </span>
+      )}
+    </button>
+  );
+}
+
+function StepRow({ step, status, role, onSetStatus, onRequestReopen, saving, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking, actor }) {
   const [pickingLeft, setPickingLeft] = useState(false);
   const [loungeNoteOpen, setLoungeNoteOpen] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
@@ -113,6 +131,11 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
   // Finished AND we know who finished it — the only case that shows a byline
   // instead of the "who may act" role hint.
   const done = (status === "COMPLETED" || status === "NOT_APPLICABLE") && !!actor;
+  // This row has a save in flight. Only this row's buttons lock — every other
+  // phase stays clickable, which is the point: independent phases are actioned
+  // in parallel. `saving` holds WHICH status is being written, so the exact
+  // button that was pressed is the one that spins.
+  const rowSaving = saving !== undefined;
 
   // SLA line — all values come from the backend's `workflow.phases`; this only
   // formats them. Delayed steps get a red overdue counter, running steps show
@@ -189,7 +212,7 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
           </span>
         ) : canAct && pickingLeft ? (
           <div className="dc-step-actions">
-            <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+            <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"}
               onClick={async () => {
                 if (systemCheckoutDone) {
                   const ok = await confirm({
@@ -207,29 +230,28 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
                 } else {
                   setLoungeNoteOpen(true);
                 }
-              }}>Patient Left</button>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-              onClick={() => setPickingLeft(false)}>Cancel</button>
+              }}>Patient Left</ActBtn>
+            <ActBtn disabled={rowSaving} onClick={() => setPickingLeft(false)}>Cancel</ActBtn>
           </div>
         ) : canAct ? (
           <div className="dc-step-actions">
             {status === "PENDING" && step.allowNA && (
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-                onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</button>
+              <ActBtn disabled={rowSaving} spinning={saving === "NOT_APPLICABLE"}
+                onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</ActBtn>
             )}
             {status !== "COMPLETED" && status !== "NOT_APPLICABLE" && (
-              <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+              <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"}
                 onClick={() => step.needsPatientLeft ? setPickingLeft(true) : onSetStatus(step.key, "COMPLETED")}>
                 Mark Completed
-              </button>
+              </ActBtn>
             )}
             {status !== "PENDING" && canDirectReopen && (
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-                onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</button>
+              <ActBtn disabled={rowSaving} spinning={saving === "PENDING"}
+                onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</ActBtn>
             )}
             {status === "COMPLETED" && !canDirectReopen && onRequestReopen && (
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px", color: "var(--amber)" }} disabled={busy}
-                onClick={() => onRequestReopen(step.key)}>Request Reopen</button>
+              <ActBtn disabled={rowSaving} style={{ color: "var(--amber)" }}
+                onClick={() => onRequestReopen(step.key)}>Request Reopen</ActBtn>
             )}
           </div>
         ) : null}
@@ -246,7 +268,7 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
       {confirmDialog}
       {loungeNoteOpen && (
         <MoveToLoungeNotePopup
-          saving={busy}
+          saving={rowSaving}
           onCancel={() => setLoungeNoteOpen(false)}
           onConfirm={(note) => {
             setLoungeNoteOpen(false);
@@ -624,6 +646,8 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   // Who completed each step (name + role), keyed by step key — see stepActorsForAdmission.
   const [stepActors, setStepActors] = useState({});
   const [busy, setBusy] = useState(false);
+  // { [stepKey]: statusBeingWritten } — one entry per in-flight step save.
+  const [savingSteps, setSavingSteps] = useState({});
   const [error, setError] = useState("");
   const [section, setSection] = useState(null); // "plan" | "transfer" | "history" | null
   const [cancelReason, setCancelReason] = useState(null); // string | null (null = hidden)
@@ -631,14 +655,21 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   // PRE only, for now — see the "Physical Checkout while System Checkout is still
   // pending" fork below. true while the choice popup is open.
 
+  // Parallel steps mean several saves can be in flight, each followed by its own
+  // load(). Responses can come back out of order, so a slow early reply would
+  // otherwise overwrite a fresh later one. Only the newest load may write state.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       const r = await api.dischargeForBed(bed.id);
+      if (seq !== loadSeq.current) return;
       setAdmission(r.admission);
       setTracking(r.tracking);
       setWorkflow(r.workflow ?? null);
       setStepActors(r.stepActors ?? {});
     } catch (e) {
+      if (seq !== loadSeq.current) return;
       const msg = toastErr(e);
       if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
         setAdmission(null);
@@ -684,11 +715,23 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
 
   const refresh = async () => { setSection(null); await load(); onChanged?.(); };
 
+  // Per-step, not per-page: independent phases (Discharge Summary / Drug Return /
+  // Physical Checkout, and the Pharmacy Clearance + Procedure Reconciliation
+  // fan-out) can be actioned at the same time without waiting on each other.
+  // The value is the status being written, so the row can spin the exact button
+  // that was pressed rather than all of them.
   const setStep = async (step, status, opts = {}) => {
-    setBusy(true); setError("");
+    setSavingSteps((prev) => ({ ...prev, [step]: status }));
+    setError("");
     try { await api.dischargeUpdateStep(tracking.admission_id, step, status, opts); await refresh(); }
     catch (e) { setError(toastErr(e)); }
-    finally { setBusy(false); }
+    finally {
+      setSavingSteps((prev) => {
+        const next = { ...prev };
+        delete next[step];
+        return next;
+      });
+    }
   };
 
   const onStepAction = async (step, status, opts = {}) => {
@@ -728,6 +771,11 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
     try { await api.dischargeCancel(tracking.admission_id, cancelReason); setCancelReason(null); await refresh(); }
     catch (e) { setError(toastErr(e)); } finally { setBusy(false); }
   };
+
+  // Page-level actions (Start Discharge / Cancel / Reschedule) keep the original
+  // "block while anything is in flight" guard — only the per-step buttons were
+  // meant to become independent.
+  const anyBusy = busy || Object.keys(savingSteps).length > 0;
 
   const canPlan = PLAN_ROLES.includes(role);
   const running = tracking && ["DISCHARGE_INITIATED", "IN_PROGRESS"].includes(tracking.status);
@@ -833,9 +881,9 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
           )}
           {tracking.status === "PLANNED" && section !== "plan" && canPlan && (
             <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={initiate}>Start Discharge</button>
-              <button className="btn btn-ghost" style={{ flex: 1 }} disabled={busy} onClick={() => setSection("plan")}>Reschedule</button>
-              <button className="btn btn-ghost" style={{ flex: 1, color: "var(--st-or)" }} disabled={busy} onClick={() => setCancelReason("")}>Cancel Plan</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} disabled={anyBusy} onClick={initiate}>Start Discharge</button>
+              <button className="btn btn-ghost" style={{ flex: 1 }} disabled={anyBusy} onClick={() => setSection("plan")}>Reschedule</button>
+              <button className="btn btn-ghost" style={{ flex: 1, color: "var(--st-or)" }} disabled={anyBusy} onClick={() => setCancelReason("")}>Cancel Plan</button>
             </div>
           )}
 
@@ -895,7 +943,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                         ? afterAllPending.map(s => s.label).join(", ")
                         : undefined;
                       return (
-                        <StepRow key={step.key} step={step} role={role} busy={busy} status={status}
+                        <StepRow key={step.key} step={step} role={role} saving={savingSteps[step.key]} status={status}
                           locked={locked} lockedOn={locked ? lockedOn : null} lockedTitle={lockedTitle}
                           onSetStatus={onStepAction} onRequestReopen={onRequestReopen ? (stepKey) => onRequestReopen(bed.admission_id, stepKey) : null}
                           patientLeft={tracking.patient_left}
@@ -941,7 +989,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                     <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setSection("plan")}>
                       <Ic d={icons.clipboard} s={14} /> Reschedule Discharge
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={initiate}>
+                    <button className="btn btn-primary" style={{ flex: 1 }} disabled={anyBusy} onClick={initiate}>
                       <Ic d={icons.check} s={14} /> Initiate Now
                     </button>
                   </div>
@@ -958,7 +1006,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                 style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", marginBottom: 10 }} />
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 14px" }} onClick={() => setCancelReason(null)}>Back</button>
-                <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={busy}
+                <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={anyBusy}
                   onClick={tracking.status === "PLANNED" ? cancelPlan : cancelWorkflow}>Confirm Cancel</button>
               </div>
             </div>

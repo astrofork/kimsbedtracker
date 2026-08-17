@@ -2444,6 +2444,20 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .dc-step-side{flex:0 0 auto;display:flex;flex-direction:column;
   align-items:flex-end;gap:4px;margin-left:auto;max-width:50%;}
 .dc-step-by{font-size:10px;font-weight:700;color:var(--ink-2);text-align:right;}
+
+/* Saving state. The label keeps its box (visibility, not display:none) so the
+   button holds its width and the row never reflows mid-save; the spinner is
+   absolutely centred over it.
+   The opacity override is load-bearing: a saving button is also `disabled`, and
+   .btn:disabled drops it to .45 — which fades the spinner with it, since a child
+   cannot undo an ancestor's opacity. A spinning control reads as working, not
+   unavailable, so it stays near full strength. */
+.dc-act{position:relative;}
+.dc-act .dc-act-label.is-hidden{visibility:hidden;}
+.dc-act-spin{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;}
+.dc-act[aria-busy="true"]{cursor:progress;}
+.dc-act[aria-busy="true"]:disabled{opacity:.9;}
 .dc-step-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
 
 /* These are compact inline chips sitting beside 11px text, not primary CTAs.
