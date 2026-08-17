@@ -77,6 +77,39 @@ const ADMIN_TITLES = {
   settings: "Settings",
 };
 
+// ── Reminder dot: computed from the clock, not fetched ───────────────────────
+// The server used to ship `dueReminder` inside the overview payload, computed as
+// `mins >= m && mins < m + 30` against COO_REMINDERS (coo.ts). That glued a
+// purely TIME-based signal onto a fetch that only ran on bed events — so the
+// reminder appeared when somebody happened to move a bed, not when it came due,
+// and it pinned the overview refetch in place because the dot rode along with it.
+//
+// It is a pure function of the clock, so it is computed here instead. Same rule,
+// same 30-minute window, and Asia/Kolkata explicitly — matching domain.ts's
+// indiaTime(), because the browser's timezone is the user's, not the hospital's.
+const REMINDER_WINDOW_MIN = 30;
+
+// Which COO tabs actually render `data` / `compliance`. Everywhere else they are
+// off screen, so refetching them on a bed event is work for nobody — the refresh
+// is remembered and replayed when such a tab is opened. Module scope so the
+// socket effect below captures one stable array rather than a fresh one per
+// render. Only safe because the reminder no longer rides inside that payload.
+const DATA_TABS = ["matrix", "savedviews", "alerts", "analytics"];
+
+function istMinutesNow() {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function dueReminderNow(reminders) {
+  const mins = istMinutesNow();
+  return (reminders || []).find((r) => {
+    const [h, m] = String(r).split(":").map(Number);
+    const start = h * 60 + m;
+    return mins >= start && mins < start + REMINDER_WINDOW_MIN;
+  }) || null;
+}
+
 export default function COOApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [data, setData] = useState(null);
@@ -99,6 +132,21 @@ export default function COOApp({ user, meta, onLogout }) {
   // Lives here, above the tab switch, so it survives navigating away from and
   // back to the Dashboard tab — see useLiveBedDashboardData's own doc comment.
   const dashboardData = useLiveBedDashboardData("admin", tab === "dashboard");
+
+  // Reminder times come from GET /meta (COO_REMINDERS server-side) — the values,
+  // not the verdict. See dueReminderNow above for why the verdict is local.
+  const reminders = meta?.cooReminders;
+  const [cooDue, setCooDue] = useState(() => dueReminderNow(reminders));
+  useEffect(() => {
+    const tick = () => setCooDue(dueReminderNow(reminders));
+    tick();
+    const id = setInterval(tick, 30 * 1000);
+    return () => clearInterval(id);
+  }, [reminders]);
+
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const cooStaleRef = useRef(false);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
@@ -141,14 +189,26 @@ export default function COOApp({ user, meta, onLogout }) {
     const socket = getSocket();
     // Coalesced: the scheduler emits one alarm:active PER PRE BLOCK every 30s,
     // and each used to trigger its own full aggregate reload. See coalesce().
-    const refresh = coalesce(() => { loadRef.current(); setLiveKey(k => k + 1); });
+    const refresh = coalesce(() => { cooStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
+    // Skipped unless a tab that reads this data is open — see DATA_TABS above.
+    const gated = () => {
+      if (!DATA_TABS.includes(tabRef.current)) { cooStaleRef.current = true; return; }
+      refresh();
+    };
     const events = ["bed:update", "discharge:update", "discharge:overstay", "round:submit", "ward:operational", "alarm:active"];
-    for (const ev of events) socket.on(ev, refresh);
+    for (const ev of events) socket.on(ev, gated);
     // Only a RECONNECT refreshes — the first connect would just duplicate the
     // mount-time load() above a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
     const offReconnect = onReconnect(socket, refresh);
-    return () => { for (const ev of events) socket.off(ev, refresh); offReconnect(); refresh.cancel(); };
+    return () => { for (const ev of events) socket.off(ev, gated); offReconnect(); refresh.cancel(); };
   }, []);
+
+  // Opening a tab that reads `data`/`compliance` replays whatever was skipped
+  // while it was closed, so those screens are never shown stale.
+  useEffect(() => {
+    if (DATA_TABS.includes(tab) && cooStaleRef.current) { cooStaleRef.current = false; loadRef.current?.(); }
+  }, [tab]);
   useEffect(() => { api.mgrHistoryDates().then((d) => setDates(d.dates || [])).catch(() => { }); }, []);
 
   // when a historical date is picked, load that day's rounds
@@ -177,7 +237,10 @@ export default function COOApp({ user, meta, onLogout }) {
     </div>
   );
 
-  const due = data.dueReminder;
+  // Ticks the clock, never the network — a plain arithmetic check every 30s.
+  // React bails out when the value is unchanged, so the common case costs a
+  // comparison and nothing else. Declared here beside its only consumers.
+  const due = cooDue;
 
   const menu = [
     {
@@ -1314,14 +1377,14 @@ function invalidatedBy(event, payload) {
   }
   switch (event) {
     case "bed:update":
-    case "discharge:update":   return ["wards", "consultants"];
+    case "discharge:update": return ["wards", "consultants"];
     // Overstay is a 60-minute timer firing; it writes no bed state, so strictly
     // it changes neither. Kept on `wards` deliberately as the conservative
     // choice — these fire rarely, and the cost of being wrong (stale occupancy)
     // outweighs one extra request an hour.
     case "discharge:overstay": return ["wards"];
-    case "ward:operational":   return ["wards"];
-    default:                   return [];
+    case "ward:operational": return ["wards"];
+    default: return [];
   }
 }
 
@@ -1502,7 +1565,7 @@ export function LiveBedDashboard({ data, userName = "Admin", currentUsername = n
   // unmounting on tab switch. Named identically to the old local state so
   // every read further down in this function needs no other changes.
   const { liveData, snaps, payerTypes, consultantData, lastSync,
-          adminCards, adminHistory, setViewBy, unitOptions, activeUnit } = data;
+    adminCards, adminHistory, setViewBy, unitOptions, activeUnit } = data;
   const [search, setSearch] = useState("");
   const [searchBy, setSearchBy] = useState("ward");
   const compact = scope === "consultant";
@@ -2482,30 +2545,30 @@ export function LiveBedDashboard({ data, userName = "Admin", currentUsername = n
             cv-groups-swipe turns the board into a horizontal strip there instead.
             Admin renders 6 and fills the grid exactly, so it keeps the grid. */}
         <div className="cv-swipe-wrap">
-        <div ref={occStripRef} className={"cv-groups" + (scope === "admin" ? "" : " cv-groups-swipe")}
-          style={{ "--cv-group-count": occGroups.length }}>
-          {occGroups.map((g) => (
-            <div key={g.title} className="cv-group">
-              <div className="cv-group-head">
-                {g.title}
-              </div>
-              {g.cards.map((k, i) => (
-                <div key={k.label}
-                  className={"cv-metric" + (i > 0 ? " cv-metric-sub-item" : "") + (k.explorerKey ? " cv-metric-click" : "")}
-                  role={k.explorerKey ? "button" : undefined}
-                  tabIndex={k.explorerKey ? 0 : undefined}
-                  aria-label={k.explorerKey ? `${k.label} — ${k.val}. Press Enter to see these beds.` : undefined}
-                  onClick={k.explorerKey ? () => openBedExplorer(k.explorerKey, k.color, k.payerFilter) : undefined}
-                  onKeyDown={k.explorerKey ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.explorerKey, k.color, k.payerFilter); } } : undefined}>
-                  <span className="cv-metric-dot" style={{ background: k.color }} />
-                  <span className="cv-metric-label">{k.label}{k.sub ? <span className="cv-metric-sub"> · {k.sub}</span> : null}</span>
-                  <span className="cv-metric-val">{k.val}</span>
+          <div ref={occStripRef} className={"cv-groups" + (scope === "admin" ? "" : " cv-groups-swipe")}
+            style={{ "--cv-group-count": occGroups.length }}>
+            {occGroups.map((g) => (
+              <div key={g.title} className="cv-group">
+                <div className="cv-group-head">
+                  {g.title}
                 </div>
-              ))}
-            </div>
-          ))}
-        </div>
-        {scope !== "admin" && <SwipeThumb targetRef={occStripRef} deps={occGroups.length} />}
+                {g.cards.map((k, i) => (
+                  <div key={k.label}
+                    className={"cv-metric" + (i > 0 ? " cv-metric-sub-item" : "") + (k.explorerKey ? " cv-metric-click" : "")}
+                    role={k.explorerKey ? "button" : undefined}
+                    tabIndex={k.explorerKey ? 0 : undefined}
+                    aria-label={k.explorerKey ? `${k.label} — ${k.val}. Press Enter to see these beds.` : undefined}
+                    onClick={k.explorerKey ? () => openBedExplorer(k.explorerKey, k.color, k.payerFilter) : undefined}
+                    onKeyDown={k.explorerKey ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.explorerKey, k.color, k.payerFilter); } } : undefined}>
+                    <span className="cv-metric-dot" style={{ background: k.color }} />
+                    <span className="cv-metric-label">{k.label}{k.sub ? <span className="cv-metric-sub"> · {k.sub}</span> : null}</span>
+                    <span className="cv-metric-val">{k.val}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          {scope !== "admin" && <SwipeThumb targetRef={occStripRef} deps={occGroups.length} />}
         </div>
       </div>
 
