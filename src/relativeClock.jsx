@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { fmtRelative, toMs } from "./lib.js";
 
 /* A single clock for every "3m ago" label in the app.
  *
@@ -80,8 +81,28 @@ export function useRelativeClock(ts) {
   useEffect(() => {
     const fn = () => bump((n) => n + 1);
     subscribers.add(fn);
-    spans.set(fn, ts == null ? null : Date.now() - Number(ts));
+    // toMs, not Number: some legacy rows store epoch SECONDS and Postgres hands
+    // bigints back as strings. fmtRelative normalises both the same way, so
+    // pacing has to as well — otherwise a seconds-based row computes an absurd
+    // age, lands in the "days old" band and silently never ticks.
+    spans.set(fn, ts == null ? null : Date.now() - toMs(ts));
     reschedule();
     return () => { subscribers.delete(fn); spans.delete(fn); reschedule(); };
   }, [ts]);
+}
+
+/** Drop-in for `{fmtRelative(ts)}` that keeps itself current.
+ *
+ *  A COMPONENT rather than a bare hook because most of these labels render
+ *  inside `.map()` over rows (PWO's complaint queue, FC's reopen requests, the
+ *  ward tables). Hooks cannot be called in a loop — the count would change with
+ *  the row count and React would throw. Each rendered element being its own
+ *  component sidesteps that entirely, and means a tick redraws just this span
+ *  rather than the table around it.
+ *
+ *  Output is identical to fmtRelative(), including "—" for a missing value, so
+ *  swapping one for the other changes nothing on screen. */
+export function RelativeTime({ ts }) {
+  useRelativeClock(ts);
+  return <>{fmtRelative(ts)}</>;
 }

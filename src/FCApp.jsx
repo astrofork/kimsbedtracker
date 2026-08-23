@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { api, toastErr, getSocket, onReconnect, coalesce, fmtRelative } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
+import { RelativeTime } from "./relativeClock.jsx";
 import { AppShell } from "./shell.jsx";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { fmtIpLast6, normalizeQuery, wardIdsMatchingPatientName, PATIENT_NAME_MIN_QUERY } from "./bedUtils.js";
@@ -68,7 +69,7 @@ function FCCard({ row, color, onComplete, onRequestReopen, busy, isMaster }) {
         </span>
       </div>
       <div style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 500 }}>
-        {fmtRelative(row.updated_at)}
+        <RelativeTime ts={row.updated_at} />
       </div>
       <div style={{ display: "flex", gap: 4, marginTop: "auto" }}>
         <button
@@ -169,7 +170,7 @@ function ReopenRequestCard({ req: r, isMaster, onReview, busy }) {
           </div>
           <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>Reason: {r.reason}</div>
           <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>
-            Requested by {r.requester_name || "—"} · {fmtRelative(r.created_at)}
+            Requested by {r.requester_name || "—"} · <RelativeTime ts={r.created_at} />
           </div>
           {r.status !== "PENDING" && (
             <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, color: r.status === "APPROVED" ? "var(--green)" : "var(--red)" }}>

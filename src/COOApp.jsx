@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, getSocket, onReconnect, coalesce } from "./lib.js";
-import { useRelativeClock } from "./relativeClock.js";
+import { useRelativeClock, RelativeTime } from "./relativeClock.jsx";
 import {
   Ic, icons, ThemeToggle, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
@@ -836,7 +836,7 @@ function DischargeListModal({ entry, onClose }) {
                     </div>
                   )}
                   <div style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 500, marginTop: "auto" }}>
-                    {fmtRelative(d.updated_at || d.admitted_at)}
+                    <RelativeTime ts={d.updated_at || d.admitted_at} />
                   </div>
                 </div>
               ))}
@@ -2843,7 +2843,7 @@ function LastUpdatedCell({ ts, reviewedAt = null }) {
   const [open, setOpen] = useState(false);
   const showReviewed = reviewedAt && (!ts || reviewedAt > ts);
   // Recount "3m ago" as it falls due. Paced off whichever of the two stamps is
-  // fresher, since both render in this cell. No fetch — see relativeClock.js.
+  // fresher, since both render in this cell. No fetch — see relativeClock.jsx.
   const youngest = ts == null ? reviewedAt
     : reviewedAt == null ? ts
     : Math.max(Number(ts), Number(reviewedAt));
@@ -3875,7 +3875,7 @@ function ActivityRow({ r, open, onToggle }) {
 
         {/* time */}
         <div style={{ flexShrink: 0, textAlign: "right" }}>
-          <div className="dim" style={{ fontSize: 12 }} title={fmtDateTime(r.ts) + " IST"}>{fmtRelative(r.ts)}</div>
+          <div className="dim" style={{ fontSize: 12 }} title={fmtDateTime(r.ts) + " IST"}><RelativeTime ts={r.ts} /></div>
           <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)", transform: open ? "rotate(90deg)" : "none", transition: ".15s" }} />
         </div>
       </button>

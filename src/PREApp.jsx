@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtRelative, fmtDMY, toastErr, getSocket, onReconnect, coalesce, getWardBeds, setWardBeds } from "./lib.js";
+import { api, startAlarm, stopAlarm, fmtTime, fmtClock, fmtDMY, toastErr, getSocket, onReconnect, coalesce, getWardBeds, setWardBeds } from "./lib.js";
+import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, StatusBar, ThemeToggle, useModal, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 import { OverstayPanel } from "./COOApp.jsx";
@@ -878,7 +879,7 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
       )}
 
       <div className="pbed-foot">
-        <span>Updated {fmtRelative(bed.updated_at)}</span>
+        <span>Updated <RelativeTime ts={bed.updated_at} /></span>
         {onClick && <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)" }} />}
       </div>
     </div>
@@ -1742,7 +1743,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
         )}
         <div className="pdlg-row" style={{ padding: "10px 0" }}>
           <span className="k row" style={{ gap: 10 }}><Ic d={icons.clock} s={16} /> Last Updated</span>
-          <span className="v dim" style={{ fontWeight: 600 }}>{fmtRelative(bed.updated_at)}</span>
+          <span className="v dim" style={{ fontWeight: 600 }}><RelativeTime ts={bed.updated_at} /></span>
         </div>
 
         {/* What's saved on the bed right now, regardless of the toggles */}
@@ -2594,7 +2595,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
             <div className="dim" style={{ fontSize: 11.5 }}>
               {beds.length} bed{beds.length !== 1 ? "s" : ""}
               {tab === "manage" && reviewedAt
-                ? <> · <Ic d={icons.check} s={11} /> Reviewed {fmtRelative(reviewedAt)}</>
+                ? <> · <Ic d={icons.check} s={11} /> Reviewed <RelativeTime ts={reviewedAt} /></>
                 : tab === "manage" && cfg.reviewWard ? " · Not reviewed yet" : ""}
             </div>
           </div>

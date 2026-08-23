@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { api, toastErr, getSocket, onReconnect, coalesce, fmtRelative, fmtDateTime } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce, fmtDateTime } from "./lib.js";
+import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { bedStateColor, normalizeQuery, wardIdsMatchingPatientName } from "./bedUtils.js";
@@ -94,7 +95,7 @@ function WardCard({ w, i = 0, onOpen, note }) {
             {note !== undefined
               ? note
               : w.reviewedAt
-                ? <><Ic d={icons.check} s={11} /> Reviewed {fmtRelative(w.reviewedAt)}</>
+                ? <><Ic d={icons.check} s={11} /> Reviewed <RelativeTime ts={w.reviewedAt} /></>
                 : <span style={{ color: "var(--ink-3)" }}>Not reviewed yet</span>}
           </div>
         </div>
@@ -209,7 +210,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
             <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
             <div className="dim" style={{ fontSize: 11.5 }}>
               {data.wards.length} wards · {totals.total} beds · {blockPct}% occupied
-              {data.reviewedAt ? <> · reviewed {fmtRelative(data.reviewedAt)}</> : ""}
+              {data.reviewedAt ? <> · reviewed <RelativeTime ts={data.reviewedAt} /></> : ""}
             </div>
           </div>
         </div>
@@ -489,7 +490,7 @@ function ActivityView() {
               <span className="doc-tl-dot" style={{ background: c }} />
               <div className="doc-tl-top">
                 <div className="doc-tl-bed">{r.bed_name} <span className="dim" style={{ fontWeight: 500, fontSize: 12 }}>· {r.ward_name || "—"}</span></div>
-                <div className="doc-tl-time" title={fmtDateTime(r.created_at)}>{fmtRelative(r.created_at)}</div>
+                <div className="doc-tl-time" title={fmtDateTime(r.created_at)}><RelativeTime ts={r.created_at} /></div>
               </div>
               <div className="doc-trans">
                 <span className="doc-pill" style={{ background: "var(--panel-2)", color: "var(--ink-3)" }}>{bedStateShort(r.old_physical, r.old_reservation)}</span>

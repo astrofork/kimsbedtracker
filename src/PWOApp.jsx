@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, getSocket, onReconnect, fmtRelative, fmtDateTime } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, fmtDateTime } from "./lib.js";
+import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, ThemeToggle, useConfirm, useModal, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 
@@ -441,7 +442,7 @@ function ComplaintDetail({ id, meId, onBack, onPatched, showToast }) {
               <div className="cd-note" key={n.id} style={{ borderLeftColor: n.visibleToPatient ? "var(--st-v)" : "var(--line)" }}>
                 <div className="cd-note-head">
                   <span style={{ fontWeight: 700, fontSize: 12 }}>{n.authorName || "—"}</span>
-                  <span className="dim" style={{ fontSize: 10.5 }}>{fmtRelative(n.createdAt)}</span>
+                  <span className="dim" style={{ fontSize: 10.5 }}><RelativeTime ts={n.createdAt} /></span>
                   <span className="cd-note-tag" style={{
                     background: n.visibleToPatient ? "var(--st-v-bg)" : "var(--panel-2)",
                     color: n.visibleToPatient ? "var(--st-v)" : "var(--ink-3)",
@@ -871,7 +872,7 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
                         </td>
                         <td><StatusPill status={r.status} /></td>
                         <td>
-                          <div className="cq-when">{fmtRelative(r.createdAt)}</div>
+                          <div className="cq-when"><RelativeTime ts={r.createdAt} /></div>
                           <div className="cq-when-sub">{fmtDateTime(r.createdAt)}</div>
                         </td>
                         <td style={{ textAlign: "right" }}>
@@ -905,7 +906,7 @@ function ComplaintsQueue({ stats, rows, total, loading, lookups, filters, onFilt
                       {r.category.label} · {r.location.wardName || "—"}
                       {r.location.bedName ? ` · Bed ${r.location.bedName}` : ""} · IP {r.ipLast6}
                     </div>
-                    <div className="cq-meta" style={{ marginTop: 3 }}>{fmtRelative(r.createdAt)} · {fmtDateTime(r.createdAt)}</div>
+                    <div className="cq-meta" style={{ marginTop: 3 }}><RelativeTime ts={r.createdAt} /> · {fmtDateTime(r.createdAt)}</div>
                   </div>
                 );
               })}
