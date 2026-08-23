@@ -1455,13 +1455,36 @@ export function useLiveBedDashboardData(scope, active) {
 
   useEffect(() => {
     const socket = getSocket();
-    const bump = (sets) => {
-      if (!sets.length) return;
+    // Batched, like every other screen's socket handler (see coalesce() and
+    // PREApp's `refresh`). This hook was the one that still bumped on EVERY
+    // event: a busy ward produces ~20 bed changes a minute, and each one drove a
+    // full round of live-wards + consultants + admin-dashboard + history. Since a
+    // refetch asks "what is everything now?" rather than "what was that change?",
+    // one fetch after the last change already contains all of them — the other
+    // nineteen returned near-identical data.
+    //
+    // The invalidated sets are ACCUMULATED rather than debounced directly: two
+    // different events in one burst can dirty different datasets (a bed change
+    // hits `wards`, a payer-type edit hits `payerTypes`), and a plain debounce
+    // would keep only the last caller's list and silently skip the other refetch.
+    // Taking the union is what makes this safe.
+    const pending = new Set();
+    const flush = coalesce(() => {
+      if (!pending.size) return;
+      const sets = [...pending];
+      pending.clear();
       setVersions((v) => {
         const next = { ...v };
         for (const s of sets) next[s] = v[s] + 1;
         return next;
       });
+    });
+    // Counts as a change marker, not a tally — the fetch effect only compares it
+    // against the last value it fetched at, so one bump per burst is correct.
+    const bump = (sets) => {
+      if (!sets.length) return;
+      for (const s of sets) pending.add(s);
+      flush();
     };
     const handlers = DASHBOARD_EVENTS.map((ev) => {
       const h = (p) => bump(invalidatedBy(ev, p));
@@ -1476,6 +1499,7 @@ export function useLiveBedDashboardData(scope, active) {
     return () => {
       for (const [ev, h] of handlers) socket.off(ev, h);
       offReconnect();
+      flush.cancel();
     };
   }, []);
 
