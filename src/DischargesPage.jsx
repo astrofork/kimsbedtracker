@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { api, toastErr, getSocket, onReconnect, coalesce, fmtRelative } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
+import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 import DischargeTab from "./DischargeTab.jsx";
@@ -133,7 +134,7 @@ function DischargeCard({ row, onOpen }) {
       )}
 
       <div className="row between" style={{ marginTop: 8 }}>
-        <span className="dim" style={{ fontSize: 10.5 }}>Updated {fmtRelative(row.updated_at)}</span>
+        <span className="dim" style={{ fontSize: 10.5 }}>Updated <RelativeTime ts={row.updated_at} /></span>
         <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)" }} />
       </div>
     </button>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { api, fmtRelative, friendlyError } from "./lib.js";
+import { api, friendlyError } from "./lib.js";
+import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, useModal, AppError } from "./ui.jsx";
 import { dischargeBadge } from "./bedUtils.js";
 
@@ -315,7 +316,7 @@ function BedCard({ bed }) {
         </div>
       )}
       <div style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 500, marginTop: "auto" }}>
-        {fmtRelative(bed.updated_at)}
+        <RelativeTime ts={bed.updated_at} />
       </div>
     </div>
   );

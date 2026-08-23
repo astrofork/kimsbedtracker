@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, getSocket, onReconnect, coalesce } from "./lib.js";
+import { useRelativeClock, RelativeTime } from "./relativeClock.jsx";
 import {
   Ic, icons, ThemeToggle, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
@@ -835,7 +836,7 @@ function DischargeListModal({ entry, onClose }) {
                     </div>
                   )}
                   <div style={{ fontSize: 10, color: "var(--ink-3)", fontWeight: 500, marginTop: "auto" }}>
-                    {fmtRelative(d.updated_at || d.admitted_at)}
+                    <RelativeTime ts={d.updated_at || d.admitted_at} />
                   </div>
                 </div>
               ))}
@@ -1454,13 +1455,36 @@ export function useLiveBedDashboardData(scope, active) {
 
   useEffect(() => {
     const socket = getSocket();
-    const bump = (sets) => {
-      if (!sets.length) return;
+    // Batched, like every other screen's socket handler (see coalesce() and
+    // PREApp's `refresh`). This hook was the one that still bumped on EVERY
+    // event: a busy ward produces ~20 bed changes a minute, and each one drove a
+    // full round of live-wards + consultants + admin-dashboard + history. Since a
+    // refetch asks "what is everything now?" rather than "what was that change?",
+    // one fetch after the last change already contains all of them — the other
+    // nineteen returned near-identical data.
+    //
+    // The invalidated sets are ACCUMULATED rather than debounced directly: two
+    // different events in one burst can dirty different datasets (a bed change
+    // hits `wards`, a payer-type edit hits `payerTypes`), and a plain debounce
+    // would keep only the last caller's list and silently skip the other refetch.
+    // Taking the union is what makes this safe.
+    const pending = new Set();
+    const flush = coalesce(() => {
+      if (!pending.size) return;
+      const sets = [...pending];
+      pending.clear();
       setVersions((v) => {
         const next = { ...v };
         for (const s of sets) next[s] = v[s] + 1;
         return next;
       });
+    });
+    // Counts as a change marker, not a tally — the fetch effect only compares it
+    // against the last value it fetched at, so one bump per burst is correct.
+    const bump = (sets) => {
+      if (!sets.length) return;
+      for (const s of sets) pending.add(s);
+      flush();
     };
     const handlers = DASHBOARD_EVENTS.map((ev) => {
       const h = (p) => bump(invalidatedBy(ev, p));
@@ -1475,6 +1499,7 @@ export function useLiveBedDashboardData(scope, active) {
     return () => {
       for (const [ev, h] of handlers) socket.off(ev, h);
       offReconnect();
+      flush.cancel();
     };
   }, []);
 
@@ -2841,6 +2866,12 @@ function OccBar({ p }) {
 function LastUpdatedCell({ ts, reviewedAt = null }) {
   const [open, setOpen] = useState(false);
   const showReviewed = reviewedAt && (!ts || reviewedAt > ts);
+  // Recount "3m ago" as it falls due. Paced off whichever of the two stamps is
+  // fresher, since both render in this cell. No fetch — see relativeClock.jsx.
+  const youngest = ts == null ? reviewedAt
+    : reviewedAt == null ? ts
+    : Math.max(Number(ts), Number(reviewedAt));
+  useRelativeClock(open ? null : youngest);
   if (!ts && !showReviewed) return <span className="dim">–</span>;
   return (
     <span
@@ -3868,7 +3899,7 @@ function ActivityRow({ r, open, onToggle }) {
 
         {/* time */}
         <div style={{ flexShrink: 0, textAlign: "right" }}>
-          <div className="dim" style={{ fontSize: 12 }} title={fmtDateTime(r.ts) + " IST"}>{fmtRelative(r.ts)}</div>
+          <div className="dim" style={{ fontSize: 12 }} title={fmtDateTime(r.ts) + " IST"}><RelativeTime ts={r.ts} /></div>
           <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)", transform: open ? "rotate(90deg)" : "none", transition: ".15s" }} />
         </div>
       </button>

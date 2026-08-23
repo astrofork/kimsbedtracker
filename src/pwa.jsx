@@ -34,16 +34,41 @@ const bannerBase = {
    The timer is a belt-and-braces fallback: if `controllerchange` never arrives
    — no waiting worker races in, the message is dropped, an engine disagrees —
    the user still gets their refresh instead of a spinner that never resolves. */
-export function reloadWithPendingUpdate(registration) {
+export function reloadWithPendingUpdate(registration, onFailed) {
   let done = false;
   const go = () => { if (!done) { done = true; window.location.reload(); } };
 
   const waiting = registration?.waiting;
   if (!waiting || !("serviceWorker" in navigator)) { go(); return; }
 
-  navigator.serviceWorker.addEventListener("controllerchange", go, { once: true });
+  // Reload ONLY once the new worker is genuinely in charge. The previous version
+  // also reloaded on a blind 2s timer, and that was the whole bug: on a slow or
+  // busy device the timer won round, the page reloaded with the OLD worker still
+  // controlling, the new one stayed `waiting` — so the update never applied and
+  // the prompt reappeared. Tapping it again just re-ran the same race, which is
+  // how a shipped fix could sit undelivered indefinitely.
+  const settle = () => { cleanup(); go(); };
+  const onControllerChange = () => settle();
+  const onStateChange = () => { if (waiting.state === "activated") settle(); };
+  function cleanup() {
+    clearTimeout(timer);
+    navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+    waiting.removeEventListener("statechange", onStateChange);
+  }
+
+  navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+  waiting.addEventListener("statechange", onStateChange);
   waiting.postMessage({ type: "SKIP_WAITING" });
-  setTimeout(go, 2000);
+
+  // Last resort, and deliberately NOT a reload: if the worker never takes over,
+  // reloading changes nothing and would only spin the user through the same
+  // prompt again. Say so instead and leave them on a working page.
+  const timer = setTimeout(() => {
+    if (done) return;
+    cleanup();
+    if (waiting.state === "activated" || navigator.serviceWorker.controller !== null && registration.active === waiting) go();
+    else onFailed?.();
+  }, 10000);
 }
 
 /* ── 1. Offline Banner ───────────────────────────────────────────────────────
@@ -83,15 +108,37 @@ export function OfflineBanner() {
 /* ── 2. Update Toast ─────────────────────────────────────────────────────────
    Shown when a new service worker is waiting to activate.
    "Reload" sends SKIP_WAITING then refreshes the page.                       */
+/* Dismissal is remembered against the specific waiting worker, not "forever".
+ *
+ * It used to live in component state, which died on remount — PwaManager is
+ * rendered separately for Login and for each role (main.jsx), so simply logging
+ * in brought the prompt straight back. The opposite failure is worse: a plain
+ * "don't ask again" would opt that user out of every future fix, with no floor
+ * on how stale they get. Keying it to the worker's script URL silences THIS
+ * build while a genuinely newer one still asks.
+ *
+ * sessionStorage, not localStorage: it must not outlive the tab. Anything
+ * dismissed here is applied on next launch by activateWaitingFromLastSession. */
+const DISMISS_KEY = "pwa_update_dismissed";
+function dismissedVersion() {
+  try { return sessionStorage.getItem(DISMISS_KEY); } catch { return null; }
+}
+function rememberDismissal(v) {
+  try { if (v) sessionStorage.setItem(DISMISS_KEY, v); } catch { /* private mode */ }
+}
+
 export function UpdateToast({ registration }) {
   const [show, setShow] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const regRef = useRef(registration);
 
   useEffect(() => {
     regRef.current = registration;
     if (!registration) return;
-    if (registration.waiting) { setShow(true); return; }
-    const onUpdate = () => { if (registration.waiting) setShow(true); };
+    const notDismissed = (w) => !!w && w.scriptURL !== dismissedVersion();
+    if (notDismissed(registration.waiting)) { setShow(true); return; }
+    const onUpdate = () => { if (notDismissed(registration.waiting)) setShow(true); };
     const onFound = () => {
       registration.installing?.addEventListener("statechange", onUpdate);
     };
@@ -104,7 +151,16 @@ export function UpdateToast({ registration }) {
 
   // Shared with the pull-to-refresh gesture, so both routes to a refresh apply
   // a waiting worker the same way and can't drift apart.
-  const reload = () => reloadWithPendingUpdate(regRef.current);
+  // Surfaces the failure instead of silently reloading into the same stale
+  // bundle — see reloadWithPendingUpdate.
+  // busy is never cleared on success on purpose: the page is about to reload, so
+  // the button should stay pressed and spinning right up to the moment it goes.
+  // Only a genuine failure releases it, and then the label says so.
+  const reload = () => {
+    if (busy) return;
+    setFailed(false); setBusy(true);
+    reloadWithPendingUpdate(regRef.current, () => { setBusy(false); setFailed(true); });
+  };
 
   if (!show) return null;
 
@@ -122,17 +178,16 @@ export function UpdateToast({ registration }) {
         <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
         <path d="M3 21v-5h5"/>
       </svg>
-      <span style={{ flex: 1 }}>New version available</span>
-      <button onClick={reload} style={{
-        background: "#0EA5E9", color: "#fff", border: "none",
-        padding: "6px 14px", borderRadius: 8, fontSize: 12,
-        fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-        fontFamily: "system-ui,sans-serif",
-      }}>Reload</button>
-      <button onClick={() => setShow(false)} style={{
-        background: "none", border: "none", color: "#64748B",
-        cursor: "pointer", padding: 4, lineHeight: 1,
-      }} aria-label="Dismiss">✕</button>
+      <span style={{ flex: 1 }}>
+        {busy ? "Updating…" : failed ? "Update didn't apply — try again" : "New version available"}
+      </span>
+      <button className="upd-btn" onClick={reload} disabled={busy} aria-busy={busy || undefined}>
+        {busy && <span className="dc-spinner" aria-hidden="true" />}
+        {busy ? "Updating…" : "Reload"}
+      </button>
+      <button className="upd-x" disabled={busy}
+        onClick={() => { rememberDismissal(regRef.current?.waiting?.scriptURL); setShow(false); }}
+        aria-label="Dismiss">✕</button>
     </div>
   );
 }
