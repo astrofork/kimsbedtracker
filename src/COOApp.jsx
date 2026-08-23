@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, getSocket, onReconnect, coalesce } from "./lib.js";
+import { useRelativeClock } from "./relativeClock.js";
 import {
   Ic, icons, ThemeToggle, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
@@ -2841,6 +2842,12 @@ function OccBar({ p }) {
 function LastUpdatedCell({ ts, reviewedAt = null }) {
   const [open, setOpen] = useState(false);
   const showReviewed = reviewedAt && (!ts || reviewedAt > ts);
+  // Recount "3m ago" as it falls due. Paced off whichever of the two stamps is
+  // fresher, since both render in this cell. No fetch — see relativeClock.js.
+  const youngest = ts == null ? reviewedAt
+    : reviewedAt == null ? ts
+    : Math.max(Number(ts), Number(reviewedAt));
+  useRelativeClock(open ? null : youngest);
   if (!ts && !showReviewed) return <span className="dim">–</span>;
   return (
     <span
