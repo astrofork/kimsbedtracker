@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { api, toastErr, fmtRelative, createSocket } from "./lib.js";
+import { api, toastErr, fmtRelative, getSocket, onReconnect, coalesce } from "./lib.js";
 import { AppShell } from "./shell.jsx";
 import { Ic, icons } from "./ui.jsx";
 import { fmtIpLast6 } from "./bedUtils.js";
 import DischargesPage from "./DischargesPage.jsx";
-import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
+import { LiveBedDashboard, OverstayPanel, useLiveBedDashboardData } from "./COOApp.jsx";
 
 const SECTIONS = [
   { key: "DRUG_RETURN", dataKey: "drugReturn", label: "Drug Return Pending", color: "#d97706", bg: "#fef3c7", emptyIcon: icons.fileText, emptyMsg: "All Drug Returns cleared." },
@@ -312,6 +312,11 @@ export default function PharmacyApp({ user, onLogout }) {
   const [reopenRequests, setReopenRequests] = useState([]);
   const [reopenModal, setReopenModal] = useState(null);
   const [liveKey, setLiveKey] = useState(0);
+  // Lives here, above the tab switch, so it survives navigating away from and
+  // back to the "beds" (Dashboard) tab — see useLiveBedDashboardData. Note:
+  // like FC, the nav key "beds" is labeled "Dashboard" and renders
+  // LiveBedDashboard; key "dashboard" is labeled "My Transactions".
+  const dashboardData = useLiveBedDashboardData("pharmacy", tab === "beds");
   const loadRef = useRef(() => {});
   const isMaster = user.role === "MASTER_PHARMACY";
 
@@ -345,16 +350,41 @@ export default function PharmacyApp({ user, onLogout }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (tab === "requests") loadRequests(); }, [tab, loadRequests]);
 
+  // load() feeds the "My Transactions" buckets, which render only on that tab —
+  // and the app opens on "beds". Refetching them for a screen nobody is on is
+  // waste, so the refresh is remembered and replayed when the tab is opened.
+  const pharmStaleRef = useRef(false);
   useEffect(() => {
-    const socket = createSocket();
-    const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
-    socket.on("bed:update", refresh);
-    socket.on("pharmacy:reopen-request", () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); });
-    socket.on("connect", refresh);
-    return () => { socket.disconnect(); };
-  }, []);
+    if (tab === "dashboard" && pharmStaleRef.current) { pharmStaleRef.current = false; load(); }
+  }, [tab, load]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    // Server-bucketed-by-step lists (like FC's billing pipeline) — bucket
+    // membership is business logic computed server-side, so this stays a
+    // refetch rather than a client-side patch.
+    const refresh = coalesce(() => { pharmStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
+    // Skipped while the buckets are off screen — see pharmStaleRef above. The
+    // MASTER_PHARMACY "Reopen Requests" dot is fed by its own
+    // pharmacy:reopen-request event below, which is never gated.
+    const gated = () => { if (tabRef.current !== "dashboard") { pharmStaleRef.current = true; return; } refresh(); };
+    const onReopenRequest = () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); };
+    socket.on("discharge:update", gated);
+    socket.on("discharge:overstay", gated);
+    socket.on("bed:update", gated);
+    socket.on("pharmacy:reopen-request", onReopenRequest);
+    // Only a RECONNECT refreshes — the first connect would duplicate the
+    // mount-time load() a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
+    const offReconnect = onReconnect(socket, refresh);
+    return () => {
+      socket.off("discharge:update", gated);
+      socket.off("discharge:overstay", gated);
+      socket.off("bed:update", gated);
+      socket.off("pharmacy:reopen-request", onReopenRequest);
+      offReconnect(); refresh.cancel();
+    };
+  }, [loadRequests]);
 
   const STEP_TOAST = { DRUG_RETURN: "Drug Return done", PHARMACY_CLEARANCE: "Pharmacy Clearance done", PROCEDURE_RECONCILIATION: "OT / Cat Clearance done" };
   const completeStep = async (admissionId, stepKey) => {
@@ -453,7 +483,7 @@ export default function PharmacyApp({ user, onLogout }) {
       )}
 
       {tab === "beds" && (
-        <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "Pharmacy"} scope="pharmacy" />
+        <LiveBedDashboard data={dashboardData} userName={user.name || user.username || "Pharmacy"} scope="pharmacy" />
       )}
 
       {tab === "overstay" && (

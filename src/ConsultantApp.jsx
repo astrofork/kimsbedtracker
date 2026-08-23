@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, createSocket } from "./lib.js";
+import { api, toastErr, getSocket, getWardBeds, setWardBeds } from "./lib.js";
 import { Ic, icons, ThemeToggle, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
-import { LiveBedDashboard } from "./COOApp.jsx";
+import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 import { BedGridCard, BedDetailSheet, BackBtn } from "./PREApp.jsx";
 
@@ -12,29 +12,24 @@ const initialsOf = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => 
 
 // Spinner shown while a tapped bed's details are fetched.
 //
-// Portaled to <body> deliberately. Both call sites sit inside <div className=
-// "slide-up">, and .slide-up animates a transform with animation-fill-mode:both
-// — so a transform stays applied even at rest, which makes it the containing
-// block for position:fixed descendants. Rendered inline, .overlay's `inset:0`
-// therefore resolved against the page block (measured 1146x265) instead of the
-// viewport (1256x818): only the card grid dimmed, the spinner centred a third
-// of the way down, and the sidebar/topbar stayed unblurred *and clickable*
-// while the fetch was in flight. Portaling restores true full-screen coverage,
-// and also makes .overlay's `padding-left:var(--sb-w)` correct — that rule
-// (styles.css) exists to re-centre body-portaled overlays over the content
-// column, and was double-counting the sidebar while these were nested.
+// This used to be a body-portaled `.overlay` — a full-screen dark scrim with a
+// backdrop blur. Every other role shows loading as a plain inline block instead
+// (FCApp, NurseApp, DoctorApp, PharmacyApp, PWOApp, COOApp and main.jsx all use
+// this exact markup), so blacking out the screen made Consultant look like a
+// different product. It is the same in-page wait as everywhere else, so it now
+// looks like it.
 //
-// The inner height:100% wrapper is load-bearing, not redundant: .overlay
-// switches to align-items:flex-end at <=767px for bottom sheets, so without a
-// full-height child the spinner would pin to the bottom edge on phones.
-function BedLoadingOverlay() {
-  return createPortal(
-    <div className="overlay">
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
-        <span className="spin"><Ic d={icons.refresh} s={28} /></span>
-      </div>
-    </div>,
-    document.body
+// Dropping the portal also retires the containing-block problem the old comment
+// documented: `.overlay` is position:fixed, and both call sites sit inside a
+// `.slide-up` whose transform made it the containing block, so `inset:0`
+// resolved against the page rather than the viewport. Nothing here is fixed, so
+// none of that applies.
+function BedLoadingInline() {
+  return (
+    <div className="empty" style={{ paddingTop: 60 }}>
+      <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={26} /></span>
+      <div className="dim" style={{ marginTop: 12, fontSize: 13 }}>Loading…</div>
+    </div>
   );
 }
 
@@ -92,7 +87,11 @@ function MyPatientsPage() {
   const [loadingBed, setLoadingBed] = useState(false);
   const [toast, setToast] = useState("");
   const [payerTypes, setPayerTypes] = useState([]);
-  const [destinations, setDestinations] = useState([]);
+  // No `destinations` here on purpose: BedDetailSheet only uses that list for
+  // ReservationPopup, which a read-only CONSULTANT_CFG can never open. It used
+  // to be declared and passed while nothing ever set it, so it was permanently
+  // [] — dead state that read like an oversight. The sheet already defaults the
+  // prop to [], so omitting it says the same thing honestly.
   const [departments, setDepartments] = useState([]);
   // Which ward's patient list is currently open — same "grid of cards, click
   // one to drill in" flow as PRE Entry's ward-card → WardPage, just landing on
@@ -130,8 +129,8 @@ function MyPatientsPage() {
   // this one only ever receives events this consultant actually owns (room-scoped
   // server-side), so every event here is guaranteed relevant, no filtering needed.
   useEffect(() => {
-    const socket = createSocket();
-    socket.on("consultant:patient-update", (payload) => {
+    const socket = getSocket();
+    const onPatientUpdate = (payload) => {
       if (!payload || typeof payload !== "object") return;
       const { action, admission_id } = payload;
       setPatients((prev) => {
@@ -146,16 +145,30 @@ function MyPatientsPage() {
         next[idx] = payload;
         return next;
       });
-    });
-    return () => socket.disconnect();
+    };
+    socket.on("consultant:patient-update", onPatientUpdate);
+    return () => socket.off("consultant:patient-update", onPatientUpdate);
   }, []);
 
+  // A patient card only needs ONE bed, but the endpoint returns the whole ward —
+  // so this used to pay a full round-trip per tap, which is what the spinner was
+  // covering. The ward-beds cache in lib.js already holds that list and is
+  // dropped the moment anything could have changed it, so a ward opened before
+  // resolves instantly with no request and no spinner at all. A miss falls back
+  // to the fetch and populates the cache for the next tap.
   const openBed = async (p) => {
     saveBedScroll();
+
+    const cached = getWardBeds(p.ward_id);
+    const hit = cached?.find((b) => b.id === p.bed_id);
+    if (hit) { setSelectedBed(hit); return; }
+
     setLoadingBed(true);
     try {
       const result = await api.consultantBeds(p.ward_id);
-      const fullBed = (result.beds || []).find(b => b.id === p.bed_id);
+      const beds = result.beds || [];
+      setWardBeds(p.ward_id, beds);
+      const fullBed = beds.find(b => b.id === p.bed_id);
       if (fullBed) {
         setSelectedBed(fullBed);
       } else {
@@ -177,7 +190,6 @@ function MyPatientsPage() {
         onChanged={() => {}}
         onToast={showToast}
         payerTypes={payerTypes}
-        destinations={destinations}
         departments={departments}
       />
     );
@@ -264,7 +276,7 @@ function MyPatientsPage() {
           ))}
         </div>
         {loadingBed && (
-          <BedLoadingOverlay />
+          <BedLoadingInline />
         )}
         {toast && <div className="toast show">{toast}</div>}
       </div>
@@ -445,7 +457,8 @@ function MyPatientsPage() {
                     specific to this consultant's patients), and Manage Beds /
                     Discharges buttons (Consultant is read-only). */}
                 {pagedWardGroups.map((g) => (
-                  <div className="ward-card slide-up" key={g.key}
+                  // Renders instantly, like BedGridCard — see PREApp's ward grid.
+                  <div className="ward-card" key={g.key}
                     style={{ padding: 16, cursor: "pointer" }}
                     onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
                     <div className="row between">
@@ -499,7 +512,7 @@ function MyPatientsPage() {
       )}
 
       {loadingBed && (
-        <BedLoadingOverlay />
+        <BedLoadingInline />
       )}
 
       {toast && <div className="toast show">{toast}</div>}
@@ -513,19 +526,18 @@ function MyPatientsPage() {
 export default function ConsultantApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
-  const [liveKey, setLiveKey] = useState(0);
+  // Lives here, above the tab switch, so it survives navigating away from and
+  // back to the Dashboard tab — see useLiveBedDashboardData.
+  const dashboardData = useLiveBedDashboardData("consultant", tab === "dashboard");
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2600); }, []);
 
-  // Live reload trigger for dashboard
-  useEffect(() => {
-    const socket = createSocket();
-    const bump = () => setLiveKey((k) => k + 1);
-    socket.on("bed:update", bump);
-    socket.on("discharge:update", bump);
-    socket.on("discharge:overstay", bump);
-    socket.on("connect", bump);
-    return () => socket.disconnect();
-  }, []);
+  // NOTE: there used to be a second socket effect here subscribing to
+  // bed:update / discharge:update / discharge:overstay purely to bump a
+  // `liveKey` counter. Nothing ever read that counter, so every bed change
+  // anywhere in the hospital re-rendered this whole component for nothing.
+  // The dashboard already refreshes itself through useLiveBedDashboardData
+  // above, and the patient list is patched in place by the consultant:
+  // patient-update handler further up — neither needed the bump.
 
   const menu = [
     { key: "dashboard",   icon: icons.home,        label: "Dashboard" },
@@ -548,7 +560,7 @@ export default function ConsultantApp({ user, meta, onLogout }) {
       >
         {tab === "dashboard" && (
           <LiveBedDashboard
-            refreshKey={liveKey}
+            data={dashboardData}
             userName={user.name || user.username || "Consultant"}
             scope="consultant"
             hideUnitFilter

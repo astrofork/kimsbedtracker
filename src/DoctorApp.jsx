@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce, fmtRelative, fmtDateTime } from "./lib.js";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { bedStateColor, normalizeQuery, wardIdsMatchingPatientName } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow, BackBtn } from "./PREApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
-import { LiveBedDashboard } from "./COOApp.jsx";
+import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
 
 // Doctor endpoints for the shared ward/bed pages (same UI as PRE, doctor APIs + role).
 const DOCTOR_CFG = {
@@ -81,7 +81,8 @@ function searchRow({ value, onChange, placeholder, select }) {
 function WardCard({ w, i = 0, onOpen, note }) {
   const o = occOf(w);
   return (
-    <div className="doc-ward slide-up tap" style={{ animationDelay: i * 0.03 + "s" }}
+    // Renders instantly, like BedGridCard — see the note in PREApp's ward grid.
+    <div className="doc-ward tap"
       role="button" tabIndex={0}
       onClick={() => w.operational !== false && onOpen()}
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && w.operational !== false && onOpen()}>
@@ -446,9 +447,10 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
             </div>
           ) : (
             <div className="card-grid">
-              {me.blocks.map((b, i) => (
-                <div key={b.id} className="doc-block slide-up" role="button" tabIndex={0}
-                  style={{ animationDelay: i * 0.03 + "s" }}
+              {me.blocks.map((b) => (
+                // Renders instantly, like the ward cards it leads to — same
+                // staggered slide-up, same "looks like it is still loading".
+                <div key={b.id} className="doc-block" role="button" tabIndex={0}
                   onClick={() => onOpenBlock(b.id)}
                   onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onOpenBlock(b.id)}>
                   <div className="doc-block-top">
@@ -527,7 +529,17 @@ export default function DoctorApp({ user, onLogout }) {
   // See useScrollRestore's doc comment for why this has to happen before
   // setWard, not reactively after.
   const openWard = useCallback((w) => { saveWardScroll(); setWard(w); }, [saveWardScroll]);
+  // Mirrors `ward` for the socket handler, which must not re-subscribe when it
+  // changes. docStaleRef records a refresh skipped while a ward was open.
+  const wardOpenRef = useRef(false);
+  const docStaleRef = useRef(false);
+  useEffect(() => { wardOpenRef.current = !!ward; }, [ward]);
   const [reloadKey,   setReloadKey]   = useState(0);
+  // Lives here, above the dash/dashboard/entry/discharges tab switch, so it
+  // survives navigating away from and back to the Dashboard tab — see
+  // useLiveBedDashboardData. Also gated off while a block/ward is open, same
+  // as the tab condition below it's paired with.
+  const dashboardData = useLiveBedDashboardData("doctor", !ward && !blockId && tab === "dashboard");
   // Entry search lives here, not in Dashboard, so opening a ward and coming back
   // doesn't wipe what you typed (Dashboard unmounts while a ward is open).
   const [entrySearch, setEntrySearch] = useState("");
@@ -559,6 +571,22 @@ export default function DoctorApp({ user, onLogout }) {
   }, []);
   useEffect(() => { loadBedDetails(); }, [loadBedDetails]);
 
+  // Upserts one bed into the search list in place — used when a bed:update
+  // payload already carries the full row, so a single-bed change doesn't
+  // need to refetch this whole doctor-scoped list. Doctor sockets only ever
+  // join ward:<id> rooms for wards they're actually assigned (see io.ts),
+  // so any bed reaching this handler is already in-scope.
+  const patchBedDetail = useCallback((incoming) => {
+    setBedDetails((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((b) => b.id === incoming.id);
+      if (idx === -1) return [...prev, incoming];
+      const next = prev.slice();
+      next[idx] = incoming;
+      return next;
+    });
+  }, []);
+
   // ip_last6 → bed, rebuilt only when the rows change. Lookup is O(1) per
   // keystroke instead of a linear scan of every bed.
   const ipIndex = useMemo(() => {
@@ -569,18 +597,41 @@ export default function DoctorApp({ user, onLogout }) {
   }, [bedDetails]);
 
   useEffect(() => {
-    const socket = createSocket();
-    // Bed rows change on the same events, but they're a heavier payload than
-    // /me — coalesce bursts so a busy ward can't fire a refetch per event.
+    const socket = getSocket();
+    // Bed rows change on the same events, but a full refetch is a heavier
+    // payload than /me — coalesce bursts so a busy ward can't fire one per
+    // event. Only used as a fallback now: a bed:update that already carries
+    // the full row (every role's status-update route sends one) patches
+    // patchBedDetail directly instead, no refetch needed.
     let t = null;
     const refetchBeds = () => { clearTimeout(t); t = setTimeout(() => loadBedDetails(), 400); };
-    const onChange = () => { loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); refetchBeds(); };
-    socket.on("bed:update", onChange);
-    socket.on("discharge:update", onChange);
-    socket.on("discharge:overstay", onChange);
-    socket.on("connect", onChange);
-    return () => { clearTimeout(t); socket.disconnect(); };
-  }, [loadBedDetails]);
+    const onWardSummary = coalesce(() => { docStaleRef.current = false; loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); });
+    // Skipped while a ward is open: WardPage replaces the block/ward view and
+    // loads its own beds, so /doctor/me's summary is off screen. Remember the
+    // refresh and replay it on the way out. The bed-details list is NOT gated —
+    // it backs Entry search and patching it costs no request.
+    const gatedSummary = () => { if (wardOpenRef.current) { docStaleRef.current = true; return; } onWardSummary(); };
+    const onBedUpdate = (p) => {
+      gatedSummary();
+      if (p?.bed && p.bed.id != null) patchBedDetail(p.bed);
+      else refetchBeds();
+    };
+    const onOther = () => { gatedSummary(); refetchBeds(); };
+    socket.on("bed:update", onBedUpdate);
+    socket.on("discharge:update", onOther);
+    socket.on("discharge:overstay", onOther);
+    // Only a RECONNECT refreshes — the first connect would duplicate the
+    // mount-time loads a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
+    const offReconnect = onReconnect(socket, () => { onWardSummary(); refetchBeds(); });
+    return () => {
+      clearTimeout(t);
+      socket.off("bed:update", onBedUpdate);
+      socket.off("discharge:update", onOther);
+      socket.off("discharge:overstay", onOther);
+      offReconnect(); onWardSummary.cancel();
+    };
+  }, [loadBedDetails, patchBedDetail]);
 
   const openBlock = (id) => { saveBlockScroll(); setBlockId(id); setWard(null); };
   const backToBlocks = () => { setBlockId(null); setWard(null); };
@@ -631,12 +682,16 @@ export default function DoctorApp({ user, onLogout }) {
           initialTab="manage"
           initialSearch={ward._search}
           cfg={DOCTOR_CFG}
-          onBack={() => setWard(null)}
+          onBack={() => {
+            setWard(null);
+            // Replay only what was skipped while inside the ward.
+            if (docStaleRef.current) { docStaleRef.current = false; loadRef.current(); setReloadKey((k) => k + 1); }
+          }}
         />
       ) : blockId ? (
         <BlockDetail blockId={blockId} reloadKey={reloadKey} onBack={backToBlocks} onOpenWard={openWard} showToast={showToast} ipIndex={ipIndex} bedRows={bedDetails} />
       ) : tab === "dashboard" ? (
-        <LiveBedDashboard refreshKey={reloadKey} userName={user.name || user.username || "Doctor"} scope="doctor" />
+        <LiveBedDashboard data={dashboardData} userName={user.name || user.username || "Doctor"} scope="doctor" />
       ) : tab === "discharges" ? (
         <DischargesPage role="DOCTOR" />
       ) : (

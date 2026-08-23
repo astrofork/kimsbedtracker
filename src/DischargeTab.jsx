@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, fmtDateTime, createSocket } from "./lib.js";
+import { api, toastErr, fmtDateTime, getSocket, onReconnect, coalesce } from "./lib.js";
 import { Ic, icons, useConfirm, useModal } from "./ui.jsx";
 import { fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
 
@@ -97,7 +97,29 @@ function MoveToLoungeNotePopup({ onCancel, onConfirm, saving }) {
   );
 }
 
-function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking, actor }) {
+/** A compact step action. While saving it swaps its label for a ring spinner
+    plus a progress verb ("Marking…"), and freezes the width it had at rest so
+    the button — and therefore the row — never collapses mid-save. Narrow ghost
+    actions pass no busyLabel and show the ring alone, which keeps them from
+    ballooning past their resting size. */
+function ActBtn({ kind = "ghost", spinning, busyLabel, disabled, onClick, style, children }) {
+  const ref = useRef(null);
+  const [restWidth, setRestWidth] = useState();
+  useEffect(() => {
+    if (!spinning && ref.current) setRestWidth(ref.current.getBoundingClientRect().width);
+  }, [spinning, children]);
+  return (
+    <button ref={ref} className={`btn btn-${kind} dc-act`} disabled={disabled}
+      aria-busy={spinning || undefined} onClick={onClick}
+      style={{ fontSize: 11, padding: "6px 10px", minWidth: restWidth, ...style }}>
+      {spinning ? (
+        <><span className="dc-spinner" aria-hidden="true" />{busyLabel}</>
+      ) : children}
+    </button>
+  );
+}
+
+function StepRow({ step, status, role, onSetStatus, onRequestReopen, saving, locked, lockedOn, lockedTitle, patientLeft, phase, isLast, systemCheckoutDone, tracking, actor }) {
   const [pickingLeft, setPickingLeft] = useState(false);
   const [loungeNoteOpen, setLoungeNoteOpen] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
@@ -110,6 +132,14 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
   );
   const canDirectReopen = !(role === "PHARMACY" && isPharmacyStep) && !(role === "FC" && isBillingStep) && !drugReturnReopenBlocked;
   const showPatientLeft = step.needsPatientLeft && status === "COMPLETED";
+  // Finished AND we know who finished it — the only case that shows a byline
+  // instead of the "who may act" role hint.
+  const done = (status === "COMPLETED" || status === "NOT_APPLICABLE") && !!actor;
+  // This row has a save in flight. Only this row's buttons lock — every other
+  // phase stays clickable, which is the point: independent phases are actioned
+  // in parallel. `saving` holds WHICH status is being written, so the exact
+  // button that was pressed is the one that spins.
+  const rowSaving = saving !== undefined;
 
   // SLA line — all values come from the backend's `workflow.phases`; this only
   // formats them. Delayed steps get a red overdue counter, running steps show
@@ -152,8 +182,8 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
     // opacity multiplied against text that was already --ink-3 dropped it to
     // roughly 1.5:1 against the box, i.e. unreadable. The lock chip on the right
     // already signals the state, so the text itself doesn't need to fade.
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: isLast ? "none" : "1px solid var(--line)", gap: 10, flexWrap: "wrap" }}>
-      <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+    <div className="dc-step" style={{ borderBottom: isLast ? "none" : "1px solid var(--line)" }}>
+      <div className="dc-step-main">
         <div style={{ fontSize: 12.5, fontWeight: 600, color: locked ? "var(--ink-2)" : "var(--ink)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {step.label}
           {delayed && (
@@ -170,19 +200,23 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
             <Ic d={patientLeft ? icons.check : icons.alert} s={11} /> {patientLeft ? "Patient has left" : "Patient has NOT left"}
           </div>
         )}
+        {/* Who MAY act reads as a caption on the step itself. (Who DID act is a
+            different thing and stays in the right column under the button that
+            produced it.) */}
+        {!done && (
+          <div style={{ marginTop: 3 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
+          </div>
+        )}
       </div>
-      {/* marginLeft: auto keeps this block pinned to the right edge even when
-          flex-wrap drops it onto its own line on narrow (phone) widths — without
-          it, a lone wrapped flex item falls back to flex-start instead of
-          honoring the parent's justify-content: space-between. */}
-      <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, marginLeft: "auto" }}>
+      <div className="dc-step-side">
         {locked ? (
           <span title={lockedTitle} style={{ fontSize: 11, fontWeight: 600, color: "var(--ink-2)", display: "flex", alignItems: "center", gap: 4 }}>
             <Ic d={icons.ban} s={12} /> After {lockedOn}
           </span>
         ) : canAct && pickingLeft ? (
-          <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+          <div className="dc-step-actions">
+            <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"} busyLabel="Marking…"
               onClick={async () => {
                 if (systemCheckoutDone) {
                   const ok = await confirm({
@@ -200,45 +234,45 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, busy, locke
                 } else {
                   setLoungeNoteOpen(true);
                 }
-              }}>Patient Left</button>
-            <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-              onClick={() => setPickingLeft(false)}>Cancel</button>
+              }}>Patient Left</ActBtn>
+            <ActBtn disabled={rowSaving} onClick={() => setPickingLeft(false)}>Cancel</ActBtn>
           </div>
         ) : canAct ? (
-          <div style={{ display: "flex", gap: 6 }}>
+          <div className="dc-step-actions">
             {status === "PENDING" && step.allowNA && (
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-                onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</button>
+              <ActBtn disabled={rowSaving} spinning={saving === "NOT_APPLICABLE"}
+                onClick={() => onSetStatus(step.key, "NOT_APPLICABLE")}>N/A</ActBtn>
             )}
             {status !== "COMPLETED" && status !== "NOT_APPLICABLE" && (
-              <button className="btn btn-primary" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
+              <ActBtn kind="primary" disabled={rowSaving} spinning={saving === "COMPLETED"} busyLabel="Marking…"
                 onClick={() => step.needsPatientLeft ? setPickingLeft(true) : onSetStatus(step.key, "COMPLETED")}>
                 Mark Completed
-              </button>
+              </ActBtn>
             )}
             {status !== "PENDING" && canDirectReopen && (
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px" }} disabled={busy}
-                onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</button>
+              <ActBtn disabled={rowSaving} spinning={saving === "PENDING"}
+                onClick={() => onSetStatus(step.key, "PENDING")}>Reopen</ActBtn>
             )}
             {status === "COMPLETED" && !canDirectReopen && onRequestReopen && (
-              <button className="btn btn-ghost" style={{ fontSize: 11, padding: "6px 10px", color: "var(--amber)" }} disabled={busy}
-                onClick={() => onRequestReopen(step.key)}>Request Reopen</button>
+              <ActBtn disabled={rowSaving} style={{ color: "var(--amber)" }}
+                onClick={() => onRequestReopen(step.key)}>Request Reopen</ActBtn>
             )}
           </div>
         ) : null}
-        {(status === "COMPLETED" || status === "NOT_APPLICABLE") && actor ? (
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--ink-2)" }} title={fmtDateTime(actor.at)}>
+        {/* Byline sits directly under the Reopen / Request Reopen button that
+            acts on it. The column is align-items:flex-end, so it stays flush
+            right whether or not a button rendered above it. */}
+        {done && (
+          <span className="dc-step-by" title={fmtDateTime(actor.at)}>
             {status === "NOT_APPLICABLE" ? "Marked N/A" : "Completed"} by {actor.name || "Unknown"}
             {actor.role && ` (${ROLE_SHORT[actor.role] || actor.role})`}
           </span>
-        ) : (
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--primary)", opacity: 0.7 }}>{friendlyRoles(step.roles)}</span>
         )}
       </div>
       {confirmDialog}
       {loungeNoteOpen && (
         <MoveToLoungeNotePopup
-          saving={busy}
+          saving={rowSaving}
           onCancel={() => setLoungeNoteOpen(false)}
           onConfirm={(note) => {
             setLoungeNoteOpen(false);
@@ -616,6 +650,8 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   // Who completed each step (name + role), keyed by step key — see stepActorsForAdmission.
   const [stepActors, setStepActors] = useState({});
   const [busy, setBusy] = useState(false);
+  // { [stepKey]: statusBeingWritten } — one entry per in-flight step save.
+  const [savingSteps, setSavingSteps] = useState({});
   const [error, setError] = useState("");
   const [section, setSection] = useState(null); // "plan" | "transfer" | "history" | null
   const [cancelReason, setCancelReason] = useState(null); // string | null (null = hidden)
@@ -623,26 +659,49 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   // PRE only, for now — see the "Physical Checkout while System Checkout is still
   // pending" fork below. true while the choice popup is open.
 
+  // Parallel steps mean several saves can be in flight, each followed by its own
+  // load(). Responses can come back out of order, so a slow early reply would
+  // otherwise overwrite a fresh later one. Only the newest load may write state.
+  const loadSeq = useRef(0);
+  const loadTail = useRef(null);
   const load = useCallback(async () => {
-    try {
-      const r = await api.dischargeForBed(bed.id);
-      setAdmission(r.admission);
-      setTracking(r.tracking);
-      setWorkflow(r.workflow ?? null);
-      setStepActors(r.stepActors ?? {});
-    } catch (e) {
-      const msg = toastErr(e);
-      if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
-        setAdmission(null);
-        setTracking(null);
-        setWorkflow(null);
-        setStepActors({});
-        onChanged?.();
-      } else {
-        setError(msg);
+    const seq = ++loadSeq.current;
+    const run = (async () => {
+      try {
+        const r = await api.dischargeForBed(bed.id);
+        if (seq !== loadSeq.current) return;
+        setAdmission(r.admission);
+        setTracking(r.tracking);
+        setWorkflow(r.workflow ?? null);
+        setStepActors(r.stepActors ?? {});
+      } catch (e) {
+        if (seq !== loadSeq.current) return;
+        const msg = toastErr(e);
+        if (msg.includes("not under your care") || msg.includes("No active") || msg.includes("not found")) {
+          setAdmission(null);
+          setTracking(null);
+          setWorkflow(null);
+          setStepActors({});
+          onChanged?.();
+        } else {
+          setError(msg);
+        }
       }
-    }
+    })();
+    loadTail.current = run;
+    return run;
   }, [bed.id, onChanged]);
+
+  // Waiting on your OWN load() is not enough: the socket's live reload fires on
+  // the same save and starts a newer one, which makes yours a no-op above. The
+  // spinner would then clear while the row still showed its old status — the
+  // button visibly flashed back to "Mark Completed" before flipping to "Reopen".
+  // This resolves only once no newer load is still running, so a caller always
+  // returns to fresh state.
+  const loadSettled = useCallback(async () => {
+    let seen;
+    do { seen = loadTail.current; await seen; } while (loadTail.current !== seen);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -651,23 +710,48 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
   const liveLoadRef = useRef(load);
   liveLoadRef.current = load;
   useEffect(() => {
-    const socket = createSocket();
-    socket.on("discharge:update", () => liveLoadRef.current());
-    socket.on("bed:update", (p) => {
+    const socket = getSocket();
+    // This panel's `workflow` (deadlines/ETA/delay state) is computed
+    // server-side from the tracking row + phase config — even though some
+    // discharge:update payloads carry the raw tracking row, there's no safe
+    // way to re-derive workflow from it on the client, so this single-record
+    // panel stays a refetch (cheap: it's one admission, not a list).
+    const reload = coalesce(() => liveLoadRef.current());
+    const onDischargeUpdate = () => reload();
+    const onBedUpdate = (p) => {
       // The bed this panel is for changed (e.g. manual vacate resets the workflow)
-      if (!p || p.bedId == null || Number(p.bedId) === Number(bed.id)) liveLoadRef.current();
-    });
-    socket.on("connect", () => liveLoadRef.current());
-    return () => { socket.disconnect(); };
+      if (!p || p.bedId == null || Number(p.bedId) === Number(bed.id)) reload();
+    };
+    socket.on("discharge:update", onDischargeUpdate);
+    socket.on("bed:update", onBedUpdate);
+    // Reconnect (not first connect) → catch updates missed while disconnected.
+    const offReconnect = onReconnect(socket, () => liveLoadRef.current());
+    return () => {
+      socket.off("discharge:update", onDischargeUpdate);
+      socket.off("bed:update", onBedUpdate);
+      offReconnect(); reload.cancel();
+    };
   }, [bed.id]);
 
-  const refresh = async () => { setSection(null); await load(); onChanged?.(); };
+  const refresh = async () => { setSection(null); await load(); await loadSettled(); onChanged?.(); };
 
+  // Per-step, not per-page: independent phases (Discharge Summary / Drug Return /
+  // Physical Checkout, and the Pharmacy Clearance + Procedure Reconciliation
+  // fan-out) can be actioned at the same time without waiting on each other.
+  // The value is the status being written, so the row can spin the exact button
+  // that was pressed rather than all of them.
   const setStep = async (step, status, opts = {}) => {
-    setBusy(true); setError("");
+    setSavingSteps((prev) => ({ ...prev, [step]: status }));
+    setError("");
     try { await api.dischargeUpdateStep(tracking.admission_id, step, status, opts); await refresh(); }
     catch (e) { setError(toastErr(e)); }
-    finally { setBusy(false); }
+    finally {
+      setSavingSteps((prev) => {
+        const next = { ...prev };
+        delete next[step];
+        return next;
+      });
+    }
   };
 
   const onStepAction = async (step, status, opts = {}) => {
@@ -708,6 +792,11 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
     catch (e) { setError(toastErr(e)); } finally { setBusy(false); }
   };
 
+  // Page-level actions (Start Discharge / Cancel / Reschedule) keep the original
+  // "block while anything is in flight" guard — only the per-step buttons were
+  // meant to become independent.
+  const anyBusy = busy || Object.keys(savingSteps).length > 0;
+
   const canPlan = PLAN_ROLES.includes(role);
   const running = tracking && ["DISCHARGE_INITIATED", "IN_PROGRESS"].includes(tracking.status);
   const phaseByKey = new Map((workflow?.phases ?? []).map(p => [p.key, p]));
@@ -739,62 +828,52 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
         )
       ) : (
         <>
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            background: "var(--panel-2)", borderRadius: 10, padding: "10px 12px", marginBottom: 12,
-          }}>
+          {/* Three top-aligned grid cells, so the labels share one line and the
+              values share the next. Cells are direct grid children rather than
+              a nested flex row — nesting reintroduced the unequal-height
+              centring that staggered the labels on phones. */}
+          <div className="dc-head">
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>Status</div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: STATUS_COLOR[tracking.status] }}>{tracking.status.replace("_", " ")}</div>
+              <div className="dc-k">Status</div>
+              <div className="dc-v" style={{ fontSize: 14, fontWeight: 700, color: STATUS_COLOR[tracking.status] }}>
+                {tracking.status.replace("_", " ")}
+              </div>
             </div>
             {tracking.status === "PLANNED" && (
-              <div className="dim" style={{ fontSize: 12, textAlign: "right" }}>
-                {tracking.planned_date}{tracking.planned_time ? ` · ${tracking.planned_time}` : ""}
+              <div className="dc-head-time" style={{ cursor: "default" }}>
+                <div className="dc-k">Planned</div>
+                <div className="dc-v sm dim">
+                  {tracking.planned_date}{tracking.planned_time ? ` · ${tracking.planned_time}` : ""}
+                </div>
               </div>
             )}
             {/* Once running, the planned date stops being useful — what everyone
                 needs is the live estimate and whether the flow is slipping. */}
-            {(workflow?.expectedTime != null || workflow?.eta != null) && (
-              <div style={{ display: "flex", gap: 16, alignItems: "flex-start", cursor: "pointer" }}
-                onClick={() => setExpandTime(v => !v)}>
-                {workflow.expectedTime != null && (() => {
-                  const now = Date.now();
-                  const overdue = now > workflow.expectedTime;
-                  const overdueMs = overdue ? now - workflow.expectedTime : 0;
-                  const overdueMins = Math.floor(overdueMs / 60000);
-                  return (
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
-                        Est. discharge
-                      </div>
-                      <div style={{ fontSize: expandTime ? 11.5 : 15, fontWeight: 800, lineHeight: 1.15, color: overdue ? "var(--red)" : "var(--ink)" }}>
-                        {expandTime ? fmtDateTime(workflow.expectedTime) : fmtClock(workflow.expectedTime)}
-                      </div>
-                      {overdue && (
-                        <span style={{
-                          display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
-                          padding: "2px 7px", borderRadius: 99, background: "var(--red-bg)", color: "var(--red)",
-                        }}>Delayed {fmtMins(overdueMins)}</span>
-                      )}
-                    </div>
-                  );
-                })()}
-                {workflow.eta != null && (
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--ink-3)", textTransform: "uppercase" }}>
-                      Expected time
-                    </div>
-                    <div style={{ fontSize: expandTime ? 11.5 : 15, fontWeight: 800, lineHeight: 1.15 }}>
-                      {expandTime ? fmtDateTime(workflow.eta) : fmtClock(workflow.eta)}
-                    </div>
-                    {tone && (
-                      <span style={{
-                        display: "inline-block", marginTop: 3, fontSize: 9.5, fontWeight: 800,
-                        padding: "2px 7px", borderRadius: 99, background: tone.bg, color: tone.color,
-                      }}>{tone.label}</span>
-                    )}
+            {workflow?.expectedTime != null && (() => {
+              const now = Date.now();
+              const overdue = now > workflow.expectedTime;
+              const overdueMins = overdue ? Math.floor((now - workflow.expectedTime) / 60000) : 0;
+              return (
+                <div className="dc-head-time" onClick={() => setExpandTime(v => !v)}>
+                  <div className="dc-k">Est.</div>
+                  <div className={"dc-v" + (expandTime ? " sm" : "")} style={{ color: overdue ? "var(--red)" : "var(--ink)" }}>
+                    {expandTime ? fmtDateTime(workflow.expectedTime) : fmtClock(workflow.expectedTime)}
                   </div>
-                )}
+                  {overdue && (
+                    <span className="dc-chip" style={{ background: "var(--red-bg)", color: "var(--red)" }}>
+                      Delayed {fmtMins(overdueMins)}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+            {workflow?.eta != null && (
+              <div className="dc-head-time" onClick={() => setExpandTime(v => !v)}>
+                <div className="dc-k">Expected</div>
+                <div className={"dc-v" + (expandTime ? " sm" : "")}>
+                  {expandTime ? fmtDateTime(workflow.eta) : fmtClock(workflow.eta)}
+                </div>
+                {tone && <span className="dc-chip" style={{ background: tone.bg, color: tone.color }}>{tone.label}</span>}
               </div>
             )}
           </div>
@@ -822,9 +901,9 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
           )}
           {tracking.status === "PLANNED" && section !== "plan" && canPlan && (
             <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={initiate}>Start Discharge</button>
-              <button className="btn btn-ghost" style={{ flex: 1 }} disabled={busy} onClick={() => setSection("plan")}>Reschedule</button>
-              <button className="btn btn-ghost" style={{ flex: 1, color: "var(--st-or)" }} disabled={busy} onClick={() => setCancelReason("")}>Cancel Plan</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} disabled={anyBusy} onClick={initiate}>Start Discharge</button>
+              <button className="btn btn-ghost" style={{ flex: 1 }} disabled={anyBusy} onClick={() => setSection("plan")}>Reschedule</button>
+              <button className="btn btn-ghost" style={{ flex: 1, color: "var(--st-or)" }} disabled={anyBusy} onClick={() => setCancelReason("")}>Cancel Plan</button>
             </div>
           )}
 
@@ -842,12 +921,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                   alone would look right in light mode and vanish in dark. */}
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 8 }}>
                 {GROUPS.map((g) => (
-                  <div key={g.id} style={{
-                    background: "var(--panel-2)",
-                    border: "1px solid var(--line)",
-                    borderRadius: "var(--radius)",
-                    padding: "2px 12px",
-                  }}>
+                  <div key={g.id} className="dc-group">
                     {g.steps.map((step, i) => {
                       const status = tracking[step.key.toLowerCase() + "_status"] || "PENDING";
                       // Explicit dependency (parallel fan-out) overrides the default
@@ -889,7 +963,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                         ? afterAllPending.map(s => s.label).join(", ")
                         : undefined;
                       return (
-                        <StepRow key={step.key} step={step} role={role} busy={busy} status={status}
+                        <StepRow key={step.key} step={step} role={role} saving={savingSteps[step.key]} status={status}
                           locked={locked} lockedOn={locked ? lockedOn : null} lockedTitle={lockedTitle}
                           onSetStatus={onStepAction} onRequestReopen={onRequestReopen ? (stepKey) => onRequestReopen(bed.admission_id, stepKey) : null}
                           patientLeft={tracking.patient_left}
@@ -935,7 +1009,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                     <button className="btn btn-primary" style={{ flex: 1 }} onClick={() => setSection("plan")}>
                       <Ic d={icons.clipboard} s={14} /> Reschedule Discharge
                     </button>
-                    <button className="btn btn-primary" style={{ flex: 1 }} disabled={busy} onClick={initiate}>
+                    <button className="btn btn-primary" style={{ flex: 1 }} disabled={anyBusy} onClick={initiate}>
                       <Ic d={icons.check} s={14} /> Initiate Now
                     </button>
                   </div>
@@ -952,7 +1026,7 @@ export default function DischargeTab({ bed, role, onChanged, onRequestReopen }) 
                 style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", marginBottom: 10 }} />
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 14px" }} onClick={() => setCancelReason(null)}>Back</button>
-                <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={busy}
+                <button className="btn btn-primary" style={{ fontSize: 12, padding: "8px 14px" }} disabled={anyBusy}
                   onClick={tracking.status === "PLANNED" ? cancelPlan : cancelWorkflow}>Confirm Cancel</button>
               </div>
             </div>

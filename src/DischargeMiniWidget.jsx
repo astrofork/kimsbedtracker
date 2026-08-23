@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { api, createSocket } from "./lib.js";
+import { api, getSocket, onReconnect, coalesce } from "./lib.js";
 
 const ROWS = [
   ["plannedToday", "Planned Today"],
@@ -20,10 +20,17 @@ export default function DischargeMiniWidget() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    const socket = createSocket();
-    socket.on("discharge:update", load);
-    socket.on("connect", load);
-    return () => { socket.disconnect(); };
+    const socket = getSocket();
+    // Server-computed aggregate counts — no single-row payload to patch from,
+    // this stays a refetch on every relevant event.
+    const refresh = coalesce(load);
+    socket.on("discharge:update", refresh);
+    // Reconnect (not first connect) → the mount-time load() already ran.
+    const offReconnect = onReconnect(socket, load);
+    return () => {
+      socket.off("discharge:update", refresh);
+      offReconnect(); refresh.cancel();
+    };
   }, [load]);
 
   if (!counts) return null;

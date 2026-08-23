@@ -2398,3 +2398,95 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   background:var(--primary-bg,#EFF6FF);color:var(--primary);}
 .cd-tl-sub{font-size:11px;color:var(--ink-3);margin-top:2px;}
 .cd-tl-note{font-size:11.5px;color:var(--ink-2);margin-top:3px;font-style:italic;}
+
+/* ── Discharge workflow (DischargeTab) ──────────────────────────────────────
+   Phone-first. On a 390px screen the phase rows only get ~306px once the page
+   gutter, the wrapping card and the group card have each taken their padding —
+   which is what pushed the action buttons onto their own line and staggered the
+   header labels. These rules buy that width back and pin the two columns.
+   Every override here is width-scoped, so >=768px keeps the current look. */
+
+.dc-shell{padding:16px 18px;}
+.dc-group{background:var(--panel-2);border:1px solid var(--line);
+  border-radius:var(--radius);padding:2px 12px;}
+
+/* Header strip. A grid with align-items:start puts every label on one line by
+   construction; the old flex + align-items:center centred blocks of UNEQUAL
+   height, which is what knocked the labels 12px out of line with each other. */
+.dc-head{display:grid;grid-template-columns:1fr auto auto;gap:2px 12px;
+  align-items:start;background:var(--panel-2);border-radius:10px;
+  padding:10px 12px;margin-bottom:12px;}
+.dc-head-time{text-align:right;cursor:pointer;}
+/* nowrap is what keeps the labels one line tall, and one line tall is what
+   keeps the values on a shared baseline. Labels are kept short for the same
+   reason — "EST. DISCHARGE" broke as "EST." / "DISCHARGE" before. */
+.dc-k{font-size:10.5px;font-weight:700;color:var(--ink-3);text-transform:uppercase;
+  letter-spacing:.02em;white-space:nowrap;}
+.dc-v{font-size:15px;font-weight:800;line-height:1.15;}
+.dc-v.sm{font-size:11.5px;}
+.dc-chip{display:inline-block;margin-top:3px;font-size:9.5px;font-weight:800;
+  padding:2px 7px;border-radius:99px;white-space:nowrap;}
+
+/* Phase row: text left, action right, on ONE line wherever it fits.
+   flex-basis 150px + min-width 150px is the pivot — the text block can grow
+   into spare space but never shrinks below readable, so a crowded row (two or
+   three buttons) overflows and wraps deliberately instead of crushing the
+   label to 60px. */
+.dc-step{display:flex;flex-wrap:wrap;align-items:flex-start;
+  justify-content:space-between;gap:6px 10px;padding:8px 0;}
+.dc-step-main{flex:1 1 150px;min-width:150px;}
+/* margin-left:auto holds the right edge when this block DOES wrap onto its own
+   line — a lone wrapped flex item otherwise falls back to flex-start and
+   ignores the parent's justify-content. */
+/* max-width caps how much a long "Completed by <name> (ROLE)" byline can claim.
+   Without it the byline sets this column's max-content width, which shoves the
+   text block past its 150px floor and wraps the whole row. */
+.dc-step-side{flex:0 0 auto;display:flex;flex-direction:column;
+  align-items:flex-end;gap:4px;margin-left:auto;max-width:50%;}
+.dc-step-by{font-size:10px;font-weight:700;color:var(--ink-2);text-align:right;}
+
+/* Saving state. A real ring spinner, not a rotating arrow glyph: border-top is
+   left transparent so the ring reads as a gap chasing itself. currentColor makes
+   it inherit the button's own text colour, so it works on both the solid primary
+   and the ghost variant without a second rule.
+   The opacity override is load-bearing: a saving button is also `disabled`, and
+   .btn:disabled drops it to .45 — which would fade the spinner with it, since a
+   child cannot undo an ancestor's opacity. A spinning control reads as working,
+   not unavailable, so it stays near full strength. */
+.dc-act{gap:6px;}
+.dc-act[aria-busy="true"]{cursor:progress;}
+.dc-act[aria-busy="true"]:disabled{opacity:.9;}
+.dc-spinner{width:11px;height:11px;flex:none;border-radius:50%;
+  border:2px solid currentColor;border-top-color:transparent;
+  animation:spin .6s linear infinite;}
+
+@media (prefers-reduced-motion:reduce){
+  /* Still communicates "busy" without the rotation. */
+  .dc-spinner{animation-duration:2.4s;}
+}
+.dc-step-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+
+/* These are compact inline chips sitting beside 11px text, not primary CTAs.
+   Opt them out of the global .btn{min-height:44px} touch target, which inflated
+   an 11px/6px button into a 44px slab. Scoped to the exact breakpoint of the
+   rule it overrides, so pointer widths keep their untouched ~24px height. */
+@media (max-width:767px){
+  .dc-step-actions .btn{min-height:32px;}
+}
+
+@media (max-width:479px){
+  /* Reclaim ~20px of row width from nested card padding. */
+  .dc-shell{padding:12px 10px;}
+  .dc-group{padding:2px 10px;}
+  .dc-head{padding:10px;gap:2px 8px;}
+  .dc-v{font-size:14px;}
+}
+
+/* iPhone SE class. 150px of text + a ~111px button no longer fit side by side,
+   and the nowrap delay chips push the header grid past the viewport — so the
+   text floor drops and the chips are allowed to break. */
+@media (max-width:359px){
+  .dc-step-main{min-width:118px;flex-basis:118px;}
+  .dc-chip{white-space:normal;}
+  .dc-head{gap:2px 6px;}
+}

@@ -62,11 +62,72 @@ async function req(path, opts = {}) {
   return data;
 }
 
+// ── Reference-data cache ─────────────────────────────────────────────────────
+// Payer types, destinations, departments, doctors and consultant groups are
+// hospital-wide lists: the same answer for every ward and every bed, changed
+// only by an admin editing Setup. They were re-fetched on every mount, so
+// opening a ward cost 3 requests and opening a bed cost 3 more — visiting ten
+// wards meant ~30 identical round-trips. A 304 does not help here: the browser
+// still pays the full round-trip (~200ms each) to be told nothing changed.
+//
+// The PROMISE is cached rather than the resolved value, so several components
+// mounting at once share ONE request instead of racing. A rejected request is
+// evicted so a transient failure is never cached permanently.
+const refCache = new Map();
+
+function cachedGet(path) {
+  if (!refCache.has(path)) {
+    refCache.set(path, req(path).catch((e) => { refCache.delete(path); throw e; }));
+  }
+  return refCache.get(path);
+}
+
+/** Drop cached reference data. Called on logout / session-expiry (the next user
+ *  may have a different role, and these lists are role-scoped), and whenever the
+ *  server signals a payer-type edit — see getSocket() below. */
+export function clearRefCache(path) {
+  if (path) refCache.delete(path); else refCache.clear();
+}
+
+// ── Ward beds cache ──────────────────────────────────────────────────────────
+// Re-entering a ward re-fetched its entire bed list even when nothing about that
+// ward had changed since the last visit. The list is cached per ward and kept
+// honest by the SAME socket events the screens already react to, so it can never
+// be served stale:
+//
+//   • bed:update carrying the full row  -> patch that one bed; cache stays valid
+//   • bed:update with no row, discharge:update, ward:operational
+//                                       -> DROP that ward, so the next visit
+//                                          refetches instead of guessing
+//   • any such payload with no wardId   -> could touch any ward, so drop all
+//   • a RECONNECT                       -> events were missed while offline,
+//                                          nothing local is trustworthy, drop all
+//
+// An entry therefore only survives while we can prove nothing happened to it.
+// Showing a stale bed on a ward is far worse than paying for one more request.
+const wardBeds = new Map();
+
+export function getWardBeds(wardId) { return wardBeds.get(Number(wardId)) ?? null; }
+export function setWardBeds(wardId, beds) { wardBeds.set(Number(wardId), beds); }
+export function clearWardBeds(wardId) {
+  if (wardId == null) wardBeds.clear(); else wardBeds.delete(Number(wardId));
+}
+
 export const api = {
+  // NOT cached, unlike the lists below. /meta carries `todayIST`, which the
+  // admission-date picker uses as its upper bound — a session-long cache pins
+  // that to whatever "today" was at login, so a tab left open across midnight
+  // (routine on a 12-hour shift) started refusing today's date. /meta is also
+  // not on the hot path this cache exists for: it's a handful of calls per
+  // session, not three per ward and three per bed.
   meta: () => req("/meta"),
-  departments: () => req("/departments"),
-  doctors: (departmentId) => req("/doctors" + (departmentId ? `?department_id=${departmentId}` : "")),
-  consultantGroups: () => req("/consultant-groups"),
+  departments: () => cachedGet("/departments"),
+  // Only the unfiltered list is cached — the filtered form is keyed by
+  // department and is not on the hot path that this cache exists for.
+  doctors: (departmentId) => (departmentId
+    ? req(`/doctors?department_id=${departmentId}`)
+    : cachedGet("/doctors")),
+  consultantGroups: () => cachedGet("/consultant-groups"),
   login: (username, password) =>
     req("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   preMe: () => req("/pre/me"),
@@ -176,13 +237,13 @@ export const api = {
   doctorBlock: (id) => req(`/doctor/blocks/${id}`),
   doctorBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/doctor/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  doctorPayerTypes: () => req("/doctor/payer-types"),
-  doctorDestinations: () => req("/doctor/destinations"),
+  doctorPayerTypes: () => cachedGet("/doctor/payer-types"),
+  doctorDestinations: () => cachedGet("/doctor/destinations"),
   // The trailing `admission` object is where new admission-time fields go from
   // here on. The positional list ahead of it is already at its practical limit —
   // adding a 14th and 15th slot for patient name/date would make every call site
@@ -205,7 +266,7 @@ export const api = {
   // ── manager — bed details (create/configure only) ────────────────────────────
   wardBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/manager/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -222,13 +283,13 @@ export const api = {
   // ── PRE — bed status management ──────────────────────────────────────────────
   preBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/pre/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  prePayerTypes: () => req("/pre/payer-types"),
-  preDestinations: () => req("/pre/destinations"),
+  prePayerTypes: () => cachedGet("/pre/payer-types"),
+  preDestinations: () => cachedGet("/pre/destinations"),
   preReviewWard: (wardId) => req(`/pre/wards/${wardId}/review`, { method: "POST" }),
   // Admin-style dashboard, scoped server-side to this PRE user's own wards.
   preLiveWards: () => req("/pre/live-wards"),
@@ -254,13 +315,13 @@ export const api = {
   nurseMe: () => req("/nurse/me"),
   nurseBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/nurse/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
   },
-  nursePayerTypes: () => req("/nurse/payer-types"),
-  nurseDestinations: () => req("/nurse/destinations"),
+  nursePayerTypes: () => cachedGet("/nurse/payer-types"),
+  nurseDestinations: () => cachedGet("/nurse/destinations"),
   nurseReviewWard: (wardId) => req(`/nurse/wards/${wardId}/review`, { method: "POST" }),
   // Admin-style dashboard, scoped server-side to this nurse's own wards.
   nurseLiveWards: () => req("/nurse/live-wards"),
@@ -276,12 +337,12 @@ export const api = {
     req(`/nurse/beds/${bedId}/status`, { method: "PATCH", body: JSON.stringify({ physical_status: physicalStatus, reservation_status: reservationStatus, payer_type: payerType ?? undefined, destination: destination ?? undefined, reservation_note: reservationNote ?? undefined, ip_last6: ipLast6 ?? undefined, patient_name: patientName ?? undefined, admission_date: admissionDate ?? undefined, admission_type: admissionType ?? undefined, department_name: departmentName ?? undefined, doctor_id: doctorId ?? undefined, department_id: departmentId ?? undefined, consultant_group_id: consultantGroupId ?? undefined }) }),
   pushSubscribe: (subscription) =>
     req("/push/subscribe", { method: "POST", body: JSON.stringify({ subscription }) }),
-  mgrPayerTypes: () => req("/manager/payer-types"),
+  mgrPayerTypes: () => cachedGet("/manager/payer-types"),
   mgrCreatePayerType: (name) => req("/manager/payer-types", { method: "POST", body: JSON.stringify({ name }) }),
   mgrUpdatePayerType: (id, data) => req(`/manager/payer-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderPayerType: (id, direction) => req(`/manager/payer-types/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
   mgrDeletePayerType: (id) => req(`/manager/payer-types/${id}`, { method: "DELETE" }),
-  mgrDestinations: () => req("/manager/destinations"),
+  mgrDestinations: () => cachedGet("/manager/destinations"),
   mgrCreateDestination: (name) => req("/manager/destinations", { method: "POST", body: JSON.stringify({ name }) }),
   mgrUpdateDestination: (id, data) => req(`/manager/destinations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   mgrReorderDestination: (id, direction) => req(`/manager/destinations/${id}/order`, { method: "PATCH", body: JSON.stringify({ direction }) }),
@@ -366,7 +427,7 @@ export const api = {
   consultantLiveWards: () => req("/consultant/live-wards"),
   consultantBedDetails: () => req("/consultant/bed-details"),
   consultantAdminDashboard: (unit) => req(`/consultant/admin-dashboard${unit && unit !== "TOTAL" ? `?unit=${encodeURIComponent(unit)}` : ""}`),
-  consultantPayerTypes: () => req("/consultant/payer-types"),
+  consultantPayerTypes: () => cachedGet("/consultant/payer-types"),
   consultantAdminDashboardHistory: (u) => req(`/consultant/admin-dashboard-history${u && u !== "TOTAL" ? `?unit=${encodeURIComponent(u)}` : ""}`),
   consultantConsultants: () => req("/consultant/consultants"),
   consultantSnapshots: () => req("/consultant/snapshots"),
@@ -429,7 +490,7 @@ export const api = {
   pharmacyAdminDashboard: (u) => req(`/pharmacy/admin-dashboard${u ? "?unit=" + u : ""}`),
   pharmacyAdminDashboardHistory: (u) => req(`/pharmacy/admin-dashboard-history${u ? "?unit=" + u : ""}`),
   pharmacyConsultants: () => req("/pharmacy/consultants"),
-  pharmacyPayerTypes: () => req("/pharmacy/payer-types"),
+  pharmacyPayerTypes: () => cachedGet("/pharmacy/payer-types"),
   pharmacySnapshots: () => req("/pharmacy/snapshots"),
   pharmacyOverstay: () => req("/pharmacy/overstay"),
   // ── FC reopen requests ────────────────────────────────────────────────────
@@ -444,15 +505,15 @@ export const api = {
   fcAdminDashboard: (u) => req(`/fc/admin-dashboard${u ? "?unit=" + u : ""}`),
   fcAdminDashboardHistory: (u) => req(`/fc/admin-dashboard-history${u ? "?unit=" + u : ""}`),
   fcConsultants: () => req("/fc/consultants"),
-  fcPayerTypes: () => req("/fc/payer-types"),
+  fcPayerTypes: () => cachedGet("/fc/payer-types"),
   fcSnapshots: () => req("/fc/snapshots"),
   fcOverstay: () => req("/fc/overstay"),
   // ── FC — Bed Entry (hospital-wide, operational wards only) ───────────────
   fcWards: () => req("/fc/wards"),
-  fcDestinations: () => req("/fc/destinations"),
+  fcDestinations: () => cachedGet("/fc/destinations"),
   fcBeds: (wardId, opts = {}) => {
     const params = new URLSearchParams();
-    if (opts.physical_status)    params.set("physical_status",    opts.physical_status);
+    if (opts.physical_status) params.set("physical_status", opts.physical_status);
     if (opts.reservation_status) params.set("reservation_status", opts.reservation_status);
     const qs = params.toString();
     return req(`/fc/wards/${wardId}/beds${qs ? "?" + qs : ""}`);
@@ -475,21 +536,148 @@ export const api = {
 // In dev: BASE_API is "" so socket connects to the vite dev server which proxies
 // /socket.io → localhost:4000 (see vite.config.js).
 // In prod: BASE_API is the backend URL so socket connects directly.
-export function createSocket() {
-  const socket = io(BASE_API || undefined, {
-    auth: { token: getToken() },
-    // polling first so the initial handshake always works through Vite's proxy;
-    // socket.io then upgrades to WebSocket automatically if the path supports it
-    transports: ["polling", "websocket"],
-  });
-  socket.on("connect_error", (err) => {
-    if (err.message === "No token" || err.message === "Invalid token") {
-      window.dispatchEvent(new CustomEvent("session:expired", {
-        detail: { message: "Session expired. Please log in again." },
-      }));
-    }
-  });
-  return socket;
+//
+// One shared connection per browser tab, not one per component. Every screen
+// that used to call createSocket() (each opening its own independent
+// connection — a ward view + its Overstay tab + its Discharges tab could
+// have 3 live sockets open at once, each reacting to the same event) now
+// calls getSocket() instead, which returns the same connection every time.
+// Callers must clean up with socket.off(event, handler) on unmount, NEVER
+// socket.disconnect() — disconnecting would kill the connection for every
+// other screen still using it. disconnectSocket() is the one exception,
+// called from logout() so a fresh login opens a fresh connection with the
+// new token instead of reusing a stale/anonymous one.
+let sharedSocket = null;
+export function getSocket() {
+  if (!sharedSocket) {
+    sharedSocket = io(BASE_API || undefined, {
+      // Function form: re-evaluated on every (re)connect attempt, so a token
+      // obtained after this socket was first created (e.g. a re-login later
+      // in the same tab, post logout->disconnectSocket->fresh getSocket) is
+      // always the one actually sent, not whatever was current at construction.
+      auth: (cb) => cb({ token: getToken() }),
+      // polling first so the initial handshake always works through Vite's proxy;
+      // socket.io then upgrades to WebSocket automatically if the path supports it
+      transports: ["polling", "websocket"],
+    });
+    sharedSocket.on("connect_error", (err) => {
+      if (err.message === "No token" || err.message === "Invalid token") {
+        window.dispatchEvent(new CustomEvent("session:expired", {
+          detail: { message: "Session expired. Please log in again." },
+        }));
+      }
+    });
+    // Reference-list CRUD reuses bed:update carrying a marker naming what moved:
+    // `payerTypeId` (manager.ts payer-type routes), `destinationId` (destination
+    // routes), or `refData` (doctors / departments / consultant groups, see
+    // emitRefDataChanged). Attached here, on the single shared connection, so
+    // every screen is covered without each one having to remember to do it.
+    //
+    // All three drop the WHOLE cache rather than one entry: renaming a payer type
+    // rewrites payer breakdowns elsewhere, and a consultant edit moves both the
+    // doctor list and the groups that contain them. These edits are rare enough
+    // that the extra refetch costs nothing, and being narrower here would risk
+    // leaving a related list stale.
+    //
+    // Missing any of these means the cache silently serves a list the admin has
+    // already changed — a new consultant stayed unselectable for everyone
+    // already logged in until they logged out and back in.
+    sharedSocket.on("bed:update", (p) => {
+      if (!p) return;
+      if (p.payerTypeId != null || p.destinationId != null || p.refData != null) clearRefCache();
+    });
+
+    // Keep the ward-beds cache correct — see the block comment on wardBeds.
+    // Attached to the one shared connection so the cache is maintained even
+    // while no ward screen is mounted, which is exactly when it would otherwise
+    // drift out of date without anyone noticing.
+    const wardOf = (p) => (p && p.wardId != null ? Number(p.wardId) : undefined);
+    sharedSocket.on("bed:update", (p) => {
+      const wid = wardOf(p);
+      if (wid === undefined) { clearWardBeds(); return; }   // unscoped: drop all
+      const cached = wardBeds.get(wid);
+      if (!cached) return;
+      if (p?.bed && p.bed.id != null) {
+        const idx = cached.findIndex((b) => b.id === p.bed.id);
+        // A bed we have never loaded is not ours to invent — drop the ward and
+        // let the next visit fetch it. Mirrors WardPage's patchBed exactly,
+        // including carrying over unit_type (a client-side annotation).
+        if (idx === -1) { clearWardBeds(wid); return; }
+        const next = cached.slice();
+        next[idx] = { ...p.bed, unit_type: cached[idx].unit_type };
+        wardBeds.set(wid, next);
+        return;
+      }
+      clearWardBeds(wid);   // no row attached: we cannot know what changed
+    });
+    sharedSocket.on("discharge:update", (p) => clearWardBeds(wardOf(p)));
+    sharedSocket.on("ward:operational", (p) => clearWardBeds(wardOf(p)));
+
+    // A reconnect means events were missed while offline (socket.io does not
+    // replay them), so nothing cached can be trusted — including the reference
+    // lists. The invalidation markers above are the ONLY signal that those went
+    // stale, and a marker sent while this client was disconnected is gone for
+    // good, so a reference edit made during the gap would otherwise survive
+    // until logout. Dropping both caches on reconnect closes that window.
+    let hasConnected = sharedSocket.connected;
+    sharedSocket.on("connect", () => {
+      if (hasConnected) { clearWardBeds(); clearRefCache(); } else hasConnected = true;
+    });
+  }
+  return sharedSocket;
+}
+export function disconnectSocket() {
+  // The next login may be a different user with a different role, and these
+  // lists are role-scoped — so neither cache may survive the session.
+  clearRefCache();
+  clearWardBeds();
+  if (sharedSocket) { sharedSocket.disconnect(); sharedSocket = null; }
+}
+
+/** Collapses a burst of socket events into ONE call.
+ *
+ *  Several server actions legitimately emit many events back-to-back — the
+ *  scheduler emits one `alarm:active` per PRE block on every 30s tick, and a
+ *  ward edit can emit per affected bed. Each of those used to trigger a full
+ *  aggregate reload, so an idle dashboard fired ~25 requests every 30 seconds
+ *  and the burst then queued behind the browser's 6-connection limit, turning
+ *  sub-second calls into multi-second ones.
+ *
+ *  The refetch is identical whether it runs once or seven times, so this only
+ *  removes duplicated work — it never changes what data is loaded. Trailing
+ *  edge: the last event in a burst wins, 250ms later (imperceptible for a
+ *  dashboard, and far cheaper than the congestion it prevents).
+ *
+ *  Callers MUST call .cancel() in their effect cleanup so a pending timer
+ *  can't fire into an unmounted component. */
+export function coalesce(fn, ms = 250) {
+  let t = null;
+  const wrapped = (...args) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => { t = null; fn(...args); }, ms);
+  };
+  wrapped.cancel = () => { if (t) { clearTimeout(t); t = null; } };
+  return wrapped;
+}
+
+/** socket.io fires "connect" for BOTH the first connection and every later
+ *  reconnect. Only a RECONNECT needs a catch-up refetch — while disconnected
+ *  the client misses events, so its data may be stale. The FIRST connection
+ *  misses nothing: the component's own mount-time load already fetched
+ *  everything, and that load and the first connect happen a few hundred ms
+ *  apart, so treating them the same made every page load fetch twice.
+ *
+ *  `seen` is seeded from socket.connected because the socket is shared: a
+ *  component mounting later finds it already connected, so no "connect" will
+ *  fire for it — without the seed, that component's first REAL reconnect
+ *  would be mistaken for a first connect and skipped.
+ *
+ *  Returns an unsubscribe function; call it in the effect cleanup. */
+export function onReconnect(socket, handler) {
+  let seen = socket.connected;
+  const onConnect = () => { if (seen) handler(); else seen = true; };
+  socket.on("connect", onConnect);
+  return () => socket.off("connect", onConnect);
 }
 
 // ---- audio alarm (loud repeating two-tone) ----

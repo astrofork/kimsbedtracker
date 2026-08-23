@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import { api, getUser, clearSession, stopAlarm } from "./lib.js";
+import { api, getUser, clearSession, stopAlarm, disconnectSocket } from "./lib.js";
 import { enablePush } from "./push.js";
 import { initTheme, Ic, icons } from "./ui.jsx";
 import { PwaManager } from "./pwa.jsx";
@@ -47,13 +47,14 @@ function App() {
     if (meta?.vapidPublic) enablePush(meta.vapidPublic);
   };
 
-  const logout = () => { stopAlarm(); clearSession(); setUser(null); };
+  const logout = () => { stopAlarm(); disconnectSocket(); clearSession(); setUser(null); };
 
   // When any API call gets a 401, lib.js fires this event.
   // We respond by stopping the alarm, clearing state, and showing the Login screen.
   useEffect(() => {
     const handleExpired = (e) => {
       stopAlarm();
+      disconnectSocket();
       clearSession();
       setUser(null);
       if (e.detail?.message) setSessionMsg(e.detail.message);

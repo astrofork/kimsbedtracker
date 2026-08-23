@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { api, toastErr, createSocket, fmtRelative } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce, fmtRelative } from "./lib.js";
 import { AppShell } from "./shell.jsx";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { fmtIpLast6, normalizeQuery, wardIdsMatchingPatientName, PATIENT_NAME_MIN_QUERY } from "./bedUtils.js";
 import DischargesPage from "./DischargesPage.jsx";
-import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
+import { LiveBedDashboard, OverstayPanel, useLiveBedDashboardData } from "./COOApp.jsx";
 import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
 import { WardCard } from "./NurseApp.jsx";
 
@@ -261,6 +261,12 @@ export default function FCApp({ user, onLogout }) {
   const [reopenRequests, setReopenRequests] = useState([]);
   const [reopenModal, setReopenModal] = useState(null);
   const [liveKey, setLiveKey] = useState(0);
+  // Lives here, above the tab switch, so it survives navigating away from and
+  // back to the "beds" (Dashboard) tab — see useLiveBedDashboardData. Note:
+  // FC's nav labels are swapped from their keys — key "beds" is labeled
+  // "Dashboard" and renders LiveBedDashboard; key "dashboard" is labeled "My
+  // Transactions" and is the billing pipeline.
+  const dashboardData = useLiveBedDashboardData("fc", tab === "beds");
   const [txnFilter, setTxnFilter] = useState("ALL"); // My Transactions ribbon filter
   const loadRef = useRef(() => {});
   const isMaster = user.role === "MASTER_FC";
@@ -285,6 +291,21 @@ export default function FCApp({ user, onLogout }) {
   const [bedDetails, setBedDetails] = useState(null);
   const bedDetailsLoadingRef = useRef(false);
   const loadWardsRef = useRef(() => {});
+
+  // Upserts one bed into the IP-search cache in place — used when a
+  // bed:update payload already carries the full row, so a single-bed change
+  // doesn't need to refetch this hospital-wide list. No-ops if the list
+  // hasn't been lazily loaded yet (nothing to patch into).
+  const patchBedDetail = useCallback((incoming) => {
+    setBedDetails((prev) => {
+      if (!prev) return prev;
+      const idx = prev.findIndex((b) => b.id === incoming.id);
+      if (idx === -1) return [...prev, incoming];
+      const next = prev.slice();
+      next[idx] = incoming;
+      return next;
+    });
+  }, []);
 
   // A 6-digit search value is treated as an IP lookup instead of a ward-name
   // filter — FC is hospital-wide, so this can match any ward. Narrows the grid
@@ -365,16 +386,53 @@ export default function FCApp({ user, onLogout }) {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (tab === "requests") loadRequests(); }, [tab, loadRequests]);
 
+  // Opening a ward replaces the whole Bed Entry pane with WardPage, which loads
+  // its own beds — neither the billing pipeline nor the ward counts are on
+  // screen while it is up. Rather than refetch both on every bed event for
+  // nobody, remember that a refresh is owed and do it on the way out.
+  // The MASTER_FC "Reopen Requests" dot IS still visible in the nav, but it is
+  // driven by its own fc:reopen-request event below, which is never gated.
+  const wardOpenRef = useRef(false);
+  const fcStaleRef = useRef(false);
+  useEffect(() => { wardOpenRef.current = !!openWard; }, [openWard]);
+
   useEffect(() => {
-    const socket = createSocket();
-    const refresh = () => { loadRef.current(); loadWardsRef.current(); setLiveKey(k => k + 1); };
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
-    socket.on("bed:update", refresh);
-    socket.on("fc:reopen-request", () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); });
-    socket.on("connect", refresh);
-    return () => { socket.disconnect(); };
-  }, []);
+    const socket = getSocket();
+    // load() is the billing pipeline — a server-bucketed list where which
+    // bucket a row belongs to depends on business rules (payment status,
+    // system checkout status, etc.) computed server-side. That bucket
+    // membership can't be safely re-derived from a single changed field on
+    // the client, so it stays a refetch even though the tracking row itself
+    // is available — same for loadWards()'s aggregate ward counts.
+    const refresh = coalesce(() => { fcStaleRef.current = false; loadRef.current(); loadWardsRef.current(); setLiveKey(k => k + 1); });
+    // Skipped while a ward is open — see wardOpenRef above. Everything the
+    // refetch feeds is off screen then; going back replays it if anything
+    // actually happened.
+    const gated = () => { if (wardOpenRef.current) { fcStaleRef.current = true; return; } refresh(); };
+    const onBedUpdate = (p) => {
+      gated();
+      // The bed-details list backs Entry search, not the ward grid — patching it
+      // costs no request, so it stays live even while a ward is open.
+      if (p?.bed && p.bed.id != null) patchBedDetail(p.bed);
+    };
+    const onReopenRequest = () => { loadRef.current(); setLiveKey(k => k + 1); if (tabRef.current === "requests") loadRequests(); };
+    socket.on("discharge:update", gated);
+    socket.on("discharge:overstay", gated);
+    socket.on("bed:update", onBedUpdate);
+    socket.on("fc:reopen-request", onReopenRequest);
+    // Only a RECONNECT refreshes — the first connect would duplicate the
+    // mount-time load() a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted, whatever is
+    // on screen.
+    const offReconnect = onReconnect(socket, refresh);
+    return () => {
+      socket.off("discharge:update", gated);
+      socket.off("discharge:overstay", gated);
+      socket.off("bed:update", onBedUpdate);
+      socket.off("fc:reopen-request", onReopenRequest);
+      offReconnect(); refresh.cancel();
+    };
+  }, [patchBedDetail, loadRequests]);
 
   const STEP_TOAST = { SYSTEM_CHECKOUT: "System Checkout complete", BILLING_STARTED: "Bill Prep done", AUDIT: "Audit done", BILL_READY: "Bill finalized", PAYMENT: "Payment complete" };
   const completeStep = async (admissionId, stepKey) => {
@@ -488,7 +546,7 @@ export default function FCApp({ user, onLogout }) {
       )}
 
       {tab === "beds" && (
-        <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "FC"} scope="fc" />
+        <LiveBedDashboard data={dashboardData} userName={user.name || user.username || "FC"} scope="fc" />
       )}
 
       {tab === "entry" && (
@@ -498,7 +556,12 @@ export default function FCApp({ user, onLogout }) {
             initialTab={openWard.tab}
             initialSearch={openWard.search}
             cfg={FC_CFG}
-            onBack={() => { setOpenWard(null); loadWards(); }}
+            onBack={() => {
+              setOpenWard(null);
+              // Replay only what was skipped while inside — walking in and
+              // straight back out costs nothing.
+              if (fcStaleRef.current) { fcStaleRef.current = false; loadWards(); load(); }
+            }}
           />
         ) : wards === null ? (
           <div className="empty" style={{ paddingTop: 80 }}>

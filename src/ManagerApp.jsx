@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { api, fmtTime, fmtClock, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
+import { api, fmtTime, fmtClock, toastErr, friendlyError, toMs, getSocket, onReconnect, coalesce } from "./lib.js";
 import { Ic, icons, StatusBar, useModal, BlockAvatar, useConfirm, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { naturalSort, calculateWardTotals } from "./bedUtils.js";
@@ -156,14 +156,12 @@ function Reporting() {
 
   // Real-time updates via WebSocket — replaces 15-second polling
   useEffect(() => {
-    const socket = createSocket();
-    const refresh = () => { loadRef.current(); };
-    socket.on("bed:update",       refresh);
-    socket.on("round:submit",     refresh);
-    socket.on("ward:operational", refresh);
-    socket.on("alarm:active",     refresh); // overdue PRE round → refresh compliance badge
-    socket.on("connect",          refresh);
-    return () => { socket.disconnect(); };
+    const socket = getSocket();
+    const refresh = coalesce(() => { loadRef.current(); });
+    const events = ["bed:update", "round:submit", "ward:operational", "alarm:active"];
+    for (const ev of events) socket.on(ev, refresh);
+    const offReconnect = onReconnect(socket, refresh); // first connect covered by mount load()
+    return () => { for (const ev of events) socket.off(ev, refresh); offReconnect(); refresh.cancel(); };
   }, []);
 
   if (!data) return (

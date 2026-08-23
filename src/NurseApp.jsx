@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { api, createSocket } from "./lib.js";
+import { api, getSocket, onReconnect, coalesce } from "./lib.js";
 import { Ic, icons, StatusBar, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { normalizeQuery, wardIdsMatchingPatientName, PATIENT_NAME_MIN_QUERY } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow } from "./PREApp.jsx";
-import { LiveBedDashboard, OverstayPanel } from "./COOApp.jsx";
+import { LiveBedDashboard, OverstayPanel, useLiveBedDashboardData } from "./COOApp.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 
 // Nurse endpoints for the shared ward/bed pages (same UI as PRE, nurse APIs + role).
@@ -52,7 +52,7 @@ export function WardCard({ ward, index, onOpen }) {
   const total = ward.total_beds ?? 0;
 
   const warningBlock = (msg, title) => (
-    <div className="ward-card slide-up" style={{ animationDelay: index * 0.03 + "s", padding: 16, opacity: 0.8 }}>
+    <div className="ward-card" style={{ padding: 16, opacity: 0.8 }}>
       <div className="row between" style={{ marginBottom: 14 }}>
         <div>
           {(ward.block_name || ward.floor_name) && (
@@ -80,8 +80,10 @@ export function WardCard({ ward, index, onOpen }) {
     return warningBlock("Contact your manager to assign beds to your account for this ward.", "No access");
 
   return (
-    <div className="ward-card slide-up" style={{
-      animationDelay: index * 0.03 + "s", padding: 16,
+    // Renders instantly, like BedGridCard — see the note in PREApp's ward grid.
+    // Shared by Nurse AND FC (FCApp imports this component).
+    <div className="ward-card" style={{
+      padding: 16,
       display: "flex", flexDirection: "column",
       borderColor: "var(--st-v)",
     }}>
@@ -159,6 +161,9 @@ export default function NurseApp({ user, onLogout }) {
   const [stationName, setStationName] = useState(user.nursing_station || "");
   const [stations,    setStations]    = useState([]); // [{id, name}] — every station this nurse covers
   const [liveKey,     setLiveKey]     = useState(0); // bumped on every live event — feeds the Home dashboard
+  // Lives here, above the dash/wards/discharges/overstay tab switch, so it
+  // survives navigating away from and back to Home — see useLiveBedDashboardData.
+  const dashboardData = useLiveBedDashboardData("nurse-full", navTab === "dash");
   // Home's summary numbers — computed server-side (DB aggregate, excludes
   // non-operational wards + Discharge Lounge) instead of reducing `wards` in
   // the browser. null until first load.
@@ -196,28 +201,46 @@ export default function NurseApp({ user, onLogout }) {
   // Initial data fetch
   useEffect(() => { load(); }, [load]);
 
-  // Real-time updates via WebSocket — replaces 15-second polling
-  useEffect(() => {
-    const socket = createSocket();
+  // Real-time updates via WebSocket — replaces 15-second polling. This
+  // screen shows ward-level aggregate counts (vacant/reserved/occupied per
+  // card), not individual beds, so a reload — not a per-bed patch — is the
+  // correct response here; there's no single row to merge into a card.
+  // Shared connection (getSocket()) — .off() each listener on cleanup,
+  // never .disconnect(), since other mounted screens share it.
+  // Opening a ward replaces this ward list with WardPage, which loads its own
+  // beds — the aggregate counts are off screen then, and the nav carries no
+  // badge fed by them. Remember that a refresh is owed and do it on the way out
+  // instead of refetching for nobody.
+  const wardOpenRef = useRef(false);
+  const nurseStaleRef = useRef(false);
+  useEffect(() => { wardOpenRef.current = !!openWard; }, [openWard]);
 
-    socket.on("bed:update", (payload) => {
+  useEffect(() => {
+    const socket = getSocket();
+    const refresh = coalesce(() => { nurseStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
+    // Skipped while a ward is open — see wardOpenRef above.
+    const gated = () => { if (wardOpenRef.current) { nurseStaleRef.current = true; return; } refresh(); };
+    const onBedUpdate = (payload) => {
       const { bedId, wardId } = payload ?? {};
       // Ward-level edits (rename/delete/operational toggle) only carry wardId,
       // bed-level edits only carry bedId — require at least one, not both.
       if (!bedId && !wardId) return;
-      // Reload to get fresh aggregate counts (vacant/reserved/occupied) for the ward cards
-      loadRef.current();
-      setLiveKey(k => k + 1);
-    });
-
-    socket.on("discharge:update", () => { loadRef.current(); setLiveKey(k => k + 1); });
-    socket.on("discharge:overstay", () => { loadRef.current(); setLiveKey(k => k + 1); });
-
-    // On reconnect, do a full reload to catch any updates missed while disconnected
-    socket.on("connect", () => { loadRef.current(); setLiveKey(k => k + 1); });
-
-    return () => { socket.disconnect(); };
-  }, []); // socket created once per mount; loadRef keeps the callback fresh
+      gated();
+    };
+    socket.on("bed:update", onBedUpdate);
+    socket.on("discharge:update", gated);
+    socket.on("discharge:overstay", gated);
+    // Only a RECONNECT refreshes — the first connect would duplicate the
+    // mount-time load() a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
+    const offReconnect = onReconnect(socket, refresh);
+    return () => {
+      socket.off("bed:update", onBedUpdate);
+      socket.off("discharge:update", gated);
+      socket.off("discharge:overstay", gated);
+      offReconnect(); refresh.cancel();
+    };
+  }, []); // socket shared across the app; loadRef keeps the callback fresh
 
   // A 6-digit search value is treated as an IP lookup instead of a ward-name
   // filter — narrows the ward grid to the one matching ward's card (same as
@@ -318,7 +341,11 @@ export default function NurseApp({ user, onLogout }) {
           initialTab={openWard.tab}
           initialSearch={openWard.search}
           cfg={NURSE_CFG}
-          onBack={() => { setOpenWard(null); load(); }}
+          onBack={() => {
+            setOpenWard(null);
+            // Replay only what was skipped while inside.
+            if (nurseStaleRef.current) { nurseStaleRef.current = false; load(); }
+          }}
         />
       ) : navTab === "wards" ? (<>
       {/* Occupancy summary bar */}
@@ -447,7 +474,7 @@ export default function NurseApp({ user, onLogout }) {
           <div className="l">{stations.length > 1 ? "NURSING STATIONS" : "NURSING STATION"}</div>
         </div>
       </div>
-      <LiveBedDashboard refreshKey={liveKey} userName={user.name || user.username || "Nurse"} scope="nurse-full" />
+      <LiveBedDashboard data={dashboardData} userName={user.name || user.username || "Nurse"} scope="nurse-full" />
       </>)}
 
       <ProfileThemeRow />

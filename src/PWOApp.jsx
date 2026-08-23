@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { api, toastErr, createSocket, fmtRelative, fmtDateTime } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, fmtRelative, fmtDateTime } from "./lib.js";
 import { Ic, icons, ThemeToggle, useConfirm, useModal, useScrollRestore } from "./ui.jsx";
 import { AppShell, useProfileMenuSlot } from "./shell.jsx";
 
@@ -983,11 +983,28 @@ export default function PWOApp({ user, meta, onLogout }) {
 
   useEffect(() => { loadQueue(filters); }, [filters, loadQueue]);
 
+  // This screen only ever patches in place — it never refetches on an event.
+  // That is right while connected, but it means a disconnect leaves the queue
+  // and the stat cards silently stale: socket.io does not replay what was
+  // missed, so a complaint raised while offline would simply never appear.
+  // Re-pull stats, charts and the current page whenever the socket comes back.
+  // Held in a ref so the socket effect below never re-subscribes just because
+  // the filters changed. Lookups are deliberately not re-pulled — they are
+  // reference data an admin edits, not live queue state.
+  const resyncRef = useRef(null);
+  resyncRef.current = async () => {
+    try {
+      const [d, ch] = await Promise.all([api.pwoDashboard(), api.pwoCharts(30)]);
+      setStats(d.stats); setCharts(ch.charts);
+    } catch { /* transient — a later reconnect will try again */ }
+    loadQueue(filtersRef.current);
+  };
+
   useEffect(() => { if (tab === "reports") api.pwoPerOfficer().then(r => setOfficers(r.officers)).catch(() => {}); }, [tab]);
 
   // ── Live updates: patch in place, never refetch ──────────────────────────
   useEffect(() => {
-    const socket = createSocket();
+    const socket = getSocket();
 
     const patchRow = (id, patch) =>
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -1006,7 +1023,7 @@ export default function PWOApp({ user, meta, onLogout }) {
       }
     };
 
-    socket.on("complaint:created", ({ complaint }) => {
+    const onCreated = ({ complaint }) => {
       setStats((s) => s && {
         ...s,
         open: s.open + 1,
@@ -1029,9 +1046,9 @@ export default function PWOApp({ user, meta, onLogout }) {
         setTotal((t) => t + 1);
       }
       showToast(`New complaint · ${complaint.category.label}`);
-    });
+    };
 
-    socket.on("complaint:accepted", (p) => {
+    const onAccepted = (p) => {
       setStats((s) => applyStatusDelta(s, p.fromStatus, p.status));
       patchRow(p.complaintId, {
         status: p.status, ownerPwoId: p.ownerPwoId, ownerName: p.ownerName,
@@ -1039,9 +1056,9 @@ export default function PWOApp({ user, meta, onLogout }) {
       });
       reconcile(p.complaintId, p.status);
       detailPatch.current?.("complaint:accepted", p);
-    });
+    };
 
-    socket.on("complaint:status_changed", (p) => {
+    const onStatusChanged = (p) => {
       setRows((prev) => {
         const row = prev.find((r) => r.id === p.complaintId);
         setStats((s) => applyStatusDelta(s, p.fromStatus, p.status, row?.priority?.code));
@@ -1051,9 +1068,9 @@ export default function PWOApp({ user, meta, onLogout }) {
       });
       reconcile(p.complaintId, p.status);
       detailPatch.current?.("complaint:status_changed", p);
-    });
+    };
 
-    socket.on("complaint:priority_changed", (p) => {
+    const onPriorityChanged = (p) => {
       setRows((prev) => {
         const row = prev.find((r) => r.id === p.complaintId);
         // Keep the High/Critical cards honest when priority changes on a
@@ -1072,11 +1089,28 @@ export default function PWOApp({ user, meta, onLogout }) {
         return prev.map((r) => (r.id === p.complaintId ? { ...r, priority: p.priority, updatedAt: p.updatedAt } : r));
       });
       detailPatch.current?.("complaint:priority_changed", p);
-    });
+    };
 
-    socket.on("complaint:note_added", (p) => detailPatch.current?.("complaint:note_added", p));
+    const onNoteAdded = (p) => detailPatch.current?.("complaint:note_added", p);
 
-    return () => socket.disconnect();
+    socket.on("complaint:created", onCreated);
+    socket.on("complaint:accepted", onAccepted);
+    socket.on("complaint:status_changed", onStatusChanged);
+    socket.on("complaint:priority_changed", onPriorityChanged);
+    socket.on("complaint:note_added", onNoteAdded);
+    // Only a RECONNECT resyncs — the first connect would duplicate the
+    // mount-time loads a moment earlier. See resyncRef above for why a
+    // patch-only screen needs this at all.
+    const offReconnect = onReconnect(socket, () => resyncRef.current?.());
+
+    return () => {
+      socket.off("complaint:created", onCreated);
+      socket.off("complaint:accepted", onAccepted);
+      socket.off("complaint:status_changed", onStatusChanged);
+      socket.off("complaint:priority_changed", onPriorityChanged);
+      socket.off("complaint:note_added", onNoteAdded);
+      offReconnect();
+    };
   }, [showToast]);
 
   const setFilter = (k, v) => setFilters((f) => ({ ...f, [k]: v, page: k === "page" ? v : 1 }));

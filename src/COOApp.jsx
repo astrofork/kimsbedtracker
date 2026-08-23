@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
-import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, createSocket } from "./lib.js";
+import { api, fmtTime, fmtRelative, fmtDateTime, toastErr, friendlyError, toMs, getSocket, onReconnect, coalesce } from "./lib.js";
 import {
   Ic, icons, ThemeToggle, StatusBar, useModal, AppError, useConfirm, BlockAvatar, Pagination,
   THEMES, T_LABEL, T_COLOR, getTheme, applyTheme,
@@ -77,6 +77,39 @@ const ADMIN_TITLES = {
   settings: "Settings",
 };
 
+// ── Reminder dot: computed from the clock, not fetched ───────────────────────
+// The server used to ship `dueReminder` inside the overview payload, computed as
+// `mins >= m && mins < m + 30` against COO_REMINDERS (coo.ts). That glued a
+// purely TIME-based signal onto a fetch that only ran on bed events — so the
+// reminder appeared when somebody happened to move a bed, not when it came due,
+// and it pinned the overview refetch in place because the dot rode along with it.
+//
+// It is a pure function of the clock, so it is computed here instead. Same rule,
+// same 30-minute window, and Asia/Kolkata explicitly — matching domain.ts's
+// indiaTime(), because the browser's timezone is the user's, not the hospital's.
+const REMINDER_WINDOW_MIN = 30;
+
+// Which COO tabs actually render `data` / `compliance`. Everywhere else they are
+// off screen, so refetching them on a bed event is work for nobody — the refresh
+// is remembered and replayed when such a tab is opened. Module scope so the
+// socket effect below captures one stable array rather than a fresh one per
+// render. Only safe because the reminder no longer rides inside that payload.
+const DATA_TABS = ["matrix", "savedviews", "alerts", "analytics"];
+
+function istMinutesNow() {
+  const d = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function dueReminderNow(reminders) {
+  const mins = istMinutesNow();
+  return (reminders || []).find((r) => {
+    const [h, m] = String(r).split(":").map(Number);
+    const start = h * 60 + m;
+    return mins >= start && mins < start + REMINDER_WINDOW_MIN;
+  }) || null;
+}
+
 export default function COOApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [data, setData] = useState(null);
@@ -96,6 +129,24 @@ export default function COOApp({ user, meta, onLogout }) {
   const [analyticsView, setAnalyticsView] = useState("overview"); // "overview" | "payer"
   const loadRef = useRef(null);
   const [liveKey, setLiveKey] = useState(0);
+  // Lives here, above the tab switch, so it survives navigating away from and
+  // back to the Dashboard tab — see useLiveBedDashboardData's own doc comment.
+  const dashboardData = useLiveBedDashboardData("admin", tab === "dashboard");
+
+  // Reminder times come from GET /meta (COO_REMINDERS server-side) — the values,
+  // not the verdict. See dueReminderNow above for why the verdict is local.
+  const reminders = meta?.cooReminders;
+  const [cooDue, setCooDue] = useState(() => dueReminderNow(reminders));
+  useEffect(() => {
+    const tick = () => setCooDue(dueReminderNow(reminders));
+    tick();
+    const id = setInterval(tick, 30 * 1000);
+    return () => clearInterval(id);
+  }, [reminders]);
+
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const cooStaleRef = useRef(false);
 
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(""), 2200); };
 
@@ -126,19 +177,38 @@ export default function COOApp({ user, meta, onLogout }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // Real-time updates via WebSocket — replaces 15-second polling
+  // Real-time updates via WebSocket — replaces 15-second polling. data/
+  // compliance/dischargeCounts are server-computed aggregates (hospital
+  // totals, compliance %, discharge dashboard counts) with no per-row
+  // payload to patch from, so this stays a refetch — but it's the ONE
+  // refetch that matters: it's held here at the top of COOApp, above the
+  // tab switch, so every tab that reads `data`/`compliance` as a prop
+  // (Matrix, SavedViewsPage, AlertsPage, CommandCenter, etc.) already stays
+  // current across navigation without needing its own fetch.
   useEffect(() => {
-    const socket = createSocket();
-    const refresh = () => { loadRef.current(); setLiveKey(k => k + 1); };
-    socket.on("bed:update", refresh);
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
-    socket.on("round:submit", refresh);
-    socket.on("ward:operational", refresh);
-    socket.on("alarm:active", refresh); // overdue PRE round → refresh compliance badge
-    socket.on("connect", refresh); // catch missed updates on reconnect
-    return () => { socket.disconnect(); };
+    const socket = getSocket();
+    // Coalesced: the scheduler emits one alarm:active PER PRE BLOCK every 30s,
+    // and each used to trigger its own full aggregate reload. See coalesce().
+    const refresh = coalesce(() => { cooStaleRef.current = false; loadRef.current(); setLiveKey(k => k + 1); });
+    // Skipped unless a tab that reads this data is open — see DATA_TABS above.
+    const gated = () => {
+      if (!DATA_TABS.includes(tabRef.current)) { cooStaleRef.current = true; return; }
+      refresh();
+    };
+    const events = ["bed:update", "discharge:update", "discharge:overstay", "round:submit", "ward:operational", "alarm:active"];
+    for (const ev of events) socket.on(ev, gated);
+    // Only a RECONNECT refreshes — the first connect would just duplicate the
+    // mount-time load() above a few hundred ms later. See onReconnect().
+    // Never gated: after a disconnect nothing local can be trusted.
+    const offReconnect = onReconnect(socket, refresh);
+    return () => { for (const ev of events) socket.off(ev, gated); offReconnect(); refresh.cancel(); };
   }, []);
+
+  // Opening a tab that reads `data`/`compliance` replays whatever was skipped
+  // while it was closed, so those screens are never shown stale.
+  useEffect(() => {
+    if (DATA_TABS.includes(tab) && cooStaleRef.current) { cooStaleRef.current = false; loadRef.current?.(); }
+  }, [tab]);
   useEffect(() => { api.mgrHistoryDates().then((d) => setDates(d.dates || [])).catch(() => { }); }, []);
 
   // when a historical date is picked, load that day's rounds
@@ -167,7 +237,10 @@ export default function COOApp({ user, meta, onLogout }) {
     </div>
   );
 
-  const due = data.dueReminder;
+  // Ticks the clock, never the network — a plain arithmetic check every 30s.
+  // React bails out when the value is unchanged, so the common case costs a
+  // comparison and nothing else. Declared here beside its only consumers.
+  const due = cooDue;
 
   const menu = [
     {
@@ -252,7 +325,7 @@ export default function COOApp({ user, meta, onLogout }) {
         <DatePicker dates={dates} selDate={selDate} setSelDate={setSelDate} />
       )}
 
-      {tab === "dashboard" && <LiveBedDashboard refreshKey={liveKey} userName={user?.name || user?.username || "Admin"} currentUsername={user?.username || null} />}
+      {tab === "dashboard" && <LiveBedDashboard data={dashboardData} userName={user?.name || user?.username || "Admin"} currentUsername={user?.username || null} />}
       {tab === "activity" && <ActivityPage />}
       {tab === "matrix" && <Matrix data={data} selDate={selDate} history={history} userId={user?.id} />}
       {tab === "analytics" && (
@@ -1275,26 +1348,229 @@ function SwipeThumb({ targetRef, deps }) {
   );
 }
 
-export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUsername = null, scope = "admin", hideUnitFilter = false }) {
+// Socket events that can invalidate any of this hook's datasets. "connect" is
+// deliberately absent — it's handled separately via onReconnect(), because the
+// FIRST connect must not trigger a refetch (see lib.js).
+const DASHBOARD_EVENTS = ["bed:update", "discharge:update", "discharge:overstay", "ward:operational"];
+
+/** Which of this hook's datasets a given socket event can ACTUALLY change.
+ *  Derived from the server-side queries, not assumed:
+ *
+ *  - wards       = allWardsLive(), which reads the `beds` count cache kept by
+ *                  _recalcWardTotals — so anything that moves a bed's state.
+ *  - consultants = consultantsLive(), which COUNTs ACTIVE patient_admissions
+ *                  joined to bed_details.payer_type. Admissions open/close as
+ *                  beds become occupied/vacant, so bed and discharge events
+ *                  both change it. (Note: this is why "bed:update does not
+ *                  affect consultants" would be wrong.)
+ *  - payerTypes  = the active payer-type reference list. No ordinary bed
+ *                  movement can change it. Payer-type CRUD reuses bed:update
+ *                  carrying a `payerTypeId` marker (manager.ts:786-812) — that
+ *                  is the only thing that invalidates it, and because renaming
+ *                  or removing a type also rewrites the payer breakdown inside
+ *                  live-wards and consultants, it invalidates all three.
+ *
+ *  `snaps` is absent on purpose — see the hour-bucket note in the fetch effect. */
+function invalidatedBy(event, payload) {
+  if (event === "bed:update" && payload && payload.payerTypeId != null) {
+    return ["wards", "consultants", "payerTypes"];
+  }
+  switch (event) {
+    case "bed:update":
+    case "discharge:update": return ["wards", "consultants"];
+    // Overstay is a 60-minute timer firing; it writes no bed state, so strictly
+    // it changes neither. Kept on `wards` deliberately as the conservative
+    // choice — these fire rarely, and the cost of being wrong (stale occupancy)
+    // outweighs one extra request an hour.
+    case "discharge:overstay": return ["wards"];
+    case "ward:operational": return ["wards"];
+    default: return [];
+  }
+}
+
+/** occupancy_snapshots rows are written ONLY by the scheduler, once per hour on
+ *  the IST hour (scheduler/index.ts), and no socket event is emitted when that
+ *  happens. So the real invalidation condition for the snapshots series is
+ *  "the IST hour rolled over", not "a bed changed". */
+function istHourKey(d = new Date()) {
+  const ist = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  return `${ist.getFullYear()}-${ist.getMonth()}-${ist.getDate()}-${ist.getHours()}`;
+}
+
+/** Ward list, occupancy history, payer types, and consultants — the pieces of
+ *  LiveBedDashboard's data that don't depend on any local UI state (unlike
+ *  the Unit-filtered admin cards below, which LiveBedDashboard still fetches
+ *  itself — see its own effects, further down). Meant to be called from each
+ *  role app's OWN top-level component, which never unmounts on tab switch, so
+ *  this data survives navigating away from and back to the Dashboard/Home tab.
+ *
+ *  Fetching is driven by a per-dataset version/watermark pair rather than by a
+ *  single "something happened" counter:
+ *
+ *    versions.<set>    bumped when an event that CAN change that dataset arrives
+ *                      (including while the tab is hidden — the shared socket
+ *                      stays connected, so we always know what was missed)
+ *    fetchedAt.<set>   the version that dataset was last fetched at
+ *
+ *  A dataset is refetched only when those two differ. That is what makes
+ *  "returned to the tab, nothing happened while away" cost zero requests,
+ *  while "returned after 5 bed changes" still refreshes exactly the datasets
+ *  those 5 changes could have affected — a plain hasLoaded flag could not
+ *  tell those two cases apart. */
+export function useLiveBedDashboardData(scope, active) {
+  const scoped = SCOPED_FETCHERS[scope] ?? null;
+  const hospitalWide = !scoped || scoped.hospitalWide === true;
+  const [liveData, setLiveData] = useState(null);
+  const [snaps, setSnaps] = useState(null);
+  const [payerTypes, setPayerTypes] = useState(null);
+  const [consultantData, setConsultantData] = useState(null);
+  const [lastSync, setLastSync] = useState(new Date());
+  // Hospital Snapshot / Occupancy / Transaction boards + their sparkline
+  // history. These are Unit-FILTERED, and `viewBy` (which unit is selected)
+  // lives here rather than in LiveBedDashboard so that both the selection and
+  // the data fetched for it survive the view unmounting on a tab switch —
+  // otherwise returning to the tab reset the filter to TOTAL and refetched.
+  const [viewBy, setViewBy] = useState("TOTAL");
+  const [adminCards, setAdminCards] = useState(null);
+  const [adminHistory, setAdminHistory] = useState(null);
+
+  const [versions, setVersions] = useState({ wards: 0, consultants: 0, payerTypes: 0 });
+  // -1 = never fetched. Written at REQUEST time so a burst of events can't fire
+  // duplicate in-flight requests for the same version, and reset on failure so
+  // the next activation retries rather than trusting a load that never landed.
+  // adminKey/adminHistKey are `${unit}|${version}` composites: a change to
+  // EITHER the selected unit or the underlying bed/discharge state refetches,
+  // while returning to the tab with both unchanged does not.
+  const fetchedAt = useRef({ wards: -1, consultants: -1, payerTypes: -1, snapsHour: null, adminKey: null, adminHistKey: null });
+
+  // Unit list is derived from the ward rows, so it's only available once
+  // liveData has loaded — null-safe until then. activeUnit falls back to TOTAL
+  // if the remembered selection is no longer a valid option (e.g. that unit's
+  // last ward was removed while the tab was hidden).
+  const unitOptions = ["TOTAL", ...Array.from(
+    new Set((liveData?.wards || []).filter((w) => !w.is_discharge_lounge).map((w) => dashboardUnitKey(w.unit_type)).filter(Boolean))
+  ).sort()];
+  const activeUnit = unitOptions.includes(viewBy) ? viewBy : "TOTAL";
+
+  useEffect(() => {
+    const socket = getSocket();
+    const bump = (sets) => {
+      if (!sets.length) return;
+      setVersions((v) => {
+        const next = { ...v };
+        for (const s of sets) next[s] = v[s] + 1;
+        return next;
+      });
+    };
+    const handlers = DASHBOARD_EVENTS.map((ev) => {
+      const h = (p) => bump(invalidatedBy(ev, p));
+      socket.on(ev, h);
+      return [ev, h];
+    });
+    // A real reconnect may have missed events entirely (socket.io does not
+    // replay them), so nothing local can be trusted — invalidate everything.
+    // The FIRST connect deliberately does not do this; see onReconnect().
+    const offReconnect = onReconnect(socket, () =>
+      bump(["wards", "consultants", "payerTypes"]));
+    return () => {
+      for (const [ev, h] of handlers) socket.off(ev, h);
+      offReconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!active) return; // hidden tab: versions still advance, fetching does not
+    const w = fetchedAt.current;
+
+    if (w.wards !== versions.wards) {
+      const at = versions.wards; w.wards = at;
+      (scoped ? scoped.liveWards() : api.cooLiveWards())
+        .then((d) => { setLiveData(d); setLastSync(new Date()); })
+        .catch(() => { if (w.wards === at) w.wards = -1; /* keep stale, retry later */ });
+    }
+
+    // Hospital-wide payer/occupancy trend history has no per-block/per-station
+    // equivalent captured anywhere — ward-scoped roles just get an empty
+    // series (LiveBedDashboard renders flat, non-animated cards for those).
+    if (hospitalWide) {
+      const hour = istHourKey();
+      if (w.snapsHour !== hour) {
+        w.snapsHour = hour;
+        (scoped ? scoped.snapshots() : api.cooSnapshots())
+          .then((r) => setSnaps(r.snapshots || []))
+          .catch(() => { if (w.snapsHour === hour) w.snapsHour = null; setSnaps([]); });
+      }
+      if (w.consultants !== versions.consultants) {
+        const at = versions.consultants; w.consultants = at;
+        (scoped ? scoped.consultants() : api.cooConsultants())
+          .then(setConsultantData)
+          .catch(() => { if (w.consultants === at) w.consultants = -1; });
+      }
+    } else if (w.snapsHour !== "n/a") {
+      w.snapsHour = "n/a";
+      setSnaps([]);
+    }
+
+    if (w.payerTypes !== versions.payerTypes) {
+      const at = versions.payerTypes; w.payerTypes = at;
+      (scoped ? scoped.payerTypes() : api.mgrPayerTypes())
+        .then((r) => setPayerTypes((r.payerTypes || []).filter((p) => p.active)))
+        .catch(() => { if (w.payerTypes === at) w.payerTypes = -1; setPayerTypes([]); });
+    }
+
+    // Unit-filtered boards. Keyed by unit AND version, so switching units
+    // fetches the new unit, a bed/discharge change refetches the current one,
+    // and merely re-showing the tab does neither. adminCards is cleared when
+    // the unit changes so a stale board can never be shown labelled as the
+    // newly-selected unit while its fetch is in flight.
+    const adminKey = `${activeUnit}|${versions.wards}`;
+    if (w.adminKey !== adminKey) {
+      const unitChanged = w.adminKey !== null && w.adminKey.split("|")[0] !== activeUnit;
+      w.adminKey = adminKey;
+      if (unitChanged) setAdminCards(null);
+      (scoped ? scoped.adminDashboard(activeUnit) : api.cooAdminDashboard(activeUnit))
+        .then(setAdminCards)
+        .catch(() => { if (w.adminKey === adminKey) w.adminKey = null; });
+    }
+    // Sparkline history is captured per-unit too (see snapshotAdminDashboard()).
+    // No per-block/per-station history exists, so ward-scoped roles render flat.
+    if (!hospitalWide) {
+      if (w.adminHistKey !== "n/a") { w.adminHistKey = "n/a"; setAdminHistory([]); }
+    } else if (w.adminHistKey !== adminKey) {
+      const unitChanged = w.adminHistKey !== null && w.adminHistKey !== "n/a" && w.adminHistKey.split("|")[0] !== activeUnit;
+      w.adminHistKey = adminKey;
+      if (unitChanged) setAdminHistory(null);
+      (scoped ? scoped.adminDashboardHistory(activeUnit) : api.cooAdminDashboardHistory(activeUnit))
+        .then((r) => setAdminHistory(r.snapshots || []))
+        .catch(() => { if (w.adminHistKey === adminKey) w.adminHistKey = null; setAdminHistory([]); });
+    }
+  }, [active, versions, scope, activeUnit, hospitalWide]);
+
+  return { liveData, snaps, payerTypes, consultantData, lastSync, adminCards, adminHistory, viewBy, setViewBy, unitOptions, activeUnit };
+}
+
+// `data` comes from useLiveBedDashboardData(), owned by the caller's top-level
+// component. This view is free to unmount on a tab switch without destroying
+// any fetched data or the Unit selection — see that hook's doc comment.
+export function LiveBedDashboard({ data, userName = "Admin", currentUsername = null, scope = "admin", hideUnitFilter = false }) {
   const scoped = SCOPED_FETCHERS[scope] ?? null; // null = admin/hospital-wide
   // Whether this mount shows the whole hospital. Admin (no scoped entry) and PRE
   // both do; Nurse/Consultant don't. Sections that would leak hospital totals to
   // a ward-scoped user gate on this rather than on `scoped`.
   const hospitalWide = !scoped || scoped.hospitalWide === true;
   const topBarSlot = useTopBarSlot();
-  const [liveData, setLiveData] = useState(null);
-  const [snaps, setSnaps] = useState(null);
-  const [lastSync, setLastSync] = useState(new Date());
-  const [viewBy, setViewBy] = useState("TOTAL");
+  // liveData/snaps/payerTypes/consultantData/lastSync now come from the
+  // caller's useLiveBedDashboardData() (see above) instead of being fetched
+  // in here — this lets that data survive LiveBedDashboard itself
+  // unmounting on tab switch. Named identically to the old local state so
+  // every read further down in this function needs no other changes.
+  const { liveData, snaps, payerTypes, consultantData, lastSync,
+    adminCards, adminHistory, setViewBy, unitOptions, activeUnit } = data;
   const [search, setSearch] = useState("");
   const [searchBy, setSearchBy] = useState("ward");
   const compact = scope === "consultant";
   const [groupBy, setGroupBy] = useState(compact ? "room_type" : "none");
   const [snapToast, setSnapToast] = useState("");
-  const [payerTypes, setPayerTypes] = useState(null); // active payer types, sorted — drives dynamic payer cards
-  const [adminCards, setAdminCards] = useState(null); // Hospital Snapshot / Occupancy / Transaction boards
-  const [adminHistory, setAdminHistory] = useState(null); // hourly history for the flat-line cards' sparklines
-  const [consultantData, setConsultantData] = useState(null); // { payerTypes, consultants }
   const snapshotRef = useRef(null);
   // Occupancy Board strip — read by SwipeThumb to size and drive its indicator.
   const occStripRef = useRef(null);
@@ -1331,30 +1607,17 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     setBedExplorer({ label, color, payer });
   }, []);
 
-  // Also must be before the early return below — null-safe so it works before
-  // liveData has loaded. Mirrors the activeUnit/unitOptions computed again
-  // (identically) further down once liveData is guaranteed non-null; kept
-  // separate only so these can be used unconditionally this early (both by
-  // the fetch effect further down and by openDischargeList right below).
-  const earlyUnitOptions = ["TOTAL", ...Array.from(
-    new Set((liveData?.wards || []).filter((w) => !w.is_discharge_lounge).map((w) => dashboardUnitKey(w.unit_type)).filter(Boolean))
-  ).sort()];
-  const earlyActiveUnit = earlyUnitOptions.includes(viewBy) ? viewBy : "TOTAL";
 
   // ── Transaction Board cards → Discharge List (admission-based, not a bed
   // status filter, so it's a separate small modal from BedExplorerModal).
   const [dischargeList, setDischargeList] = useState(null); // null | { step, label, hospitalWide, unit }
-  // Must use earlyActiveUnit, not activeUnit — this hook (like every hook)
-  // has to run before the `if (!liveData) return` guard further down, but
-  // `activeUnit` is only declared after that guard (it needs liveData to be
-  // non-null). earlyActiveUnit is the same value, computed null-safely for
-  // exactly this reason (see its own comment above). earlyActiveUnit IS a
-  // required dep here: without it, switching the Unit toolbar filter (which
-  // doesn't change `hospitalWide`) would keep reusing a stale, memoized
+  // activeUnit comes from useLiveBedDashboardData (which owns the Unit filter
+  // so it survives this view unmounting). It IS a required dep: without it,
+  // switching the Unit toolbar filter would keep reusing a stale memoized
   // closure from whichever unit was active when this callback last changed.
   const openDischargeList = useCallback((step, label) => {
-    setDischargeList({ step, label, hospitalWide, unit: earlyActiveUnit });
-  }, [hospitalWide, earlyActiveUnit]);
+    setDischargeList({ step, label, hospitalWide, unit: activeUnit });
+  }, [hospitalWide, activeUnit]);
 
   // ── KPI card layout customization — frontend/localStorage only, never touches
   // the backend. Locked by default on every load; an admin can unlock, drag
@@ -1649,24 +1912,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     }
   }, [orderKey]);
 
-  const load = useCallback(async () => {
-    try { setLiveData(await (scoped ? scoped.liveWards() : api.cooLiveWards())); setLastSync(new Date()); } catch { /* keep stale */ }
-  }, [scoped]);
-  useEffect(() => { load(); }, [load, refreshKey]);
-  useEffect(() => {
-    // Hospital-wide payer/occupancy trend history has no per-block/per-station
-    // equivalent captured anywhere — showing it would leak hospital totals, so
-    // ward-scoped dashboards just get flat (non-animated) cards instead of
-    // skipping the feature outright. Hospital-wide mounts get the real series.
-    if (!hospitalWide) { setSnaps([]); return; }
-    (scoped ? scoped.snapshots() : api.cooSnapshots())
-      .then((r) => setSnaps(r.snapshots || [])).catch(() => setSnaps([]));
-  }, [refreshKey, scoped, hospitalWide]);
-  useEffect(() => {
-    (scoped ? scoped.payerTypes() : api.mgrPayerTypes()).then((r) => setPayerTypes((r.payerTypes || []).filter((p) => p.active)))
-      .catch(() => setPayerTypes([]));
-  }, [refreshKey, scoped]);
-
   const showSnapToast = useCallback((m) => { setSnapToast(m); setTimeout(() => setSnapToast(""), 2400); }, []);
 
   // Must be before any early return — hooks cannot be called conditionally
@@ -1681,26 +1926,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
     if (searchBy === "payer_type") return Object.keys(r.payersLive || {}).some(p => p.toLowerCase().includes(q));
     return r.ward.toLowerCase().includes(q);
   }, [search, searchBy]);
-
-  // Re-fetches whenever the Unit toolbar filter changes — Hospital Snapshot /
-  // Occupancy Board / Transaction Board now scope to the same wards as the
-  // ward tables and By Payer cards below (see adminDashboard()'s unitType param).
-  useEffect(() => {
-    (scoped ? scoped.adminDashboard(earlyActiveUnit) : api.cooAdminDashboard(earlyActiveUnit)).then(setAdminCards).catch(() => { });
-  }, [refreshKey, earlyActiveUnit, scoped]);
-  // Sparkline history is now captured per-unit too (see snapshotAdminDashboard()),
-  // so it moves with the same filter instead of always showing the hospital-wide trend.
-  // No per-block/per-station history exists (see the snaps effect above) — scoped cards render flat.
-  useEffect(() => {
-    if (!hospitalWide) { setAdminHistory([]); return; }
-    (scoped ? scoped.adminDashboardHistory(earlyActiveUnit) : api.cooAdminDashboardHistory(earlyActiveUnit))
-      .then((r) => setAdminHistory(r.snapshots || [])).catch(() => setAdminHistory([]));
-  }, [refreshKey, earlyActiveUnit, scoped, hospitalWide]);
-
-  useEffect(() => {
-    if (!hospitalWide) return;
-    (scoped ? scoped.consultants() : api.cooConsultants()).then(setConsultantData).catch(() => { });
-  }, [refreshKey, scoped, hospitalWide]);
 
   if (!liveData) return (
     <div className="empty" style={{ paddingTop: 80 }}>
@@ -1732,10 +1957,6 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
   // ward is excluded here regardless of whatever unit_type it's been given —
   // it's a shared virtual holding ward, not a real unit, and its patients are
   // already attributed to their origin ward's unit everywhere on this board.
-  const unitOptions = ["TOTAL", ...Array.from(
-    new Set(allRows.filter((r) => !r.is_discharge_lounge).map((r) => dashboardUnitKey(r.unit_type)).filter(Boolean))
-  ).sort()];
-  const activeUnit = unitOptions.includes(viewBy) ? viewBy : "TOTAL";
   // The Discharge Lounge ward has no unit_type of its own (it's shared across
   // units — a patient's unit is determined by where they came FROM, same as
   // the backend's origin-scoped lounge counts in bedService.ts), so it would
@@ -2324,30 +2545,30 @@ export function LiveBedDashboard({ refreshKey = 0, userName = "Admin", currentUs
             cv-groups-swipe turns the board into a horizontal strip there instead.
             Admin renders 6 and fills the grid exactly, so it keeps the grid. */}
         <div className="cv-swipe-wrap">
-        <div ref={occStripRef} className={"cv-groups" + (scope === "admin" ? "" : " cv-groups-swipe")}
-          style={{ "--cv-group-count": occGroups.length }}>
-          {occGroups.map((g) => (
-            <div key={g.title} className="cv-group">
-              <div className="cv-group-head">
-                {g.title}
-              </div>
-              {g.cards.map((k, i) => (
-                <div key={k.label}
-                  className={"cv-metric" + (i > 0 ? " cv-metric-sub-item" : "") + (k.explorerKey ? " cv-metric-click" : "")}
-                  role={k.explorerKey ? "button" : undefined}
-                  tabIndex={k.explorerKey ? 0 : undefined}
-                  aria-label={k.explorerKey ? `${k.label} — ${k.val}. Press Enter to see these beds.` : undefined}
-                  onClick={k.explorerKey ? () => openBedExplorer(k.explorerKey, k.color, k.payerFilter) : undefined}
-                  onKeyDown={k.explorerKey ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.explorerKey, k.color, k.payerFilter); } } : undefined}>
-                  <span className="cv-metric-dot" style={{ background: k.color }} />
-                  <span className="cv-metric-label">{k.label}{k.sub ? <span className="cv-metric-sub"> · {k.sub}</span> : null}</span>
-                  <span className="cv-metric-val">{k.val}</span>
+          <div ref={occStripRef} className={"cv-groups" + (scope === "admin" ? "" : " cv-groups-swipe")}
+            style={{ "--cv-group-count": occGroups.length }}>
+            {occGroups.map((g) => (
+              <div key={g.title} className="cv-group">
+                <div className="cv-group-head">
+                  {g.title}
                 </div>
-              ))}
-            </div>
-          ))}
-        </div>
-        {scope !== "admin" && <SwipeThumb targetRef={occStripRef} deps={occGroups.length} />}
+                {g.cards.map((k, i) => (
+                  <div key={k.label}
+                    className={"cv-metric" + (i > 0 ? " cv-metric-sub-item" : "") + (k.explorerKey ? " cv-metric-click" : "")}
+                    role={k.explorerKey ? "button" : undefined}
+                    tabIndex={k.explorerKey ? 0 : undefined}
+                    aria-label={k.explorerKey ? `${k.label} — ${k.val}. Press Enter to see these beds.` : undefined}
+                    onClick={k.explorerKey ? () => openBedExplorer(k.explorerKey, k.color, k.payerFilter) : undefined}
+                    onKeyDown={k.explorerKey ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBedExplorer(k.explorerKey, k.color, k.payerFilter); } } : undefined}>
+                    <span className="cv-metric-dot" style={{ background: k.color }} />
+                    <span className="cv-metric-label">{k.label}{k.sub ? <span className="cv-metric-sub"> · {k.sub}</span> : null}</span>
+                    <span className="cv-metric-val">{k.val}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          {scope !== "admin" && <SwipeThumb targetRef={occStripRef} deps={occGroups.length} />}
         </div>
       </div>
 
@@ -5751,14 +5972,14 @@ export function OverstayPanel({ loadFn = api.cooOverstay }) {
   }, [loadFn]);
   useEffect(() => { load(); }, [load]);
 
+  // Server-computed overstay tiers/counts — no per-row payload to patch from.
   useEffect(() => {
-    const socket = createSocket();
-    const refresh = () => load();
-    socket.on("discharge:update", refresh);
-    socket.on("discharge:overstay", refresh);
-    socket.on("bed:update", refresh);
-    socket.on("connect", refresh);
-    return () => socket.disconnect();
+    const socket = getSocket();
+    const refresh = coalesce(() => load());
+    const events = ["discharge:update", "discharge:overstay", "bed:update"];
+    for (const ev of events) socket.on(ev, refresh);
+    const offReconnect = onReconnect(socket, refresh); // first connect is covered by mount load()
+    return () => { for (const ev of events) socket.off(ev, refresh); offReconnect(); refresh.cancel(); };
   }, [load]);
 
   const fmtPlanDate = (dateStr) => {
