@@ -130,6 +130,7 @@ function rememberDismissal(v) {
 export function UpdateToast({ registration }) {
   const [show, setShow] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const regRef = useRef(registration);
 
   useEffect(() => {
@@ -152,7 +153,14 @@ export function UpdateToast({ registration }) {
   // a waiting worker the same way and can't drift apart.
   // Surfaces the failure instead of silently reloading into the same stale
   // bundle — see reloadWithPendingUpdate.
-  const reload = () => { setFailed(false); reloadWithPendingUpdate(regRef.current, () => setFailed(true)); };
+  // busy is never cleared on success on purpose: the page is about to reload, so
+  // the button should stay pressed and spinning right up to the moment it goes.
+  // Only a genuine failure releases it, and then the label says so.
+  const reload = () => {
+    if (busy) return;
+    setFailed(false); setBusy(true);
+    reloadWithPendingUpdate(regRef.current, () => { setBusy(false); setFailed(true); });
+  };
 
   if (!show) return null;
 
@@ -170,17 +178,16 @@ export function UpdateToast({ registration }) {
         <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
         <path d="M3 21v-5h5"/>
       </svg>
-      <span style={{ flex: 1 }}>{failed ? "Update didn't apply — try again" : "New version available"}</span>
-      <button onClick={reload} style={{
-        background: "#0EA5E9", color: "#fff", border: "none",
-        padding: "6px 14px", borderRadius: 8, fontSize: 12,
-        fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap",
-        fontFamily: "system-ui,sans-serif",
-      }}>Reload</button>
-      <button onClick={() => { rememberDismissal(regRef.current?.waiting?.scriptURL); setShow(false); }} style={{
-        background: "none", border: "none", color: "#64748B",
-        cursor: "pointer", padding: 4, lineHeight: 1,
-      }} aria-label="Dismiss">✕</button>
+      <span style={{ flex: 1 }}>
+        {busy ? "Updating…" : failed ? "Update didn't apply — try again" : "New version available"}
+      </span>
+      <button className="upd-btn" onClick={reload} disabled={busy} aria-busy={busy || undefined}>
+        {busy && <span className="dc-spinner" aria-hidden="true" />}
+        {busy ? "Updating…" : "Reload"}
+      </button>
+      <button className="upd-x" disabled={busy}
+        onClick={() => { rememberDismissal(regRef.current?.waiting?.scriptURL); setShow(false); }}
+        aria-label="Dismiss">✕</button>
     </div>
   );
 }

@@ -2490,3 +2490,51 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   .dc-chip{white-space:normal;}
   .dc-head{gap:2px 6px;}
 }
+
+/* ── Update toast actions ────────────────────────────────────────────────────
+   The Reload button gave no feedback at all on tap: no press state, no hover,
+   no busy state. Since the reload now waits for the new service worker to
+   genuinely activate (correct, but it can take a few seconds on a slow device),
+   an inert button reads as "my tap did nothing" and people tap repeatedly.
+
+   Built from a hard-offset "comic" style: solid border, square-offset shadow,
+   hover inverts fill/outline, and the press physically sinks by the shadow's
+   own depth so the button meets the surface. Scaled down from a 24px CTA to fit
+   a 12px control in a compact bar, and driven by --primary rather than a fixed
+   red — red reads as destructive, and a literal colour would ignore the four
+   themes. */
+.upd-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:7px 14px;font-size:12.5px;font-weight:700;line-height:1;
+  font-family:system-ui,sans-serif;white-space:nowrap;
+  color:#fff;background:var(--primary);
+  /* The toast is near-black (#0F172A) in every theme, so the outline and its
+     offset shadow have to be LIGHTER than the surface to read at all — a dark
+     border here is invisible, which is the trap the original red-on-white
+     version hides. A translucent white keeps the hard-edged look without
+     hard-coding a colour that fights the four themes. */
+  border:2px solid rgba(255,255,255,.92);border-radius:9px;
+  box-shadow:3px 3px 0 rgba(255,255,255,.92);
+  cursor:pointer;transition:background .18s ease,color .18s ease,
+    border-color .18s ease,box-shadow .12s ease,transform .12s ease;
+}
+/* Hover inverts: the fill drops out, the primary becomes the ink and the frame. */
+.upd-btn:hover:not(:disabled){
+  background:#fff;color:var(--primary);border-color:#fff;
+  box-shadow:3px 3px 0 var(--primary);
+}
+/* Sinks exactly the shadow's offset, so the gap closes rather than shifting. */
+.upd-btn:active:not(:disabled){box-shadow:none;transform:translate(3px,3px);}
+/* Held down while saving: the button stays visibly pressed for the whole wait,
+   which is the point — the feedback has to outlast the click. */
+.upd-btn:disabled{cursor:progress;box-shadow:none;transform:translate(3px,3px);opacity:.92;}
+
+/* The ✕ is a quiet dismiss, so it gets feedback without the raised treatment. */
+.upd-x{
+  display:inline-flex;align-items:center;justify-content:center;
+  background:none;border:none;color:#64748B;cursor:pointer;
+  padding:4px 6px;line-height:1;border-radius:7px;
+  transition:background .16s ease,color .16s ease,transform .12s ease;
+}
+.upd-x:hover{background:rgba(255,255,255,.10);color:#E2E8F0;}
+.upd-x:active{transform:translateY(1px);}
