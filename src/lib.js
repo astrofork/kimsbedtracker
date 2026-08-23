@@ -709,6 +709,13 @@ export function stopAlarm() { if (alarmTimer) { clearInterval(alarmTimer); alarm
 // ---- error handling ----
 export function friendlyError(err) {
   const msg = (err?.message ?? String(err ?? "")).trim();
+  // req() attaches the real HTTP status; use it rather than hunting for digits in
+  // the message. Matching the TEXT for "500" replaced any server message that
+  // merely contained those three characters — "IP 005003 is already admitted on
+  // bed 201B" became "Server error", so staff were told the system was broken
+  // instead of being told which bed the patient was already on. Bed names, room
+  // numbers and amounts could all trip it the same way.
+  const status = Number(err?.status) || null;
   if (!msg || msg === "Request failed")
     return { title: null, message: "Something went wrong. Please try again." };
   if (/failed to fetch|networkerror|network error|load failed/i.test(msg))
@@ -717,7 +724,10 @@ export function friendlyError(err) {
   // Login errors now arrive as plain messages from the server and fall through below.
   if (/^unauthorized$/i.test(msg))
     return { title: null, message: "Session expired. Please sign in again." };
-  if (/500|internal server error/i.test(msg))
+  // A 5xx body is a stack trace or proxy HTML, never something to show a user.
+  // The text check stays as a fallback for errors thrown without a status, but it
+  // now looks for the distinctive phrase, not a bare digit sequence.
+  if ((status && status >= 500) || /internal server error/i.test(msg))
     return { title: null, message: "Server error. Please try again in a moment." };
   // Handle "Request failed (HTTP NNN)" — fires when the server returns no JSON error body
   // (e.g. nginx 502, unknown route, proxy timeout).
