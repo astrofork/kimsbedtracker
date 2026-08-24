@@ -15,9 +15,13 @@ import ConsultantApp from "./ConsultantApp.jsx";
 import FCApp from "./FCApp.jsx";
 import PharmacyApp from "./PharmacyApp.jsx";
 import PWOApp from "./PWOApp.jsx";
+import { inject } from "@vercel/analytics";
 
 // Apply saved theme before first paint — prevents flash-of-wrong-theme.
 initTheme();
+
+// Inject Vercel Web Analytics
+inject();
 
 // Register the PWA service worker. The dev/prod URL split (and the fact that
 // push.js registers too) lives in swRegistration.js — see the note there.
