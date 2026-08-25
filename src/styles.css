@@ -1588,7 +1588,7 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .preui .pbed.tap:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .preui .pbed.st-v{border-color:color-mix(in srgb,var(--st-v) 45%,var(--line));}
 .preui .pbed.st-vr{border-color:color-mix(in srgb,var(--st-vr) 45%,var(--line));}
-.preui .pbed.st-o{border-color:var(--line);}
+.preui .pbed.st-o{border-color:color-mix(in srgb,var(--st-o) 45%,var(--line));}
 .preui .pbed.st-or{border-color:color-mix(in srgb,var(--st-or) 45%,var(--line));}
 /* Overstay — System Checkout done, patient hasn't physically left. Wins over the
    plain st-o border since it needs to read as distinctly different at a glance. */
