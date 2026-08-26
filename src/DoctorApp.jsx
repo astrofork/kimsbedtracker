@@ -396,9 +396,15 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   const occPct = s.total > 0 ? Math.round((totalOcc / s.total) * 100) : 0;
   const hour = new Date().getHours();
   const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  // Every tile counts USABLE capacity, so Occupied + Vacant + Reserved add up to
+  // Beds. Out-of-service beds are excluded from all of them (a patient cannot be
+  // admitted to one) but shown as a note under Beds rather than dropped —
+  // "99 beds / 1 out of service" keeps the fact without breaking the arithmetic.
+  const outOfService = s.outOfService || 0;
   const stats = [
     ["Blocks", me.blocks.length, "var(--ink)"], ["Wards", me.wardCount, "var(--ink)"],
-    ["Beds", s.total, "var(--ink)"], ["Occupied", totalOcc, "var(--st-o)"],
+    ["Beds", s.total, "var(--ink)", outOfService ? `${outOfService} out of service` : null],
+    ["Occupied", totalOcc, "var(--st-o)"],
     ["Vacant", s.vacant, "var(--st-v)"], ["Reserved", (s.reserved || 0) + (s.occupied_reserved || 0), "var(--st-vr)"],
   ];
 
@@ -421,8 +427,12 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
           </div>
 
           <div className="doc-statline">
-            {stats.map(([l, v, c]) => (
-              <div key={l} className="doc-stat"><div className="doc-stat-v" style={{ color: c }}>{v}</div><div className="doc-stat-l">{l}</div></div>
+            {stats.map(([l, v, c, note]) => (
+              <div key={l} className="doc-stat">
+                <div className="doc-stat-v" style={{ color: c }}>{v}</div>
+                <div className="doc-stat-l">{l}</div>
+                {note && <div className="doc-stat-note">{note}</div>}
+              </div>
             ))}
           </div>
 

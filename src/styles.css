@@ -857,6 +857,10 @@ body.hero-gone .appbar{
 .doc-stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;box-shadow:var(--shadow);}
 .doc-stat-v{font-size:20px;font-weight:800;line-height:1;letter-spacing:-.02em;}
 .doc-stat-l{font-size:9px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;margin-top:5px;}
+/* Secondary note under a stat tile — currently the out-of-service bed count.
+   Deliberately quieter and NOT uppercase, so it reads as a footnote to the
+   number above rather than competing with the tile's own label. */
+.doc-stat-note{font-size:9px;font-weight:600;color:var(--ink-3);opacity:.75;margin-top:3px;line-height:1.2;}
 
 /* Thin occupancy bar */
 .doc-bar{height:6px;border-radius:99px;background:var(--panel-2);overflow:hidden;display:flex;}
