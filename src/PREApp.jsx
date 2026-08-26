@@ -1730,7 +1730,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
               {dischargeBadge(bed.discharge_tracking)}
               {dischargeProgress(bed.discharge_tracking) && (() => {
                 const p = dischargeProgress(bed.discharge_tracking);
-                return ` · ${p.done}/${p.total} done`;
+                return ` ${p.done}/${p.total} done`;
               })()}
             </span>
           </div>
@@ -2577,7 +2577,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
               return b;
             }));
             setEditingBed(r.toWardId === ward.id ? { id: r.toBedId } : null);
-            showToast(`Transferred to ${r.toBedName}${r.toWardName ? " · " + r.toWardName : ""} ✓`);
+            showToast(`Transferred to ${r.toBedName}${r.toWardName ? ", " + r.toWardName : ""} ✓`);
           }}
         />
         {toast && <div className="toast">{toast}</div>}
@@ -2595,8 +2595,8 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
             <div className="dim" style={{ fontSize: 11.5 }}>
               {beds.length} bed{beds.length !== 1 ? "s" : ""}
               {tab === "manage" && reviewedAt
-                ? <> · <Ic d={icons.check} s={11} /> Reviewed <RelativeTime ts={reviewedAt} /></>
-                : tab === "manage" && cfg.reviewWard ? " · Not reviewed yet" : ""}
+                ? <> <Ic d={icons.check} s={11} /> Reviewed <RelativeTime ts={reviewedAt} /></>
+                : tab === "manage" && cfg.reviewWard ? " Not reviewed yet" : ""}
             </div>
           </div>
         </div>

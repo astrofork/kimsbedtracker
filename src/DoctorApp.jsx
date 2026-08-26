@@ -36,7 +36,7 @@ function OccBar({ w }) {
   const { total, on, or, vr } = occOf(w);
   const p = (n) => (total > 0 ? (n / total) * 100 : 0);
   return (
-    <div className="doc-bar" title={`${on} occupied · ${or} occ+res · ${vr} vac+res of ${total}`}>
+    <div className="doc-bar" title={`${on} occupied, ${or} occ+res, ${vr} vac+res of ${total}`}>
       <i className="seg-o"  style={{ width: `${p(on)}%` }} />
       <i className="seg-or" style={{ width: `${p(or)}%` }} />
       <i className="seg-vr" style={{ width: `${p(vr)}%` }} />
@@ -49,8 +49,10 @@ function OccBar({ w }) {
 // input keeps focus across keystrokes.
 function searchRow({ value, onChange, placeholder, select }) {
   return (
-    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-      <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+    // nowrap: the filter belongs beside the search, not under it. On a phone the
+    // wrapped version cost a whole extra row for one short control.
+    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "nowrap", alignItems: "center" }}>
+      <div style={{ position: "relative", flex: "1 1 auto", minWidth: 0 }}>
         <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
           <Ic d={icons.search} s={15} />
         </span>
@@ -89,7 +91,7 @@ function WardCard({ w, i = 0, onOpen, note }) {
       onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && w.operational !== false && onOpen()}>
       <div className="row between" style={{ alignItems: "flex-start" }}>
         <div style={{ minWidth: 0 }}>
-          {(w.block_name || w.floor_name) && <div className="doc-ward-loc">{[w.block_name, w.floor_name].filter(Boolean).join(" · ")}</div>}
+          {(w.block_name || w.floor_name) && <div className="doc-ward-loc">{[w.block_name, w.floor_name].filter(Boolean).join(" ")}</div>}
           <div className="doc-ward-name">{w.name}</div>
           <div className="doc-ward-rev">
             {note !== undefined
@@ -246,7 +248,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
   const totals = data.wards.reduce((a, w) => {
     const o = occOf(w); a.total += o.total; a.occ += o.occ; return a;
   }, { total: 0, occ: 0 });
-  const blockPct = totals.total > 0 ? Math.round((totals.occ / totals.total) * 100) : 0;
 
   return (
     <div className="slide-up">
@@ -256,10 +257,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
           <BackBtn onClick={onBack} />
           <div style={{ minWidth: 0 }}>
             <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
-            <div className="dim" style={{ fontSize: 11.5 }}>
-              {data.wards.length} wards · {totals.total} beds · {blockPct}% occupied
-              {data.reviewedAt ? <> · reviewed <RelativeTime ts={data.reviewedAt} /></> : ""}
-            </div>
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
@@ -312,8 +309,8 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
             select: data.wards.length > 1 && (
               <select className="field" aria-label="Filter by ward" value={wardFilter}
                 onChange={(e) => setWardFilter(e.target.value)}
-                style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
-                <option value="all">All wards ({data.wards.length})</option>
+                style={{ width: "auto", flex: "0 0 auto", maxWidth: 124, fontWeight: 600 }}>
+                <option value="all">All ({data.wards.length})</option>
                 {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
               </select>
             ),
@@ -452,7 +449,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
             <div className="doc-hero-text">
               <div className="doc-hello">{greet},</div>
               <div className="doc-name">{user.name || user.username || "Doctor"}</div>
-              <div className="doc-sub"><span className="doc-live">Live</span> · {me.wardCount} wards across {me.blocks.length} block{me.blocks.length === 1 ? "" : "s"}</div>
+              <div className="doc-sub"><span className="doc-live">Live</span> {me.wardCount} wards across {me.blocks.length} block{me.blocks.length === 1 ? "" : "s"}</div>
             </div>
             {/* Decorative only. Inline SVG rather than a background image so it
                 inherits a theme token — a flat asset would keep its own colours
@@ -494,8 +491,8 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
         select: me.blocks.length > 1 && (
           <select className="field" aria-label="Filter by block" value={blockFilter}
             onChange={(e) => setBlockFilter(e.target.value)}
-            style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
-            <option value="all">All blocks ({me.blocks.length})</option>
+            style={{ width: "auto", flex: "0 0 auto", maxWidth: 124, fontWeight: 600 }}>
+            <option value="all">All ({me.blocks.length})</option>
             {me.blocks.map((b) => <option key={b.id} value={String(b.id)}>{b.name}</option>)}
           </select>
         ),
@@ -532,7 +529,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                 <WardCard key={w.id} w={w} i={i}
                   note={
                     isIpSearch && ipBed
-                      ? <><Ic d={icons.bed} s={11} /> Bed {ipBed.bed_name} · IP {q} · {w._blockName}</>
+                      ? <><Ic d={icons.bed} s={11} /> Bed {ipBed.bed_name}, IP {q}, {w._blockName}</>
                       : <span style={{ color: "var(--ink-3)" }}>{w._blockName}</span>
                   }
                   onOpen={() => onOpenWard({ ...w, _search: isIpSearch || (nameWardIds.has(w.id) && !w.name?.toLowerCase().includes(nameQuery)) ? q : undefined })} />
@@ -563,7 +560,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                     <div className="doc-badge"><Ic d={icons.stethoscope} s={21} /></div>
                     <div className="doc-block-body">
                       <div className="doc-block-name">{b.name}</div>
-                      <div className="doc-block-meta">{b.ward_count} ward{b.ward_count === 1 ? "" : "s"} · {b.total_beds} beds</div>
+                      <div className="doc-block-meta">{b.ward_count} ward{b.ward_count === 1 ? "" : "s"}, {b.total_beds} beds</div>
                     </div>
                     <Ic d={icons.chevron} s={18} style={{ color: "var(--ink-3)" }} />
                   </div>
@@ -594,14 +591,14 @@ function ActivityView() {
             <div key={r.id} className="doc-tl-item">
               <span className="doc-tl-dot" style={{ background: c }} />
               <div className="doc-tl-top">
-                <div className="doc-tl-bed">{r.bed_name} <span className="dim" style={{ fontWeight: 500, fontSize: 12 }}>· {r.ward_name || "—"}</span></div>
+                <div className="doc-tl-bed">{r.bed_name} <span className="dim" style={{ fontWeight: 500, fontSize: 12 }}>{r.ward_name || "—"}</span></div>
                 <div className="doc-tl-time" title={fmtDateTime(r.created_at)}><RelativeTime ts={r.created_at} /></div>
               </div>
               <div className="doc-trans">
                 <span className="doc-pill" style={{ background: "var(--panel-2)", color: "var(--ink-3)" }}>{bedStateShort(r.old_physical, r.old_reservation)}</span>
                 <Ic d={icons.chevron} s={12} style={{ color: "var(--ink-3)" }} />
                 <span className="doc-pill" style={{ background: bedStateBg(r.new_physical, r.new_reservation), color: c }}>{bedStateShort(r.new_physical, r.new_reservation)}</span>
-                {r.block_name ? <span className="dim" style={{ fontSize: 11 }}>· {r.block_name}</span> : null}
+                {r.block_name ? <span className="dim" style={{ fontSize: 11 }}>{r.block_name}</span> : null}
               </div>
             </div>
           );
