@@ -401,11 +401,20 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // admitted to one) but shown as a note under Beds rather than dropped —
   // "99 beds / 1 out of service" keeps the fact without breaking the arithmetic.
   const outOfService = s.outOfService || 0;
+  // Lounge places are kept OUT of the ward tiles — a place in the discharge
+  // lounge is not a bed anyone can be admitted to, so folding it into capacity
+  // would misstate what is available. But the people waiting there are real
+  // patients, so they get their own tile rather than disappearing. Omitted
+  // entirely when this doctor has no lounge ward, so nobody reads a bare 0 as
+  // "the lounge is empty" when the truth is "you cannot see the lounge".
+  const lounge = me.lounge || null;
   const stats = [
     ["Blocks", me.blocks.length, "var(--ink)"], ["Wards", me.wardCount, "var(--ink)"],
     ["Beds", s.total, "var(--ink)", outOfService ? `${outOfService} out of service` : null],
     ["Occupied", totalOcc, "var(--st-o)"],
     ["Vacant", s.vacant, "var(--st-v)"], ["Reserved", (s.reserved || 0) + (s.occupied_reserved || 0), "var(--st-vr)"],
+    ...(lounge ? [["In Lounge", lounge.patients, "var(--st-dl, var(--ink))",
+                   lounge.free ? `${lounge.free} free` : "none free"]] : []),
   ];
 
   return (
