@@ -975,9 +975,10 @@ body.hero-gone .appbar{
    so on a phone the whole block scrolls sideways instead. Vertical space is the
    scarce resource on a phone; horizontal space is not.
 
-   ONE scroller wraps both rows. Four columns each — seven capacity tiles fill
-   two rows of four, the four discharge counters fill one — so the rows are the
-   same width and stay in step under a single gesture. */
+   ONE scroller wraps both rows, and both are laid out exactly as they are on a
+   monitor — seven across the top, four stretched to that same width below — so
+   the phone shows the same arrangement rather than a rearranged one. A single
+   gesture moves both, and sharing a min-width is what keeps them in step. */
 @media (max-width:640px){
   .doc-tilescroll{
     overflow-x:auto;
@@ -991,15 +992,18 @@ body.hero-gone .appbar{
   }
   .doc-tilescroll::-webkit-scrollbar{display:none;}
 
+  /* Exactly the desktop proportions, just wider than the viewport: seven
+     capacity tiles on one line, four discharge counters stretched across that
+     same width below. Two rows, one scroll — the phone sees the same layout a
+     monitor does rather than a rearranged one. */
   .doc-tilescroll .doc-statline,
   .doc-tilescroll .doc-statline--wide{
-    min-width:min(560px, 148vw);
-    grid-template-columns:repeat(4,1fr);
-    /* Equal rows, so a tile in row two lines its figure up with row one. */
-    grid-auto-rows:1fr;
-    margin-bottom:8px;
+    min-width:700px;
+    grid-auto-flow:row;
+    grid-auto-rows:auto;
   }
-  .doc-tilescroll .doc-statline--wide{margin-bottom:0;}
+  .doc-tilescroll .doc-statline{grid-template-columns:repeat(7,1fr);margin-bottom:8px;}
+  .doc-tilescroll .doc-statline--wide{grid-template-columns:repeat(4,1fr);margin-bottom:0;}
   .doc-stat{scroll-snap-align:start;}
   /* The press animation is a pointer affordance; on touch it only fights the
      scroll gesture. */
