@@ -581,7 +581,6 @@ export default function DoctorApp({ user, onLogout }) {
   const [me,          setMe]          = useState(null);
   const [loadError,   setLoadError]   = useState(null);
   const [toast,       setToast]       = useState("");
-  const [lastSync,    setLastSync]    = useState(null);
   const [blockId,     setBlockId]     = useState(null);
   // Opening a block replaces the "My Doctor Blocks" home grid with BlockDetail
   // entirely — same swap pattern as ward↔WardPage below, same fix.
@@ -623,7 +622,7 @@ export default function DoctorApp({ user, onLogout }) {
 
   const load = useCallback(async () => {
     setLoadError(null);
-    try { const data = await api.doctorMe(); setMe(data); setLastSync(new Date()); }
+    try { const data = await api.doctorMe(); setMe(data); }
     catch (e) { const msg = e?.message ?? ""; if (msg === "Unauthorized") return; setLoadError("Unable to connect to server"); }
   }, []);
   loadRef.current = load;
@@ -673,7 +672,7 @@ export default function DoctorApp({ user, onLogout }) {
     // patchBedDetail directly instead, no refetch needed.
     let t = null;
     const refetchBeds = () => { clearTimeout(t); t = setTimeout(() => loadBedDetails(), 400); };
-    const onWardSummary = coalesce(() => { docStaleRef.current = false; loadRef.current(); setReloadKey((k) => k + 1); setLastSync(new Date()); });
+    const onWardSummary = coalesce(() => { docStaleRef.current = false; loadRef.current(); setReloadKey((k) => k + 1); });
     // Skipped while a ward is open: WardPage replaces the block/ward view and
     // loads its own beds, so /doctor/me's summary is off screen. Remember the
     // refresh and replay it on the way out. The bed-details list is NOT gated —
@@ -767,13 +766,6 @@ export default function DoctorApp({ user, onLogout }) {
           showSearch={tab === "entry"} onOpenWard={openWard} ipIndex={ipIndex} bedRows={bedDetails}
           search={entrySearch} setSearch={setEntrySearch}
           blockFilter={entryBlockFilter} setBlockFilter={setEntryBlockFilter} />
-      )}
-
-      {lastSync && !ward && !blockId && (
-        <div className="dim" style={{ fontSize: 11, textAlign: "center", marginTop: 20, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--st-v)" }} />
-          Updates instantly · last sync {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-        </div>
       )}
 
       {toast && <div className="toast">{toast}</div>}
