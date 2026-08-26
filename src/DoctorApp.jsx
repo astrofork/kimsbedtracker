@@ -411,25 +411,19 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // [label, value, accent, note, icon]. The accent is always a THEME TOKEN, never
   // a literal colour — it drives the number, the icon and the underline, so a
   // hard-coded value would look wrong the moment the user switches theme.
-  // [label, value, accent, note, icon, pct].
-  //
-  // pct draws a share-of-total bar, and is only supplied where a share actually
-  // MEANS something. "4 blocks" has no denominator, so it gets no bar rather
-  // than a decorative one — a progress bar that does not measure anything is a
-  // lie the eye believes.
-  const pctOf = (n, d) => (d > 0 ? Math.round((n / d) * 100) : null);
+  // [label, value, accent, note, icon]. The accent is always a THEME TOKEN, never
+  // a literal — it drives the badge and the watermark, so a hard-coded value
+  // would look wrong the moment the user switches theme.
   const reserved = (s.reserved || 0) + (s.occupied_reserved || 0);
   const stats = [
-    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building", null],
-    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid", null],
-    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed",
-      pctOf(s.total, s.total + outOfService)],
-    ["Occupied", totalOcc, "var(--st-o)", null, "user", pctOf(totalOcc, s.total)],
-    ["Vacant", s.vacant, "var(--st-v)", null, "check", pctOf(s.vacant, s.total)],
-    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark", pctOf(reserved, s.total)],
+    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building"],
+    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid"],
+    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed"],
+    ["Occupied", totalOcc, "var(--st-o)", null, "user"],
+    ["Vacant", s.vacant, "var(--st-v)", null, "check"],
+    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark"],
     ...(lounge ? [["In Lounge", lounge.patients, "var(--doc-a-lounge)",
-                   lounge.free ? `${lounge.free} free` : "none free", "clock",
-                   pctOf(lounge.patients, lounge.patients + lounge.free)]] : []),
+                   lounge.free ? `${lounge.free} free` : "none free", "clock"]] : []),
   ];
 
   return (
@@ -470,24 +464,21 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
           </div>
 
           <div className="doc-statline">
-            {stats.map(([l, v, c, note, ic, pct]) => (
-              // --accent cascades to the badge, the value and the bar, so one
-              // token keeps all three in step across every theme.
+            {stats.map(([l, v, c, note, ic]) => (
+              // --accent cascades to the badge and the watermark, so one token
+              // keeps them in step across every theme.
               <div key={l} className="doc-stat" style={{ "--accent": c }}>
                 <span className="doc-stat-head">
                   <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={13} /></span>
                   <span className="doc-stat-l">{l}</span>
                 </span>
-                <span className="doc-stat-row">
-                  <span className="doc-stat-v">{v}</span>
-                  {pct != null && <span className="doc-stat-pct">{pct}%</span>}
-                </span>
+                <span className="doc-stat-row"><span className="doc-stat-v">{v}</span></span>
                 {note && <span className="doc-stat-note">{note}</span>}
-                {pct != null && (
-                  <span className="doc-stat-range" aria-hidden="true">
-                    <span className="doc-stat-fill" style={{ width: `${Math.min(100, pct)}%` }} />
-                  </span>
-                )}
+                {/* Oversized, very faint copy of the tile's own icon. Gives the
+                    card some weight now the bar is gone, without adding a second
+                    thing to read — it repeats the badge rather than saying
+                    anything new, which is what lets it sit at 7% opacity. */}
+                <span className="doc-stat-art" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={64} /></span>
               </div>
             ))}
           </div>

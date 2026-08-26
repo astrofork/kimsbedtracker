@@ -55,6 +55,7 @@ export default function DischargeMiniWidget({ rich = false }) {
               <span className="doc-stat-l">{label.toUpperCase()}</span>
             </span>
             <span className="doc-stat-row"><span className="doc-stat-v">{counts[key]}</span></span>
+            <span className="doc-stat-art" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={64} /></span>
           </div>
         ))}
       </div>

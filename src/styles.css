@@ -889,16 +889,20 @@ body.hero-gone .appbar{
 .doc-stat{
   --accent:var(--primary);
   position:relative;overflow:hidden;
-  display:flex;flex-direction:column;gap:5px;
+  display:flex;flex-direction:column;
+  /* A fixed floor is what actually lines the numbers up. Without it a tile
+     carrying a note grew taller than its neighbours and its figure sat lower,
+     so the row read as a ragged line rather than a set. */
+  min-height:88px;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  padding:10px 11px 11px;text-align:left;box-shadow:var(--shadow);
+  padding:10px 11px;text-align:left;box-shadow:var(--shadow);
 }
-.doc-stat-head{display:flex;align-items:center;gap:6px;min-width:0;}
+.doc-stat-head{display:flex;align-items:flex-start;gap:6px;min-width:0;position:relative;z-index:1;}
 /* Solid accent disc with a white glyph. Deliberately not a tint: at this size a
    14% wash reads as grey, and the disc is the only thing distinguishing one tile
-   from the next now that the underline is gone. */
+   from the next. */
 .doc-stat-ic{
-  flex:none;width:22px;height:22px;border-radius:9999px;
+  flex:none;width:22px;height:22px;border-radius:9999px;margin-top:1px;
   display:grid;place-items:center;
   color:#fff;background:var(--accent);
 }
@@ -909,28 +913,26 @@ body.hero-gone .appbar{
   font-size:8.5px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;
   text-transform:uppercase;line-height:1.25;
 }
-/* Top-align so a two-line label does not push its badge off-centre from the
-   single-line badges beside it. */
-.doc-stat-head{align-items:flex-start;}
-.doc-stat-ic{margin-top:1px;}
-/* Bars and notes sit at the bottom of the tile, so a tile without them still
-   lines its number up with the ones that have them. */
-.doc-stat-row{margin-top:auto;}
-.doc-stat-row{display:flex;align-items:baseline;justify-content:space-between;gap:6px;}
-.doc-stat-v{font-size:22px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--ink);}
-/* The share sits beside the number, in the accent, so the bar below has a value
-   attached to it rather than being a shape on its own. */
-.doc-stat-pct{font-size:11px;font-weight:700;color:var(--accent);line-height:1;}
-.doc-stat-note{font-size:9px;font-weight:600;color:var(--ink-3);opacity:.75;line-height:1.2;}
-/* Only rendered where a share genuinely exists — see the pct note in DoctorApp. */
-.doc-stat-range{
-  position:relative;width:100%;height:4px;border-radius:4px;margin-top:1px;
-  background:color-mix(in srgb, var(--ink-3) 22%, transparent);
+/* The figure is centred in whatever space the label leaves, so every tile in the
+   row puts its number in the same place. */
+.doc-stat-row{flex:1;display:grid;place-items:center;position:relative;z-index:1;}
+.doc-stat-v{font-size:24px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--ink);}
+/* Taken out of flow on purpose: in flow it pushed the figure off-centre on the
+   two tiles that carry one, which is the misalignment this layout exists to
+   remove. */
+.doc-stat-note{
+  position:absolute;left:11px;right:11px;bottom:7px;z-index:1;
+  font-size:9px;font-weight:600;color:var(--ink-3);opacity:.75;
+  line-height:1.2;text-align:center;
 }
-.doc-stat-fill{
-  position:absolute;top:0;left:0;height:100%;border-radius:4px;
-  background:var(--accent);transition:width .3s ease;
+/* Watermark. Bottom-right, bleeding past the corner so it reads as texture
+   rather than a second icon. Faint enough that it never competes with the
+   figure, and lifted slightly on dark panels where a 7% wash disappears. */
+.doc-stat-art{
+  position:absolute;right:-12px;bottom:-14px;z-index:0;pointer-events:none;
+  color:var(--accent);opacity:.07;line-height:0;
 }
+[data-theme="dark"] .doc-stat-art{opacity:.12;}
 
 /* Illustration in the hero. Deliberately faint and behind the text: it is
    atmosphere, not information, and must never compete with the greeting or the
