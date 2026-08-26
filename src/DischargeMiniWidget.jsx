@@ -44,9 +44,8 @@ export default function DischargeMiniWidget({ rich = false }) {
 
   if (!counts) return null;
 
-  // Own grid, own track size: four tiles across the same width the seven above
-  // occupy, so this row fills its line instead of leaving three-quarters of it
-  // empty. Same tile styling, so the two rows still read as one family.
+  // Its own row, and its own grid: four tiles stretched across the same width the
+  // seven capacity tiles occupy above.
   if (rich) {
     return (
       <div className="doc-statline doc-statline--wide">

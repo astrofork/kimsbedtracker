@@ -550,3 +550,47 @@ export function StatusBar({ v, r, o, or: or_ = 0, total }) {
     </div>
   );
 }
+
+/** Horizontal strip with a drawn scroll-position indicator.
+ *
+ *  The native scrollbar is deliberately not used: on touch it fades out, which is
+ *  precisely when a reader needs to be told the row continues off-screen. The bar
+ *  is drawn from --primary so it follows the theme like everything around it.
+ *
+ *  Rendered only when the content actually overflows — a full-width bar under a
+ *  row that fits is a control for nothing. */
+export function ScrollStrip({ className, children }) {
+  const ref = useRef(null);
+  const [bar, setBar] = useState(null); // { w, x } in %, or null when it fits
+
+  const measure = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const { scrollWidth, clientWidth, scrollLeft } = el;
+    if (scrollWidth <= clientWidth + 2) { setBar(null); return; }
+    const w = (clientWidth / scrollWidth) * 100;
+    const x = (scrollLeft / (scrollWidth - clientWidth)) * (100 - w);
+    setBar({ w, x });
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    // Catches the width changing for any reason — rotation, a tile appearing,
+    // the sidebar collapsing — without polling for it.
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", measure); ro.disconnect(); };
+  }, [measure, children]);
+
+  return (
+    <>
+      <div className={className} ref={ref}>{children}</div>
+      <div className="doc-scrollbar" aria-hidden="true">
+        {bar && <span style={{ width: `${bar.w}%`, left: `${bar.x}%` }} />}
+      </div>
+    </>
+  );
+}

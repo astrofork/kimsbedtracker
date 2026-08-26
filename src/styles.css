@@ -878,45 +878,46 @@ body.hero-gone .appbar{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(94px,1fr));
   gap:8px;margin-bottom:10px;
 }
-/* Fewer tiles, so a larger minimum keeps them filling the row rather than
-   sitting narrow with the rest of the line empty. */
+/* Seven explicit columns on a desktop, so the capacity row is exactly seven
+   cards wide. */
+@media (min-width:1100px){.doc-statline{grid-template-columns:repeat(7,1fr);}}
+/* The discharge row stretches across that same full width — four cards sharing
+   the space seven occupy above, rather than sitting narrow with the rest of the
+   line empty. */
 .doc-statline--wide{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px;}
+@media (min-width:1100px){.doc-statline--wide{grid-template-columns:repeat(4,1fr);}}
 
-/* Each tile carries its own --accent, set inline from a theme token (see the
-   stats array in DoctorApp). That one value drives the badge, the number and the
-   bar, so all three stay in step — and because it is a token rather than a
-   literal, the tile follows whichever of the four themes is active. */
+/* Each tile carries its own --accent, set inline from a theme token. That one
+   value drives the badge and the value together, and because it is a token
+   rather than a literal the tile follows whichever theme is active. */
 .doc-stat{
   --accent:var(--primary);
   position:relative;overflow:hidden;
   display:flex;flex-direction:column;
-  /* A fixed floor is what actually lines the numbers up. Without it a tile
-     carrying a note grew taller than its neighbours and its figure sat lower,
-     so the row read as a ragged line rather than a set. */
+  /* A fixed floor is what lines the numbers up: without it a tile with a
+     two-line label grows taller than its neighbours and its figure sits lower,
+     so the row reads as a ragged line rather than a set. */
   min-height:88px;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:10px 11px;text-align:left;box-shadow:var(--shadow);
   transition:transform .4s ease, box-shadow .4s ease;
 }
 /* Press-in feel: the card shrinks slightly on hover and further on click, while
-   the illustration grows a touch — the counter-motion is what makes it read as
-   depth rather than the whole tile just getting smaller. */
+   the illustration grows a touch — the counter-motion is what reads as depth
+   rather than the tile simply getting smaller. */
 .doc-stat:hover{transform:scale(.97);box-shadow:var(--shadow-md);}
 .doc-stat:hover .doc-stat-art{transform:scale(1.08);}
 .doc-stat:active{transform:scale(.94);}
-/* Honour a reduced-motion preference: these tiles are ambient, and a scale
-   animation on eleven of them at once is exactly what that setting is for. */
+/* Ambient tiles; a scale animation on eleven of them at once is exactly what
+   this preference exists for. */
 @media (prefers-reduced-motion:reduce){
   .doc-stat,.doc-stat-art{transition:none;}
   .doc-stat:hover,.doc-stat:active{transform:none;}
   .doc-stat:hover .doc-stat-art{transform:none;}
 }
-/* Centred, so a label that wraps to two lines stays balanced against its badge
-   instead of the badge sitting against the first line. */
 .doc-stat-head{display:flex;align-items:center;gap:7px;min-width:0;position:relative;z-index:1;}
 /* Solid accent disc with a white glyph. Deliberately not a tint: at this size a
-   14% wash reads as grey, and the disc is the only thing distinguishing one tile
-   from the next. */
+   14% wash reads as grey. */
 .doc-stat-ic{
   flex:none;width:24px;height:24px;border-radius:9999px;
   display:grid;place-items:center;
@@ -924,46 +925,88 @@ body.hero-gone .appbar{
 }
 /* Wraps rather than truncating. "PLANNED TOMORROW" clipped to "PLANNED TO..." is
    indistinguishable from "PLANNED TODAY", so an ellipsis here does not just look
-   untidy — it makes two different tiles read as the same one. */
+   untidy — it makes two different tiles read as the same one.
+   The min-height reserves two lines on every tile, so a one-line label leaves the
+   same space below it as a two-line one and the figures stay on a shared
+   baseline. */
 .doc-stat-l{
   font-size:9px;font-weight:700;color:var(--ink-2);letter-spacing:.03em;
-  text-transform:uppercase;line-height:1.2;
+  text-transform:uppercase;line-height:1.2;min-height:2.4em;
+  display:flex;align-items:center;
 }
 /* The figure is centred in whatever space the label leaves, so every tile in the
    row puts its number in the same place. */
 .doc-stat-row{flex:1;display:grid;place-items:center;position:relative;z-index:1;}
 .doc-stat-v{font-size:24px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--ink);}
-/* Taken out of flow on purpose: in flow it pushed the figure off-centre on the
-   two tiles that carry one, which is the misalignment this layout exists to
-   remove. */
-/* Watermark. Bottom-right, bleeding past the corner so it reads as texture
-   rather than a second element. */
-.doc-stat-art{
-  position:absolute;right:-6px;bottom:-6px;z-index:0;pointer-events:none;
-  width:78px;height:56px;
-  background-repeat:no-repeat;background-position:right bottom;background-size:contain;
-  opacity:.7;transition:transform .4s ease, opacity .4s ease;
-}
-/* Dark mode swaps the ASSET rather than filtering the light one. Dimming and
+
+/* Dark mode swaps the ASSET rather than filtering the light one: dimming and
    desaturating a pale-mint illustration still leaves a washed-out grey smudge —
    the art has to be drawn for a dark panel, not corrected towards one. Because
-   the swap happens in CSS, only the active theme's images are ever fetched. */
-/* The dark cut is drawn dark, so it needs MORE opacity to register on a dark
-   panel, not less — the instinct to dim art in dark mode is exactly backwards
-   once the art is drawn for that background. */
-[data-theme="dark"] .doc-stat-art{opacity:1;}
-
+   the swap is in CSS, only the active theme's images are ever fetched. */
 .art-hospital{background-image:url(/art/hospital.webp);}
-.art-chart{background-image:url(/art/chart.webp);}
-.art-clipboard{background-image:url(/art/clipboard.webp);}
 .art-calendar{background-image:url(/art/calendar.webp);}
+.art-clipboard{background-image:url(/art/clipboard.webp);}
+.art-chart{background-image:url(/art/chart.webp);}
 .art-shield{background-image:url(/art/shield.webp);}
 
 [data-theme="dark"] .art-hospital{background-image:url(/art/hospital-dark.webp);}
-[data-theme="dark"] .art-chart{background-image:url(/art/chart-dark.webp);}
-[data-theme="dark"] .art-clipboard{background-image:url(/art/clipboard-dark.webp);}
 [data-theme="dark"] .art-calendar{background-image:url(/art/calendar-dark.webp);}
+[data-theme="dark"] .art-clipboard{background-image:url(/art/clipboard-dark.webp);}
+[data-theme="dark"] .art-chart{background-image:url(/art/chart-dark.webp);}
 [data-theme="dark"] .art-shield{background-image:url(/art/shield-dark.webp);}
+
+/* ── Phone ────────────────────────────────────────────────────────────────────
+   Eleven tiles stacked five rows deep push everything below them off the screen,
+   so on a phone the whole block scrolls sideways instead. Vertical space is the
+   scarce resource on a phone; horizontal space is not.
+
+   ONE scroller wraps both rows. Four columns each — seven capacity tiles fill
+   two rows of four, the four discharge counters fill one — so the rows are the
+   same width and stay in step under a single gesture. */
+@media (max-width:640px){
+  .doc-tilescroll{
+    overflow-x:auto;
+    /* Stops a sideways flick from dragging the whole page once the strip reaches
+       its end — the most annoying failure of a scroller inside a scrolling page. */
+    overscroll-behavior-x:contain;
+    scroll-snap-type:x proximity;
+    /* Native bar hidden: it fades out on touch, which is exactly when the reader
+       needs telling there is more to the right. The drawn indicator replaces it. */
+    scrollbar-width:none;
+  }
+  .doc-tilescroll::-webkit-scrollbar{display:none;}
+
+  .doc-tilescroll .doc-statline,
+  .doc-tilescroll .doc-statline--wide{
+    min-width:min(560px, 148vw);
+    grid-template-columns:repeat(4,1fr);
+    /* Equal rows, so a tile in row two lines its figure up with row one. */
+    grid-auto-rows:1fr;
+    margin-bottom:8px;
+  }
+  .doc-tilescroll .doc-statline--wide{margin-bottom:0;}
+  .doc-stat{scroll-snap-align:start;}
+  /* The press animation is a pointer affordance; on touch it only fights the
+     scroll gesture. */
+  .doc-stat:hover{transform:none;box-shadow:var(--shadow);}
+  .doc-stat:hover .doc-stat-art{transform:none;}
+}
+
+/* Scroll position indicator. Hidden at pointer widths, where the strip does not
+   scroll and the bar would be a control for nothing. */
+.doc-scrollbar{display:none;}
+@media (max-width:640px){
+  .doc-scrollbar{
+    display:block;position:relative;height:3px;border-radius:99px;
+    background:color-mix(in srgb, var(--ink-3) 20%, transparent);
+    margin:0 0 12px;overflow:hidden;
+  }
+  .doc-scrollbar span{
+    position:absolute;top:0;bottom:0;border-radius:99px;
+    background:var(--primary);
+    transition:left .08s linear;
+  }
+}
 
 /* Illustration in the hero. Deliberately faint and behind the text: it is
    atmosphere, not information, and must never compete with the greeting or the

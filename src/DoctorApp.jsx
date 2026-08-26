@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { api, toastErr, getSocket, onReconnect, coalesce, fmtDateTime, getDoctorBlock, setDoctorBlock } from "./lib.js";
 import { RelativeTime } from "./relativeClock.jsx";
-import { Ic, icons, useScrollRestore } from "./ui.jsx";
+import { Ic, icons, useScrollRestore, ScrollStrip } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
 import { bedStateColor, normalizeQuery, wardIdsMatchingPatientName } from "./bedUtils.js";
 import { WardPage, ProfileThemeRow, BackBtn } from "./PREApp.jsx";
@@ -461,6 +461,10 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
             <span className="doc-hero-art art-hospital" aria-hidden="true" />
           </div>
 
+          {/* ONE scroller around both rows: they are two rows of the same strip,
+              so a single gesture should move both. Two scrollers would drift out
+              of alignment the moment either one was nudged. */}
+          <ScrollStrip className="doc-tilescroll">
           <div className="doc-statline">
             {stats.map(([l, v, c, , ic]) => (
               // --accent cascades to the badge and the icon watermark, so one
@@ -478,12 +482,8 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
               </div>
             ))}
           </div>
-
-          {/* Its own row: four discharge counters, deliberately separate from the
-              seven capacity tiles above. They answer a different question — what
-              is happening today, not what the wards hold — so they read better as
-              their own line than mixed into the same run of tiles. */}
           <DischargeMiniWidget rich />
+          </ScrollStrip>
         </>
       )}
 
