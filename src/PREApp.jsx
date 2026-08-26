@@ -2424,10 +2424,13 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           <option key={o.key} value={o.key}>{o.label} ({fc[o.key] ?? fc.ALL})</option>
         ))}
       </select>
-      {/* Jump straight to one bed — opens the bed's edit page. */}
+      {/* Jump straight to one bed — opens the bed's edit page. }
+            Styled as an ACTION, not a form field: beside the bed filter in identical
+            styling, two controls that looked the same did different things — one
+            narrows what you see, the other navigates away from it. */}
       {sortedBeds.length > 1 && (
         <select
-          className="field field-select"
+          className="field field-select field-jump"
           aria-label="Go to bed"
           value=""
           onChange={(e) => {
@@ -2438,7 +2441,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           }}
           style={{ width: "auto", flex: "0 1 auto", maxWidth: 150, fontWeight: 600 }}
         >
-          <option value="">Go to bed…</option>
+          <option value="">Open bed</option>
           {sortedBeds.map((b) => <option key={b.id} value={String(b.id)}>{b.bed_name}</option>)}
         </select>
       )}
@@ -2605,7 +2608,10 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
             <button className="btn btn-ghost ward-review-btn"
               disabled={reviewing || inCooldown} onClick={reviewWard}
               title={inCooldown ? `Available again in ${Math.ceil(cooldownMsLeft / 60000)}m` : "No changes needed — mark this ward reviewed"}>
-              {reviewing ? "…" : inCooldown ? `${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}
+              {/* "Wait 3m", not a bare "3m": alone the number read as an unlabelled
+                  chip beside the ward name, and it repeated the "Reviewed 3m ago"
+                  line directly beneath it. */}
+              {reviewing ? "…" : inCooldown ? `Wait ${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}
             </button>
           )}
         </div>
@@ -2629,6 +2635,8 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         <>
           {!firstLoadPending && beds.length > 0 && searchBar}
           {firstLoadPending ? spinner : beds.length === 0 ? emptyState : <BedGrid clickable />}
+            {/* Summary at the BOTTOM, matching the Discharges tab — the counters
+                summarise the grid above them, so they read as its footer. */}
           {!firstLoadPending && beds.length > 0 && summaryStrip}
         </>
       )}

@@ -234,7 +234,49 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
 
   return (
     <div className="slide-up">
-      {/* Counters + filter */}
+
+        {/* Its own row, not a fifth cell in the counter grid. As a grid cell it
+            landed alone on a third row filling about a third of it, reading as a
+            stat that had lost its number rather than as a control. */}
+        <div className="row between" style={{ gap: 8, marginBottom: 14 }}>
+          <span className="dim" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>
+            Showing
+          </span>
+          <select className="field" aria-label="Filter discharges" value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ width: "auto", flex: "0 0 auto", maxWidth: 190, fontWeight: 600 }}>
+            <option value="ALL">All</option>
+            <option value="PLANNED">Planned only</option>
+            <option value="RUNNING">In progress only</option>
+            <option value="DELAYED">Delayed only</option>
+          </select>
+        </div>
+
+      {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
+      {rows === null && !error && (
+        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
+      )}
+      {rows && shown.length === 0 && (
+        <div className="card empty" style={{ padding: 28 }}>
+          <Ic d={icons.clipboard} s={28} />
+          <div style={{ marginTop: 10, fontWeight: 700, fontSize: 14 }}>No active discharges</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            Planned and in-progress discharges across your wards appear here.
+          </div>
+        </div>
+      )}
+
+      {rows && shown.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {shown.map((row) => (
+            <DischargeCard key={row.admission_id} row={row}
+              onOpen={() => { saveScroll(); setOpenBed({ id: row.bed_id, bed_name: row.bed_name, ward_id: row.ward_id }); }} />
+          ))}
+        </div>
+      )}
+        {/* Counters at the BOTTOM, matching the Manage tab — they summarise the
+            list above them, so they read as its footer rather than a header
+            the reader has to scroll past to reach the discharges. */}
       <div className="stat-grid" style={{ marginBottom: 14 }}>
         <div className="stat">
           <div className="row" style={{ gap: 10 }}>
@@ -269,38 +311,7 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
           </div>
           <div className="l">DELAYED</div>
         </div>
-        <div className="stat" style={{ justifyContent: "center" }}>
-          <select className="field" aria-label="Filter discharges" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ fontWeight: 600 }}>
-            <option value="ALL">All</option>
-            <option value="PLANNED">Planned only</option>
-            <option value="RUNNING">In progress only</option>
-            <option value="DELAYED">Delayed only</option>
-          </select>
         </div>
-      </div>
-
-      {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
-      {rows === null && !error && (
-        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
-      )}
-      {rows && shown.length === 0 && (
-        <div className="card empty" style={{ padding: 28 }}>
-          <Ic d={icons.clipboard} s={28} />
-          <div style={{ marginTop: 10, fontWeight: 700, fontSize: 14 }}>No active discharges</div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-            Planned and in-progress discharges across your wards appear here.
-          </div>
-        </div>
-      )}
-
-      {rows && shown.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {shown.map((row) => (
-            <DischargeCard key={row.admission_id} row={row}
-              onOpen={() => { saveScroll(); setOpenBed({ id: row.bed_id, bed_name: row.bed_name, ward_id: row.ward_id }); }} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -2725,3 +2725,14 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 }
 .upd-x:hover{background:rgba(255,255,255,.10);color:#E2E8F0;}
 .upd-x:active{transform:translateY(1px);}
+
+/* A select that NAVIGATES, not one that filters. It sits beside the bed filter,
+   and in identical styling the two read as a pair of filters — so this one takes
+   the accent colour and a tinted ground, the same language buttons use, while
+   the filter keeps the plain field look. */
+.field-jump{
+  color:var(--primary);
+  border-color:color-mix(in srgb, var(--primary) 35%, var(--line));
+  background:color-mix(in srgb, var(--primary) 7%, transparent);
+}
+.field-jump:hover{background:color-mix(in srgb, var(--primary) 12%, transparent);}
