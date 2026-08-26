@@ -936,13 +936,6 @@ body.hero-gone .appbar{
 /* Taken out of flow on purpose: in flow it pushed the figure off-centre on the
    two tiles that carry one, which is the misalignment this layout exists to
    remove. */
-/* Bottom-LEFT and width-capped: the art sits bottom-right, and a centred note
-   ran straight through it. */
-.doc-stat-note{
-  position:absolute;left:11px;bottom:7px;z-index:1;max-width:58%;
-  font-size:9px;font-weight:600;color:var(--ink-2);opacity:.8;
-  line-height:1.2;text-align:left;
-}
 /* Watermark. Bottom-right, bleeding past the corner so it reads as texture
    rather than a second element. */
 .doc-stat-art{
@@ -961,30 +954,16 @@ body.hero-gone .appbar{
 [data-theme="dark"] .doc-stat-art{opacity:1;}
 
 .art-hospital{background-image:url(/art/hospital.webp);}
-.art-lounge{background-image:url(/art/lounge.webp);}
-.art-doctor{background-image:url(/art/doctor.webp);}
 .art-chart{background-image:url(/art/chart.webp);}
 .art-clipboard{background-image:url(/art/clipboard.webp);}
 .art-calendar{background-image:url(/art/calendar.webp);}
-.art-bed{background-image:url(/art/bed.webp);}
-.art-kit{background-image:url(/art/kit.webp);}
 .art-shield{background-image:url(/art/shield.webp);}
-.art-pulse{background-image:url(/art/pulse.webp);}
-.art-wave2{background-image:url(/art/wave2.webp);}
-.art-wave5{background-image:url(/art/wave5.webp);}
 
 [data-theme="dark"] .art-hospital{background-image:url(/art/hospital-dark.webp);}
-[data-theme="dark"] .art-lounge{background-image:url(/art/lounge-dark.webp);}
-[data-theme="dark"] .art-doctor{background-image:url(/art/doctor-dark.webp);}
 [data-theme="dark"] .art-chart{background-image:url(/art/chart-dark.webp);}
 [data-theme="dark"] .art-clipboard{background-image:url(/art/clipboard-dark.webp);}
 [data-theme="dark"] .art-calendar{background-image:url(/art/calendar-dark.webp);}
-[data-theme="dark"] .art-bed{background-image:url(/art/bed-dark.webp);}
-[data-theme="dark"] .art-kit{background-image:url(/art/kit-dark.webp);}
 [data-theme="dark"] .art-shield{background-image:url(/art/shield-dark.webp);}
-[data-theme="dark"] .art-pulse{background-image:url(/art/pulse-dark.webp);}
-[data-theme="dark"] .art-wave2{background-image:url(/art/wave2-dark.webp);}
-[data-theme="dark"] .art-wave5{background-image:url(/art/wave5-dark.webp);}
 
 /* Illustration in the hero. Deliberately faint and behind the text: it is
    atmosphere, not information, and must never compete with the greeting or the
@@ -1003,7 +982,6 @@ body.hero-gone .appbar{
 /* Secondary note under a stat tile — currently the out-of-service bed count.
    Deliberately quieter and NOT uppercase, so it reads as a footnote to the
    number above rather than competing with the tile's own label. */
-.doc-stat-note{font-size:9px;font-weight:600;color:var(--ink-3);opacity:.75;margin-top:3px;line-height:1.2;}
 
 /* Thin occupancy bar */
 .doc-bar{height:6px;border-radius:99px;background:var(--panel-2);overflow:hidden;display:flex;}

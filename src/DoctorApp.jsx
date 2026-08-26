@@ -419,23 +419,23 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // Wards and Reserved have no illustration that means the right thing, so they
   // take an abstract wave rather than borrowing a picture that says something
   // else — a first-aid kit on "Reserved" would be worse than no art at all.
-  // Colours come from the theme's OWN palette, not from tokens invented for this
-  // screen. The rule is simple enough to hold as more tiles are added:
-  //   structural counts (how much capacity exists) -> --primary
-  //   bed states                                   -> the status colour already
-  //                                                   used for that state
-  //                                                   everywhere else in the app
-  // That is what makes a green badge mean "vacant" here and on the ward grid,
-  // instead of six hues chosen because they looked different from each other.
+  // Every badge takes --primary. The status colours (orange for occupied, green
+  // for vacant) were dropped deliberately: a colour that changes per tile invites
+  // the reader to decode it, and on this screen the badge is an ornament — the
+  // LABEL says what the number is. One theme colour throughout means the row
+  // reads as a set, and it follows the active theme with nothing to keep in sync.
+  // No art on the capacity row: these seven are the numbers a doctor actually
+  // reads, and an illustration behind a figure competes with it. The discharge
+  // row below keeps its art — those are lower-traffic counts where the artwork
+  // gives the row some weight instead of getting in the way.
   const stats = [
-    ["Blocks", me.blocks.length, "var(--primary)", null, "building", "kit"],
-    ["Wards", me.wardCount, "var(--primary)", null, "grid", "wave5"],
-    ["Beds", s.total, "var(--primary)", null, "bed", "bed"],
-    ["Occupied", totalOcc, "var(--st-o)", null, "user", "doctor"],
-    ["Vacant", s.vacant, "var(--st-v)", null, "check", "pulse"],
-    ["Reserved", reserved, "var(--st-vr)", null, "bookmark", "wave2"],
-    ...(lounge ? [["In Lounge", lounge.patients, "var(--teal)",
-                   lounge.free ? `${lounge.free} free` : "none free", "clock", "lounge"]] : []),
+    ["Blocks", me.blocks.length, "var(--primary)", null, "building"],
+    ["Wards", me.wardCount, "var(--primary)", null, "grid"],
+    ["Beds", s.total, "var(--primary)", null, "bed"],
+    ["Occupied", totalOcc, "var(--primary)", null, "user"],
+    ["Vacant", s.vacant, "var(--primary)", null, "check"],
+    ["Reserved", reserved, "var(--primary)", null, "bookmark"],
+    ...(lounge ? [["In Lounge", lounge.patients, "var(--primary)", null, "clock"]] : []),
   ];
 
   return (
@@ -462,7 +462,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
           </div>
 
           <div className="doc-statline">
-            {stats.map(([l, v, c, note, ic, art]) => (
+            {stats.map(([l, v, c, , ic]) => (
               // --accent cascades to the badge and the icon watermark, so one
               // token keeps them in step across every theme.
               <div key={l} className="doc-stat" style={{ "--accent": c }}>
@@ -471,16 +471,10 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                   <span className="doc-stat-l">{l}</span>
                 </span>
                 <span className="doc-stat-row"><span className="doc-stat-v">{v}</span></span>
-                {note && <span className="doc-stat-note">{note}</span>}
                 {/* Decorative. loading="lazy" and aria-hidden: it carries no
                     information, so it should neither block the first paint nor be
                     announced. Tiles without an illustration fall back to a faint
                     copy of their own icon. */}
-                {/* CSS background rather than <img>: the sheet ships in a light
-                    and a dark cut, and a stylesheet can swap them on the theme
-                    while markup cannot. It also means only the ACTIVE theme's
-                    images are ever fetched. */}
-                <span className={`doc-stat-art art-${art}`} aria-hidden="true" />
               </div>
             ))}
           </div>

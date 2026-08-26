@@ -4,14 +4,13 @@ import { Ic, icons } from "./ui.jsx";
 
 // The icon and accent are only read by the `rich` variant. Accents are theme
 // tokens, so the tiles follow whichever theme is active.
-// Theme palette only — --primary for the scheduled/in-flight counts, and the
-// app's own "done" green for completed. See the note on the stats array in
-// DoctorApp for why these are not bespoke colours.
+// One theme colour for every badge — see the note on the stats array in
+// DoctorApp. The label carries the meaning; the badge is an ornament.
 const ROWS = [
   ["plannedToday", "Planned Today", "clipboard", "var(--primary)", "calendar"],
   ["plannedTomorrow", "Planned Tomorrow", "list", "var(--primary)", "clipboard"],
-  ["initiated", "Initiated", "target", "var(--amber)", "chart"],
-  ["completedToday", "Completed Today", "check", "var(--st-v)", "shield"],
+  ["initiated", "Initiated", "target", "var(--primary)", "chart"],
+  ["completedToday", "Completed Today", "check", "var(--primary)", "shield"],
 ];
 
 /** Small self-contained discharge-counter row — scoped server-side to whichever
