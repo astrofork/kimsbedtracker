@@ -143,6 +143,52 @@ export function setDoctorBlock(blockId, data) {
   doctorBlocks.set(Number(blockId), { at: Date.now(), data });
 }
 export function clearDoctorBlocks() { doctorBlocks.clear(); }
+export function clearDoctorBlock(blockId) {
+  if (blockId == null) doctorBlocks.clear(); else doctorBlocks.delete(Number(blockId));
+}
+
+/** Apply the server's recomputed counts to one ward inside every cached block.
+ *  Returns the wards it touched so callers can tell whether anything changed.
+ *  Only the five count fields are replaced — name, floor, review state and the
+ *  rest of the row are left exactly as fetched, because this event says nothing
+ *  about them. */
+export function patchWardCounts(c) {
+  if (!c || c.wardId == null) return false;
+  const wid = Number(c.wardId);
+  let touched = false;
+  for (const [id, hit] of doctorBlocks) {
+    const wards = hit?.data?.wards;
+    if (!Array.isArray(wards)) continue;
+    const idx = wards.findIndex((w) => Number(w.id) === wid);
+    if (idx === -1) continue;
+    const next = wards.slice();
+    next[idx] = {
+      ...wards[idx],
+      total_beds:        c.total,
+      vacant:            c.vacant,
+      reserved:          c.reserved,
+      occupied:          c.occupied,
+      occupied_reserved: c.occupied_reserved,
+    };
+    // `at` is refreshed too: the entry is current as of this event, so the
+    // staleness clock should restart rather than expire an up-to-date copy.
+    doctorBlocks.set(id, { at: Date.now(), data: { ...hit.data, wards: next } });
+    touched = true;
+  }
+  return touched;
+}
+
+/** Anything we cannot patch — a review, a ward going out of service, a change we
+ *  do not understand — drops every block containing that ward, so the next visit
+ *  refetches rather than showing a row we can no longer vouch for. */
+export function dropBlocksWithWard(wardId) {
+  if (wardId == null) { doctorBlocks.clear(); return; }
+  const wid = Number(wardId);
+  for (const [id, hit] of doctorBlocks) {
+    const wards = hit?.data?.wards;
+    if (!Array.isArray(wards) || wards.some((w) => Number(w.id) === wid)) doctorBlocks.delete(id);
+  }
+}
 
 export const api = {
   // NOT cached, unlike the lists below. /meta carries `todayIST`, which the
@@ -643,6 +689,19 @@ export function getSocket() {
     });
     sharedSocket.on("discharge:update", (p) => clearWardBeds(wardOf(p)));
     sharedSocket.on("ward:operational", (p) => clearWardBeds(wardOf(p)));
+
+    // Doctor block cache. ward:counts carries the server's freshly recomputed
+    // totals for one ward, so it is PATCHED rather than invalidated — that is
+    // what lets a doctor re-enter a block for zero requests instead of one.
+    sharedSocket.on("ward:counts", (p) => patchWardCounts(p));
+    // A review changes reviewedAt, which ward:counts says nothing about. Cheap
+    // enough to drop and refetch, and far safer than guessing.
+    sharedSocket.on("bed:update", (p) => {
+      if (p && p.doctorBlockId != null) clearDoctorBlock(p.doctorBlockId);
+    });
+    // A ward leaving service changes `operational` and can change its name or
+    // floor — none of it covered by a counts patch.
+    sharedSocket.on("ward:operational", (p) => dropBlocksWithWard(wardOf(p)));
 
     // A reconnect means events were missed while offline (socket.io does not
     // replay them), so nothing cached can be trusted — including the reference

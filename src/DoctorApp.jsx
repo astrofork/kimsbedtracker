@@ -137,7 +137,44 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
       .then((d) => { setData(d); setDoctorBlock(blockId, d); })
       .catch((e) => setError(toastErr(e)));
   }, [blockId]);
-  useEffect(() => { load(); }, [load, reloadKey]);
+  // A cached block is only kept while lib.js can still vouch for it: ward:counts
+  // patches it with the server's recomputed totals, and anything that cannot be
+  // patched drops it. So a surviving entry is current, and re-entering a block
+  // costs NO request — the same reasoning WardPage already uses for beds.
+  //
+  // `reloadKey` still forces a real load, because that is the socket-driven
+  // refresh path and it must never be short-circuited.
+  const lastReload = useRef(reloadKey);
+  useEffect(() => {
+    if (reloadKey !== lastReload.current) { lastReload.current = reloadKey; load(); return; }
+    if (getDoctorBlock(blockId)) return;   // cached and provably current
+    load();
+  }, [load, blockId, reloadKey]);
+
+  // While this screen is open, apply the same delta the cache gets, so the cards
+  // update live without a request. Guarded on the ward actually being in THIS
+  // block — a doctor's other blocks are patched in the cache by lib.js, and
+  // touching state for a ward we do not show would re-render for nothing.
+  useEffect(() => {
+    const socket = getSocket();
+    const onCounts = (c) => {
+      if (!c || c.wardId == null) return;
+      setData((d) => {
+        if (!d || !Array.isArray(d.wards)) return d;
+        const idx = d.wards.findIndex((w) => Number(w.id) === Number(c.wardId));
+        if (idx === -1) return d;
+        const wards = d.wards.slice();
+        wards[idx] = {
+          ...wards[idx],
+          total_beds: c.total, vacant: c.vacant, reserved: c.reserved,
+          occupied: c.occupied, occupied_reserved: c.occupied_reserved,
+        };
+        return { ...d, wards };
+      });
+    };
+    socket.on("ward:counts", onCounts);
+    return () => socket.off("ward:counts", onCounts);
+  }, []);
 
   // Switching blocks without unmounting would otherwise leave the PREVIOUS
   // block's wards on screen, under the new block's name, until its fetch landed.
