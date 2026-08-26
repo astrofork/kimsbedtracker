@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { api, toastErr, getSocket, onReconnect, coalesce, fmtDateTime } from "./lib.js";
+import { api, toastErr, getSocket, onReconnect, coalesce, fmtDateTime, getDoctorBlock, setDoctorBlock } from "./lib.js";
 import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
 import { AppShell } from "./shell.jsx";
@@ -124,15 +124,26 @@ function WardCard({ w, i = 0, onOpen, note }) {
 
 // ── Block detail ─────────────────────────────────────────────────────────────────
 function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipIndex, bedRows }) {
-  const [data,      setData]      = useState(null);
+  // Seeded from the cache so re-entering a block the doctor just left renders
+  // its ward cards immediately instead of a spinner. `load` still runs below on
+  // every mount, so what is shown is only ever one request behind.
+  const [data,      setData]      = useState(() => getDoctorBlock(blockId));
   const [error,     setError]     = useState(null);
   const [reviewing, setReviewing] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
-    api.doctorBlock(blockId).then(setData).catch((e) => setError(toastErr(e)));
+    api.doctorBlock(blockId)
+      .then((d) => { setData(d); setDoctorBlock(blockId, d); })
+      .catch((e) => setError(toastErr(e)));
   }, [blockId]);
   useEffect(() => { load(); }, [load, reloadKey]);
+
+  // Switching blocks without unmounting would otherwise leave the PREVIOUS
+  // block's wards on screen, under the new block's name, until its fetch landed.
+  // Swapping to the new block's cached payload (or to nothing) keeps the header
+  // and the grid describing the same block at all times.
+  useEffect(() => { setData(getDoctorBlock(blockId)); }, [blockId]);
 
   const [docsOpen, setDocsOpen] = useState(false); // doctors-list dropdown
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id

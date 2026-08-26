@@ -113,6 +113,37 @@ export function clearWardBeds(wardId) {
   if (wardId == null) wardBeds.clear(); else wardBeds.delete(Number(wardId));
 }
 
+// Doctor Block payloads (the ward-cards screen), keyed by block id.
+//
+// BlockDetail keeps its ward list in component state, so opening a ward unmounts
+// it and coming back re-rendered a spinner while /doctor/blocks/:id refetched —
+// even when the doctor had been on that exact screen a second earlier.
+//
+// Unlike wardBeds this is NOT dropped on every bed event, and the difference is
+// deliberate. While the screen is mounted it already refetches on any change
+// (see `reloadKey` in DoctorApp), and every mount fires its own load. So the
+// cached copy is only ever what to SHOW DURING that fetch — its staleness window
+// is one request. Choosing between "last known counts for ~500ms, then correct"
+// and "a spinner for ~500ms, then correct" is not a freshness trade at all: the
+// second shows less, not something truer.
+//
+// That reasoning holds only for a SHORT gap, so entries expire. Anything older
+// than this is treated as absent and the spinner comes back rather than
+// rendering numbers from a previous shift.
+const BLOCK_STALE_MS = 2 * 60 * 1000;
+const doctorBlocks = new Map();
+
+export function getDoctorBlock(blockId) {
+  const hit = doctorBlocks.get(Number(blockId));
+  if (!hit) return null;
+  if (Date.now() - hit.at > BLOCK_STALE_MS) { doctorBlocks.delete(Number(blockId)); return null; }
+  return hit.data;
+}
+export function setDoctorBlock(blockId, data) {
+  doctorBlocks.set(Number(blockId), { at: Date.now(), data });
+}
+export function clearDoctorBlocks() { doctorBlocks.clear(); }
+
 export const api = {
   // NOT cached, unlike the lists below. /meta carries `todayIST`, which the
   // admission-date picker uses as its upper bound — a session-long cache pins
@@ -621,7 +652,7 @@ export function getSocket() {
     // until logout. Dropping both caches on reconnect closes that window.
     let hasConnected = sharedSocket.connected;
     sharedSocket.on("connect", () => {
-      if (hasConnected) { clearWardBeds(); clearRefCache(); } else hasConnected = true;
+      if (hasConnected) { clearWardBeds(); clearRefCache(); clearDoctorBlocks(); } else hasConnected = true;
     });
   }
   return sharedSocket;
@@ -631,6 +662,7 @@ export function disconnectSocket() {
   // lists are role-scoped — so neither cache may survive the session.
   clearRefCache();
   clearWardBeds();
+  clearDoctorBlocks();
   if (sharedSocket) { sharedSocket.disconnect(); sharedSocket = null; }
 }
 
