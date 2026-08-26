@@ -926,13 +926,24 @@ body.hero-gone .appbar{
   line-height:1.2;text-align:center;
 }
 /* Watermark. Bottom-right, bleeding past the corner so it reads as texture
-   rather than a second icon. Faint enough that it never competes with the
-   figure, and lifted slightly on dark panels where a 7% wash disappears. */
+   rather than a second element. Faint enough that it never competes with the
+   figure. */
 .doc-stat-art{
   position:absolute;right:-12px;bottom:-14px;z-index:0;pointer-events:none;
   color:var(--accent);opacity:.07;line-height:0;
 }
 [data-theme="dark"] .doc-stat-art{opacity:.12;}
+
+/* The illustrations are fixed-colour artwork, so unlike the icon watermark they
+   cannot follow a theme token. Two consequences are handled here:
+   - they sit lower in opacity than the icon fallback, because a full-colour
+     picture draws far more attention than a monochrome glyph at the same value;
+   - on dark panels they are dimmed further AND desaturated, since pale mint and
+     sky blue on a near-black card reads as a bright smudge rather than texture. */
+.doc-stat-art--img{
+  right:-10px;bottom:-8px;width:74px;height:auto;opacity:.3;
+}
+[data-theme="dark"] .doc-stat-art--img{opacity:.16;filter:saturate(.55);}
 
 /* Illustration in the hero. Deliberately faint and behind the text: it is
    atmosphere, not information, and must never compete with the greeting or the
@@ -940,13 +951,13 @@ body.hero-gone .appbar{
 .doc-hero{position:relative;overflow:hidden;}
 .doc-hero-art{
   display:none;position:absolute;right:0;bottom:0;
-  width:min(230px,38%);height:auto;pointer-events:none;
-  fill:var(--doc-a-lounge);opacity:.16;
+  width:min(300px,40%);height:auto;pointer-events:none;opacity:.55;
 }
+[data-theme="dark"] .doc-hero-art{opacity:.3;filter:saturate(.6);}
 @media (min-width:720px){.doc-hero-art{display:block;}}
 /* Dark panels swallow a 13% fill, so it is lifted just enough to stay visible
    without turning into a shape the eye tracks. */
-[data-theme="dark"] .doc-hero-art{opacity:.22;}
+
 /* Secondary note under a stat tile — currently the out-of-service bed count.
    Deliberately quieter and NOT uppercase, so it reads as a footnote to the
    number above rather than competing with the tile's own label. */

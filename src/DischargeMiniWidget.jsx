@@ -5,10 +5,10 @@ import { Ic, icons } from "./ui.jsx";
 // The icon and accent are only read by the `rich` variant. Accents are theme
 // tokens, so the tiles follow whichever theme is active.
 const ROWS = [
-  ["plannedToday", "Planned Today", "clipboard", "var(--doc-a-blocks)"],
-  ["plannedTomorrow", "Planned Tomorrow", "list", "var(--doc-a-wards)"],
-  ["initiated", "Initiated", "target", "var(--doc-a-beds)"],
-  ["completedToday", "Completed Today", "check", "var(--st-v)"],
+  ["plannedToday", "Planned Today", "clipboard", "var(--doc-a-blocks)", "calendar"],
+  ["plannedTomorrow", "Planned Tomorrow", "list", "var(--doc-a-wards)", "clipboard"],
+  ["initiated", "Initiated", "target", "var(--doc-a-beds)", "chart"],
+  ["completedToday", "Completed Today", "check", "var(--st-v)", "shield"],
 ];
 
 /** Small self-contained discharge-counter row — scoped server-side to whichever
@@ -48,14 +48,14 @@ export default function DischargeMiniWidget({ rich = false }) {
   if (rich) {
     return (
       <div className="doc-statline doc-statline--wide">
-        {ROWS.map(([key, label, ic, accent]) => (
+        {ROWS.map(([key, label, ic, accent, art]) => (
           <div className="doc-stat" key={key} style={{ "--accent": accent }}>
             <span className="doc-stat-head">
               <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={13} /></span>
               <span className="doc-stat-l">{label.toUpperCase()}</span>
             </span>
             <span className="doc-stat-row"><span className="doc-stat-v">{counts[key]}</span></span>
-            <span className="doc-stat-art" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={64} /></span>
+            <img className="doc-stat-art doc-stat-art--img" src={`/art/${art}.webp`} alt="" aria-hidden="true" loading="lazy" decoding="async" />
           </div>
         ))}
       </div>

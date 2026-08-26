@@ -415,15 +415,18 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // a literal — it drives the badge and the watermark, so a hard-coded value
   // would look wrong the moment the user switches theme.
   const reserved = (s.reserved || 0) + (s.occupied_reserved || 0);
+  // [label, value, accent, note, icon, art]. `art` names a file in public/art —
+  // omitted where no illustration fits, and those tiles fall back to a faint copy
+  // of their own icon rather than borrowing a picture that means something else.
   const stats = [
-    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building"],
-    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid"],
-    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed"],
-    ["Occupied", totalOcc, "var(--st-o)", null, "user"],
-    ["Vacant", s.vacant, "var(--st-v)", null, "check"],
-    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark"],
+    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building", "kit"],
+    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid", null],
+    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed", "bed"],
+    ["Occupied", totalOcc, "var(--st-o)", null, "user", "doctor"],
+    ["Vacant", s.vacant, "var(--st-v)", null, "check", "pulse"],
+    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark", null],
     ...(lounge ? [["In Lounge", lounge.patients, "var(--doc-a-lounge)",
-                   lounge.free ? `${lounge.free} free` : "none free", "clock"]] : []),
+                   lounge.free ? `${lounge.free} free` : "none free", "clock", "lounge"]] : []),
   ];
 
   return (
@@ -446,27 +449,13 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                 inherits a theme token — a flat asset would keep its own colours
                 when the user switches theme, which is exactly what looks broken.
                 aria-hidden because it carries no information. */}
-            <svg className="doc-hero-art" viewBox="0 0 200 80" aria-hidden="true" focusable="false">
-              <path d="M0 74q28-9 54-3t44-2 42 1 60-6v16H0z" opacity=".5" />
-              <path d="M104 74V38h26V28l12-9 12 9v10h26v36z" />
-              <rect x="112" y="45" width="8" height="8" rx="1.5" opacity=".5" />
-              <rect x="126" y="45" width="8" height="8" rx="1.5" opacity=".5" />
-              <rect x="160" y="45" width="8" height="8" rx="1.5" opacity=".5" />
-              <rect x="112" y="59" width="8" height="8" rx="1.5" opacity=".5" />
-              <rect x="160" y="59" width="8" height="8" rx="1.5" opacity=".5" />
-              <path d="M139 22h6v5h5v6h-5v5h-6v-5h-5v-6h5z" opacity=".6" />
-              <rect x="136" y="58" width="12" height="16" rx="2" opacity=".55" />
-              <circle cx="82" cy="60" r="6" opacity=".4" />
-              <path d="M76 72q6-13 12 0z" opacity=".4" />
-              <circle cx="62" cy="64" r="4.5" opacity=".3" />
-              <path d="M57.5 72q4.5-9 9 0z" opacity=".3" />
-            </svg>
+            <img className="doc-hero-art" src="/art/hospital.webp" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           </div>
 
           <div className="doc-statline">
-            {stats.map(([l, v, c, note, ic]) => (
-              // --accent cascades to the badge and the watermark, so one token
-              // keeps them in step across every theme.
+            {stats.map(([l, v, c, note, ic, art]) => (
+              // --accent cascades to the badge and the icon watermark, so one
+              // token keeps them in step across every theme.
               <div key={l} className="doc-stat" style={{ "--accent": c }}>
                 <span className="doc-stat-head">
                   <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={13} /></span>
@@ -474,11 +463,13 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                 </span>
                 <span className="doc-stat-row"><span className="doc-stat-v">{v}</span></span>
                 {note && <span className="doc-stat-note">{note}</span>}
-                {/* Oversized, very faint copy of the tile's own icon. Gives the
-                    card some weight now the bar is gone, without adding a second
-                    thing to read — it repeats the badge rather than saying
-                    anything new, which is what lets it sit at 7% opacity. */}
-                <span className="doc-stat-art" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={64} /></span>
+                {/* Decorative. loading="lazy" and aria-hidden: it carries no
+                    information, so it should neither block the first paint nor be
+                    announced. Tiles without an illustration fall back to a faint
+                    copy of their own icon. */}
+                {art
+                  ? <img className="doc-stat-art doc-stat-art--img" src={`/art/${art}.webp`} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+                  : <span className="doc-stat-art" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={64} /></span>}
               </div>
             ))}
           </div>
