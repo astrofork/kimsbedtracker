@@ -5,6 +5,14 @@
    those edges flash dark even while the app is in a light theme. */
 :root { color-scheme: dark; }
 [data-theme="light"], [data-theme="purple"], [data-theme="teal"] { color-scheme: light; }
+/* Same accents, darkened for light panels. See the note on --doc-a-blocks. */
+[data-theme="light"], [data-theme="purple"], [data-theme="teal"] {
+  --doc-a-blocks:#0D9488;
+  --doc-a-wards:#7C3AED;
+  --doc-a-beds:#2563EB;
+  --doc-a-res:#4F46E5;
+  --doc-a-lounge:#0D9488;
+}
 
 /* ── Safe-area insets ─────────────────────────────────────────────────────── *
  * Canonical source for every notch/Dynamic-Island/gesture-bar/home-indicator
@@ -47,7 +55,18 @@
   /* App shell */
   --sb-bg:#0F2744; --sb-ink:#ffffff; --sb-muted:#8FA3BD;
   --sb-active:#2563EB; --sb-line:rgba(255,255,255,.08);
-  --primary:#3B82F6; --primary-deep:#2563EB;
+  --primary:#3B82F6;
+  /* Doctor-home stat accents. New tokens, deliberately not reusing --teal /
+     --blue / --primary / --st-vr — in every theme those all resolve to the SAME
+     blue, so tiles keyed to them came out indistinguishable. Defined per theme
+     so the tiles follow whichever is active; nothing existing is redefined.
+     Dark values are lifted, since a mid-tone that reads well on white goes muddy
+     on a dark panel. */
+  --doc-a-blocks:#2DD4BF;
+  --doc-a-wards:#A78BFA;
+  --doc-a-beds:#60A5FA;
+  --doc-a-res:#818CF8;
+  --doc-a-lounge:#2DD4BF; --primary-deep:#2563EB;
 }
 
 [data-theme="light"] {
@@ -852,11 +871,52 @@ body.hero-gone .appbar{
 .doc-ring-lbl{font-size:8.5px;font-weight:700;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;margin-top:2px;}
 
 /* Compact stat strip */
-.doc-statline{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px;}
-@media (min-width:560px){.doc-statline{grid-template-columns:repeat(6,1fr);}}
-.doc-stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;box-shadow:var(--shadow);}
-.doc-stat-v{font-size:20px;font-weight:800;line-height:1;letter-spacing:-.02em;}
-.doc-stat-l{font-size:9px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;margin-top:5px;}
+.doc-statline{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:18px;}
+@media (min-width:480px){.doc-statline{grid-template-columns:repeat(3,1fr);}}
+@media (min-width:900px){.doc-statline{grid-template-columns:repeat(6,1fr);}}
+
+/* Each tile carries its own --accent, set inline from a theme token (see the
+   stats array in DoctorApp). That single value drives the icon, the number and
+   the underline, so all three stay in step — and because it is a token rather
+   than a literal, the tile follows whichever of the four themes is active.
+   The 14% mix keeps the chip readable on a light panel without glowing on a
+   dark one; a fixed rgba tint could not do both. */
+.doc-stat{
+  --accent:var(--primary);
+  position:relative;overflow:hidden;
+  display:flex;align-items:center;gap:10px;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:11px 11px 13px;text-align:left;box-shadow:var(--shadow);
+}
+/* The underline reads as a category stripe. Sits on ::after so it spans the full
+   tile width regardless of padding. */
+.doc-stat::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:3px;
+  background:var(--accent);opacity:.85;
+}
+.doc-stat-ic{
+  flex:none;width:32px;height:32px;border-radius:9px;
+  display:grid;place-items:center;
+  color:var(--accent);
+  background:color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.doc-stat-body{display:block;min-width:0;}
+.doc-stat-v{display:block;font-size:19px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--accent);}
+.doc-stat-l{display:block;font-size:9px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;margin-top:4px;}
+
+/* Illustration in the hero. Deliberately faint and behind the text: it is
+   atmosphere, not information, and must never compete with the greeting or the
+   occupancy ring. Hidden on narrow screens where the text needs the room. */
+.doc-hero{position:relative;overflow:hidden;}
+.doc-hero-art{
+  display:none;position:absolute;right:0;bottom:0;
+  width:min(230px,38%);height:auto;pointer-events:none;
+  fill:var(--doc-a-lounge);opacity:.16;
+}
+@media (min-width:720px){.doc-hero-art{display:block;}}
+/* Dark panels swallow a 13% fill, so it is lifted just enough to stay visible
+   without turning into a shape the eye tracks. */
+[data-theme="dark"] .doc-hero-art{opacity:.22;}
 /* Secondary note under a stat tile — currently the out-of-service bed count.
    Deliberately quieter and NOT uppercase, so it reads as a footnote to the
    number above rather than competing with the tile's own label. */

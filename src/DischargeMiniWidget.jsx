@@ -1,16 +1,23 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api, getSocket, onReconnect, coalesce } from "./lib.js";
+import { Ic, icons } from "./ui.jsx";
 
+// The icon and accent are only read by the `rich` variant. Accents are theme
+// tokens, so the tiles follow whichever theme is active.
 const ROWS = [
-  ["plannedToday", "Planned Today"],
-  ["plannedTomorrow", "Planned Tomorrow"],
-  ["initiated", "Initiated"],
-  ["completedToday", "Completed Today"],
+  ["plannedToday", "Planned Today", "clipboard", "var(--doc-a-blocks)"],
+  ["plannedTomorrow", "Planned Tomorrow", "list", "var(--doc-a-wards)"],
+  ["initiated", "Initiated", "target", "var(--doc-a-beds)"],
+  ["completedToday", "Completed Today", "check", "var(--st-v)"],
 ];
 
 /** Small self-contained discharge-counter row — scoped server-side to whichever
- *  role/block/station the caller belongs to. Used on PRE's and Doctor's dashboards. */
-export default function DischargeMiniWidget() {
+ *  role/block/station the caller belongs to. Used on PRE's and Doctor's dashboards.
+ *
+ *  `rich` opts into the icon-and-accent tiles used on the Doctor home screen, so
+ *  those match the stat row directly above them. It is opt-IN precisely because
+ *  this component is shared: PRE renders the plain variant and is unaffected. */
+export default function DischargeMiniWidget({ rich = false }) {
   const [counts, setCounts] = useState(null);
 
   const load = useCallback(() => {
@@ -34,6 +41,22 @@ export default function DischargeMiniWidget() {
   }, [load]);
 
   if (!counts) return null;
+
+  if (rich) {
+    return (
+      <div className="doc-statline" style={{ marginBottom: 16 }}>
+        {ROWS.map(([key, label, ic, accent]) => (
+          <div className="doc-stat" key={key} style={{ "--accent": accent }}>
+            <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={15} /></span>
+            <span className="doc-stat-body">
+              <span className="doc-stat-v">{counts[key]}</span>
+              <span className="doc-stat-l">{label.toUpperCase()}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="stat-grid" style={{ marginBottom: 14 }}>

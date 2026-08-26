@@ -408,13 +408,18 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // entirely when this doctor has no lounge ward, so nobody reads a bare 0 as
   // "the lounge is empty" when the truth is "you cannot see the lounge".
   const lounge = me.lounge || null;
+  // [label, value, accent, note, icon]. The accent is always a THEME TOKEN, never
+  // a literal colour — it drives the number, the icon and the underline, so a
+  // hard-coded value would look wrong the moment the user switches theme.
   const stats = [
-    ["Blocks", me.blocks.length, "var(--ink)"], ["Wards", me.wardCount, "var(--ink)"],
-    ["Beds", s.total, "var(--ink)", outOfService ? `${outOfService} out of service` : null],
-    ["Occupied", totalOcc, "var(--st-o)"],
-    ["Vacant", s.vacant, "var(--st-v)"], ["Reserved", (s.reserved || 0) + (s.occupied_reserved || 0), "var(--st-vr)"],
-    ...(lounge ? [["In Lounge", lounge.patients, "var(--st-dl, var(--ink))",
-                   lounge.free ? `${lounge.free} free` : "none free"]] : []),
+    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building"],
+    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid"],
+    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed"],
+    ["Occupied", totalOcc, "var(--st-o)", null, "user"],
+    ["Vacant", s.vacant, "var(--st-v)", null, "check"],
+    ["Reserved", (s.reserved || 0) + (s.occupied_reserved || 0), "var(--doc-a-res)", null, "bookmark"],
+    ...(lounge ? [["In Lounge", lounge.patients, "var(--doc-a-lounge)",
+                   lounge.free ? `${lounge.free} free` : "none free", "clock"]] : []),
   ];
 
   return (
@@ -433,19 +438,43 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
               <div className="doc-name">{user.name || user.username || "Doctor"}</div>
               <div className="doc-sub"><span className="doc-live">Live</span> · {me.wardCount} wards across {me.blocks.length} block{me.blocks.length === 1 ? "" : "s"}</div>
             </div>
+            {/* Decorative only. Inline SVG rather than a background image so it
+                inherits a theme token — a flat asset would keep its own colours
+                when the user switches theme, which is exactly what looks broken.
+                aria-hidden because it carries no information. */}
+            <svg className="doc-hero-art" viewBox="0 0 200 80" aria-hidden="true" focusable="false">
+              <path d="M0 74q28-9 54-3t44-2 42 1 60-6v16H0z" opacity=".5" />
+              <path d="M104 74V38h26V28l12-9 12 9v10h26v36z" />
+              <rect x="112" y="45" width="8" height="8" rx="1.5" opacity=".5" />
+              <rect x="126" y="45" width="8" height="8" rx="1.5" opacity=".5" />
+              <rect x="160" y="45" width="8" height="8" rx="1.5" opacity=".5" />
+              <rect x="112" y="59" width="8" height="8" rx="1.5" opacity=".5" />
+              <rect x="160" y="59" width="8" height="8" rx="1.5" opacity=".5" />
+              <path d="M139 22h6v5h5v6h-5v5h-6v-5h-5v-6h5z" opacity=".6" />
+              <rect x="136" y="58" width="12" height="16" rx="2" opacity=".55" />
+              <circle cx="82" cy="60" r="6" opacity=".4" />
+              <path d="M76 72q6-13 12 0z" opacity=".4" />
+              <circle cx="62" cy="64" r="4.5" opacity=".3" />
+              <path d="M57.5 72q4.5-9 9 0z" opacity=".3" />
+            </svg>
           </div>
 
           <div className="doc-statline">
-            {stats.map(([l, v, c, note]) => (
-              <div key={l} className="doc-stat">
-                <div className="doc-stat-v" style={{ color: c }}>{v}</div>
-                <div className="doc-stat-l">{l}</div>
-                {note && <div className="doc-stat-note">{note}</div>}
+            {stats.map(([l, v, c, note, ic]) => (
+              // --accent cascades to the icon chip, the value and the underline,
+              // so one token keeps all three in step.
+              <div key={l} className="doc-stat" style={{ "--accent": c }}>
+                <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={15} /></span>
+                <span className="doc-stat-body">
+                  <span className="doc-stat-v">{v}</span>
+                  <span className="doc-stat-l">{l}</span>
+                  {note && <span className="doc-stat-note">{note}</span>}
+                </span>
               </div>
             ))}
           </div>
 
-          <DischargeMiniWidget />
+          <DischargeMiniWidget rich />
         </>
       )}
 
