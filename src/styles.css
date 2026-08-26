@@ -886,13 +886,7 @@ body.hero-gone .appbar{
   position:relative;overflow:hidden;
   display:flex;align-items:center;gap:10px;
   background:var(--panel);border:1px solid var(--line);border-radius:12px;
-  padding:11px 11px 13px;text-align:left;box-shadow:var(--shadow);
-}
-/* The underline reads as a category stripe. Sits on ::after so it spans the full
-   tile width regardless of padding. */
-.doc-stat::after{
-  content:"";position:absolute;left:0;right:0;bottom:0;height:3px;
-  background:var(--accent);opacity:.85;
+  padding:11px;text-align:left;box-shadow:var(--shadow);
 }
 .doc-stat-ic{
   flex:none;width:32px;height:32px;border-radius:9px;
