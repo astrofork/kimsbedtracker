@@ -42,16 +42,19 @@ export default function DischargeMiniWidget({ rich = false }) {
 
   if (!counts) return null;
 
+  // Own grid, own track size: four tiles across the same width the seven above
+  // occupy, so this row fills its line instead of leaving three-quarters of it
+  // empty. Same tile styling, so the two rows still read as one family.
   if (rich) {
     return (
-      <div className="doc-statline" style={{ marginBottom: 16 }}>
+      <div className="doc-statline doc-statline--wide">
         {ROWS.map(([key, label, ic, accent]) => (
           <div className="doc-stat" key={key} style={{ "--accent": accent }}>
-            <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={15} /></span>
-            <span className="doc-stat-body">
-              <span className="doc-stat-v">{counts[key]}</span>
+            <span className="doc-stat-head">
+              <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={13} /></span>
               <span className="doc-stat-l">{label.toUpperCase()}</span>
             </span>
+            <span className="doc-stat-row"><span className="doc-stat-v">{counts[key]}</span></span>
           </div>
         ))}
       </div>

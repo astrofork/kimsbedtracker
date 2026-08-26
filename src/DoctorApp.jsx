@@ -411,15 +411,25 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // [label, value, accent, note, icon]. The accent is always a THEME TOKEN, never
   // a literal colour — it drives the number, the icon and the underline, so a
   // hard-coded value would look wrong the moment the user switches theme.
+  // [label, value, accent, note, icon, pct].
+  //
+  // pct draws a share-of-total bar, and is only supplied where a share actually
+  // MEANS something. "4 blocks" has no denominator, so it gets no bar rather
+  // than a decorative one — a progress bar that does not measure anything is a
+  // lie the eye believes.
+  const pctOf = (n, d) => (d > 0 ? Math.round((n / d) * 100) : null);
+  const reserved = (s.reserved || 0) + (s.occupied_reserved || 0);
   const stats = [
-    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building"],
-    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid"],
-    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed"],
-    ["Occupied", totalOcc, "var(--st-o)", null, "user"],
-    ["Vacant", s.vacant, "var(--st-v)", null, "check"],
-    ["Reserved", (s.reserved || 0) + (s.occupied_reserved || 0), "var(--doc-a-res)", null, "bookmark"],
+    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building", null],
+    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid", null],
+    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed",
+      pctOf(s.total, s.total + outOfService)],
+    ["Occupied", totalOcc, "var(--st-o)", null, "user", pctOf(totalOcc, s.total)],
+    ["Vacant", s.vacant, "var(--st-v)", null, "check", pctOf(s.vacant, s.total)],
+    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark", pctOf(reserved, s.total)],
     ...(lounge ? [["In Lounge", lounge.patients, "var(--doc-a-lounge)",
-                   lounge.free ? `${lounge.free} free` : "none free", "clock"]] : []),
+                   lounge.free ? `${lounge.free} free` : "none free", "clock",
+                   pctOf(lounge.patients, lounge.patients + lounge.free)]] : []),
   ];
 
   return (
@@ -460,20 +470,32 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
           </div>
 
           <div className="doc-statline">
-            {stats.map(([l, v, c, note, ic]) => (
-              // --accent cascades to the icon chip, the value and the underline,
-              // so one token keeps all three in step.
+            {stats.map(([l, v, c, note, ic, pct]) => (
+              // --accent cascades to the badge, the value and the bar, so one
+              // token keeps all three in step across every theme.
               <div key={l} className="doc-stat" style={{ "--accent": c }}>
-                <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={15} /></span>
-                <span className="doc-stat-body">
-                  <span className="doc-stat-v">{v}</span>
+                <span className="doc-stat-head">
+                  <span className="doc-stat-ic" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={13} /></span>
                   <span className="doc-stat-l">{l}</span>
-                  {note && <span className="doc-stat-note">{note}</span>}
                 </span>
+                <span className="doc-stat-row">
+                  <span className="doc-stat-v">{v}</span>
+                  {pct != null && <span className="doc-stat-pct">{pct}%</span>}
+                </span>
+                {note && <span className="doc-stat-note">{note}</span>}
+                {pct != null && (
+                  <span className="doc-stat-range" aria-hidden="true">
+                    <span className="doc-stat-fill" style={{ width: `${Math.min(100, pct)}%` }} />
+                  </span>
+                )}
               </div>
             ))}
           </div>
 
+          {/* Its own row: four discharge counters, deliberately separate from the
+              seven capacity tiles above. They answer a different question — what
+              is happening today, not what the wards hold — so they read better as
+              their own line than mixed into the same run of tiles. */}
           <DischargeMiniWidget rich />
         </>
       )}

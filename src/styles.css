@@ -871,32 +871,66 @@ body.hero-gone .appbar{
 .doc-ring-lbl{font-size:8.5px;font-weight:700;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;margin-top:2px;}
 
 /* Compact stat strip */
-.doc-statline{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:18px;}
-@media (min-width:480px){.doc-statline{grid-template-columns:repeat(3,1fr);}}
-@media (min-width:900px){.doc-statline{grid-template-columns:repeat(6,1fr);}}
+/* auto-fit rather than a fixed column count: the row packs as many tiles as fit
+   and only wraps when they genuinely will not, so seven tiles sit on one line on
+   a desktop instead of leaving a single orphan on a second row. */
+.doc-statline{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(94px,1fr));
+  gap:8px;margin-bottom:10px;
+}
+/* Fewer tiles, so a larger minimum keeps them filling the row rather than
+   sitting narrow with the rest of the line empty. */
+.doc-statline--wide{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:16px;}
 
 /* Each tile carries its own --accent, set inline from a theme token (see the
-   stats array in DoctorApp). That single value drives the icon, the number and
-   the underline, so all three stay in step — and because it is a token rather
-   than a literal, the tile follows whichever of the four themes is active.
-   The 14% mix keeps the chip readable on a light panel without glowing on a
-   dark one; a fixed rgba tint could not do both. */
+   stats array in DoctorApp). That one value drives the badge, the number and the
+   bar, so all three stay in step — and because it is a token rather than a
+   literal, the tile follows whichever of the four themes is active. */
 .doc-stat{
   --accent:var(--primary);
   position:relative;overflow:hidden;
-  display:flex;align-items:center;gap:10px;
-  background:var(--panel);border:1px solid var(--line);border-radius:12px;
-  padding:11px;text-align:left;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:5px;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  padding:10px 11px 11px;text-align:left;box-shadow:var(--shadow);
 }
+.doc-stat-head{display:flex;align-items:center;gap:6px;min-width:0;}
+/* Solid accent disc with a white glyph. Deliberately not a tint: at this size a
+   14% wash reads as grey, and the disc is the only thing distinguishing one tile
+   from the next now that the underline is gone. */
 .doc-stat-ic{
-  flex:none;width:32px;height:32px;border-radius:9px;
+  flex:none;width:22px;height:22px;border-radius:9999px;
   display:grid;place-items:center;
-  color:var(--accent);
-  background:color-mix(in srgb, var(--accent) 14%, transparent);
+  color:#fff;background:var(--accent);
 }
-.doc-stat-body{display:block;min-width:0;}
-.doc-stat-v{display:block;font-size:19px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--accent);}
-.doc-stat-l{display:block;font-size:9px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase;margin-top:4px;}
+/* Wraps rather than truncating. "PLANNED TOMORROW" clipped to "PLANNED TO..." is
+   indistinguishable from "PLANNED TODAY", so an ellipsis here does not just look
+   untidy — it makes two different tiles read as the same one. */
+.doc-stat-l{
+  font-size:8.5px;font-weight:700;color:var(--ink-3);letter-spacing:.04em;
+  text-transform:uppercase;line-height:1.25;
+}
+/* Top-align so a two-line label does not push its badge off-centre from the
+   single-line badges beside it. */
+.doc-stat-head{align-items:flex-start;}
+.doc-stat-ic{margin-top:1px;}
+/* Bars and notes sit at the bottom of the tile, so a tile without them still
+   lines its number up with the ones that have them. */
+.doc-stat-row{margin-top:auto;}
+.doc-stat-row{display:flex;align-items:baseline;justify-content:space-between;gap:6px;}
+.doc-stat-v{font-size:22px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--ink);}
+/* The share sits beside the number, in the accent, so the bar below has a value
+   attached to it rather than being a shape on its own. */
+.doc-stat-pct{font-size:11px;font-weight:700;color:var(--accent);line-height:1;}
+.doc-stat-note{font-size:9px;font-weight:600;color:var(--ink-3);opacity:.75;line-height:1.2;}
+/* Only rendered where a share genuinely exists — see the pct note in DoctorApp. */
+.doc-stat-range{
+  position:relative;width:100%;height:4px;border-radius:4px;margin-top:1px;
+  background:color-mix(in srgb, var(--ink-3) 22%, transparent);
+}
+.doc-stat-fill{
+  position:absolute;top:0;left:0;height:100%;border-radius:4px;
+  background:var(--accent);transition:width .3s ease;
+}
 
 /* Illustration in the hero. Deliberately faint and behind the text: it is
    atmosphere, not information, and must never compete with the greeting or the
