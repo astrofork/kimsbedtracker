@@ -419,14 +419,22 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // Wards and Reserved have no illustration that means the right thing, so they
   // take an abstract wave rather than borrowing a picture that says something
   // else — a first-aid kit on "Reserved" would be worse than no art at all.
+  // Colours come from the theme's OWN palette, not from tokens invented for this
+  // screen. The rule is simple enough to hold as more tiles are added:
+  //   structural counts (how much capacity exists) -> --primary
+  //   bed states                                   -> the status colour already
+  //                                                   used for that state
+  //                                                   everywhere else in the app
+  // That is what makes a green badge mean "vacant" here and on the ward grid,
+  // instead of six hues chosen because they looked different from each other.
   const stats = [
-    ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building", "kit"],
-    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid", "wave5"],
-    ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed", "bed"],
+    ["Blocks", me.blocks.length, "var(--primary)", null, "building", "kit"],
+    ["Wards", me.wardCount, "var(--primary)", null, "grid", "wave5"],
+    ["Beds", s.total, "var(--primary)", null, "bed", "bed"],
     ["Occupied", totalOcc, "var(--st-o)", null, "user", "doctor"],
     ["Vacant", s.vacant, "var(--st-v)", null, "check", "pulse"],
-    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark", "wave2"],
-    ...(lounge ? [["In Lounge", lounge.patients, "var(--doc-a-lounge)",
+    ["Reserved", reserved, "var(--st-vr)", null, "bookmark", "wave2"],
+    ...(lounge ? [["In Lounge", lounge.patients, "var(--teal)",
                    lounge.free ? `${lounge.free} free` : "none free", "clock", "lounge"]] : []),
   ];
 
