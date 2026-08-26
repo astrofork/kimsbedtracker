@@ -915,6 +915,21 @@ body.hero-gone .appbar{
   .doc-stat:hover,.doc-stat:active{transform:none;}
   .doc-stat:hover .doc-stat-art{transform:none;}
 }
+/* Watermark. Bottom-right, bleeding past the corner so it reads as texture
+   rather than a second element. Only the discharge tiles carry one — the
+   capacity row is deliberately plain so nothing sits behind the figures a doctor
+   actually reads. */
+.doc-stat-art{
+  position:absolute;right:-6px;bottom:-6px;z-index:0;pointer-events:none;
+  width:78px;height:56px;
+  background-repeat:no-repeat;background-position:right bottom;background-size:contain;
+  opacity:.7;transition:transform .4s ease, opacity .4s ease;
+}
+/* The dark cut is drawn dark, so it needs MORE presence on a dark panel, not
+   less — the instinct to dim artwork in dark mode is backwards once the art is
+   drawn for that background. */
+[data-theme="dark"] .doc-stat-art{opacity:1;}
+
 .doc-stat-head{display:flex;align-items:center;gap:7px;min-width:0;position:relative;z-index:1;}
 /* Solid accent disc with a white glyph. Deliberately not a tint: at this size a
    14% wash reads as grey. */
