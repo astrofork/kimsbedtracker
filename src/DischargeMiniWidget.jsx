@@ -55,7 +55,7 @@ export default function DischargeMiniWidget({ rich = false }) {
               <span className="doc-stat-l">{label.toUpperCase()}</span>
             </span>
             <span className="doc-stat-row"><span className="doc-stat-v">{counts[key]}</span></span>
-            <img className="doc-stat-art doc-stat-art--img" src={`/art/${art}.webp`} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span className={`doc-stat-art art-${art}`} aria-hidden="true" />
           </div>
         ))}
       </div>

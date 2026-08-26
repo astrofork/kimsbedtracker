@@ -896,6 +896,20 @@ body.hero-gone .appbar{
   min-height:88px;
   background:var(--panel);border:1px solid var(--line);border-radius:14px;
   padding:10px 11px;text-align:left;box-shadow:var(--shadow);
+  transition:transform .4s ease, box-shadow .4s ease;
+}
+/* Press-in feel: the card shrinks slightly on hover and further on click, while
+   the illustration grows a touch — the counter-motion is what makes it read as
+   depth rather than the whole tile just getting smaller. */
+.doc-stat:hover{transform:scale(.97);box-shadow:var(--shadow-md);}
+.doc-stat:hover .doc-stat-art{transform:scale(1.08);opacity:.55;}
+.doc-stat:active{transform:scale(.94);}
+/* Honour a reduced-motion preference: these tiles are ambient, and a scale
+   animation on eleven of them at once is exactly what that setting is for. */
+@media (prefers-reduced-motion:reduce){
+  .doc-stat,.doc-stat-art{transition:none;}
+  .doc-stat:hover,.doc-stat:active{transform:none;}
+  .doc-stat:hover .doc-stat-art{transform:none;}
 }
 .doc-stat-head{display:flex;align-items:flex-start;gap:6px;min-width:0;position:relative;z-index:1;}
 /* Solid accent disc with a white glyph. Deliberately not a tint: at this size a
@@ -926,24 +940,44 @@ body.hero-gone .appbar{
   line-height:1.2;text-align:center;
 }
 /* Watermark. Bottom-right, bleeding past the corner so it reads as texture
-   rather than a second element. Faint enough that it never competes with the
-   figure. */
+   rather than a second element. */
 .doc-stat-art{
-  position:absolute;right:-12px;bottom:-14px;z-index:0;pointer-events:none;
-  color:var(--accent);opacity:.07;line-height:0;
+  position:absolute;right:-6px;bottom:-6px;z-index:0;pointer-events:none;
+  width:78px;height:56px;
+  background-repeat:no-repeat;background-position:right bottom;background-size:contain;
+  opacity:.42;transition:transform .4s ease, opacity .4s ease;
 }
-[data-theme="dark"] .doc-stat-art{opacity:.12;}
+/* Dark mode swaps the ASSET rather than filtering the light one. Dimming and
+   desaturating a pale-mint illustration still leaves a washed-out grey smudge —
+   the art has to be drawn for a dark panel, not corrected towards one. Because
+   the swap happens in CSS, only the active theme's images are ever fetched. */
+[data-theme="dark"] .doc-stat-art{opacity:.5;}
 
-/* The illustrations are fixed-colour artwork, so unlike the icon watermark they
-   cannot follow a theme token. Two consequences are handled here:
-   - they sit lower in opacity than the icon fallback, because a full-colour
-     picture draws far more attention than a monochrome glyph at the same value;
-   - on dark panels they are dimmed further AND desaturated, since pale mint and
-     sky blue on a near-black card reads as a bright smudge rather than texture. */
-.doc-stat-art--img{
-  right:-10px;bottom:-8px;width:74px;height:auto;opacity:.3;
-}
-[data-theme="dark"] .doc-stat-art--img{opacity:.16;filter:saturate(.55);}
+.art-hospital{background-image:url(/art/hospital.webp);}
+.art-lounge{background-image:url(/art/lounge.webp);}
+.art-doctor{background-image:url(/art/doctor.webp);}
+.art-chart{background-image:url(/art/chart.webp);}
+.art-clipboard{background-image:url(/art/clipboard.webp);}
+.art-calendar{background-image:url(/art/calendar.webp);}
+.art-bed{background-image:url(/art/bed.webp);}
+.art-kit{background-image:url(/art/kit.webp);}
+.art-shield{background-image:url(/art/shield.webp);}
+.art-pulse{background-image:url(/art/pulse.webp);}
+.art-wave2{background-image:url(/art/wave2.webp);}
+.art-wave5{background-image:url(/art/wave5.webp);}
+
+[data-theme="dark"] .art-hospital{background-image:url(/art/hospital-dark.webp);}
+[data-theme="dark"] .art-lounge{background-image:url(/art/lounge-dark.webp);}
+[data-theme="dark"] .art-doctor{background-image:url(/art/doctor-dark.webp);}
+[data-theme="dark"] .art-chart{background-image:url(/art/chart-dark.webp);}
+[data-theme="dark"] .art-clipboard{background-image:url(/art/clipboard-dark.webp);}
+[data-theme="dark"] .art-calendar{background-image:url(/art/calendar-dark.webp);}
+[data-theme="dark"] .art-bed{background-image:url(/art/bed-dark.webp);}
+[data-theme="dark"] .art-kit{background-image:url(/art/kit-dark.webp);}
+[data-theme="dark"] .art-shield{background-image:url(/art/shield-dark.webp);}
+[data-theme="dark"] .art-pulse{background-image:url(/art/pulse-dark.webp);}
+[data-theme="dark"] .art-wave2{background-image:url(/art/wave2-dark.webp);}
+[data-theme="dark"] .art-wave5{background-image:url(/art/wave5-dark.webp);}
 
 /* Illustration in the hero. Deliberately faint and behind the text: it is
    atmosphere, not information, and must never compete with the greeting or the
@@ -951,9 +985,10 @@ body.hero-gone .appbar{
 .doc-hero{position:relative;overflow:hidden;}
 .doc-hero-art{
   display:none;position:absolute;right:0;bottom:0;
-  width:min(300px,40%);height:auto;pointer-events:none;opacity:.55;
+  width:min(300px,40%);height:100%;pointer-events:none;opacity:.8;
+  background-repeat:no-repeat;background-position:right bottom;background-size:contain;
 }
-[data-theme="dark"] .doc-hero-art{opacity:.3;filter:saturate(.6);}
+[data-theme="dark"] .doc-hero-art{opacity:.85;}
 @media (min-width:720px){.doc-hero-art{display:block;}}
 /* Dark panels swallow a 13% fill, so it is lifted just enough to stay visible
    without turning into a shape the eye tracks. */

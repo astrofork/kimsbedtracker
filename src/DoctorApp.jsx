@@ -415,16 +415,17 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
   // a literal — it drives the badge and the watermark, so a hard-coded value
   // would look wrong the moment the user switches theme.
   const reserved = (s.reserved || 0) + (s.occupied_reserved || 0);
-  // [label, value, accent, note, icon, art]. `art` names a file in public/art —
-  // omitted where no illustration fits, and those tiles fall back to a faint copy
-  // of their own icon rather than borrowing a picture that means something else.
+  // [label, value, accent, note, icon, art]. `art` names a sprite in public/art.
+  // Wards and Reserved have no illustration that means the right thing, so they
+  // take an abstract wave rather than borrowing a picture that says something
+  // else — a first-aid kit on "Reserved" would be worse than no art at all.
   const stats = [
     ["Blocks", me.blocks.length, "var(--doc-a-blocks)", null, "building", "kit"],
-    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid", null],
+    ["Wards", me.wardCount, "var(--doc-a-wards)", null, "grid", "wave5"],
     ["Beds", s.total, "var(--doc-a-beds)", outOfService ? `${outOfService} out of service` : null, "bed", "bed"],
     ["Occupied", totalOcc, "var(--st-o)", null, "user", "doctor"],
     ["Vacant", s.vacant, "var(--st-v)", null, "check", "pulse"],
-    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark", null],
+    ["Reserved", reserved, "var(--doc-a-res)", null, "bookmark", "wave2"],
     ...(lounge ? [["In Lounge", lounge.patients, "var(--doc-a-lounge)",
                    lounge.free ? `${lounge.free} free` : "none free", "clock", "lounge"]] : []),
   ];
@@ -449,7 +450,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                 inherits a theme token — a flat asset would keep its own colours
                 when the user switches theme, which is exactly what looks broken.
                 aria-hidden because it carries no information. */}
-            <img className="doc-hero-art" src="/art/hospital.webp" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+            <span className="doc-hero-art art-hospital" aria-hidden="true" />
           </div>
 
           <div className="doc-statline">
@@ -467,9 +468,11 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                     information, so it should neither block the first paint nor be
                     announced. Tiles without an illustration fall back to a faint
                     copy of their own icon. */}
-                {art
-                  ? <img className="doc-stat-art doc-stat-art--img" src={`/art/${art}.webp`} alt="" aria-hidden="true" loading="lazy" decoding="async" />
-                  : <span className="doc-stat-art" aria-hidden="true"><Ic d={icons[ic] || icons.grid} s={64} /></span>}
+                {/* CSS background rather than <img>: the sheet ships in a light
+                    and a dark cut, and a stylesheet can swap them on the theme
+                    while markup cannot. It also means only the ACTIVE theme's
+                    images are ever fetched. */}
+                <span className={`doc-stat-art art-${art}`} aria-hidden="true" />
               </div>
             ))}
           </div>
