@@ -32,6 +32,15 @@
 :root {
   /* DARK */
   --bg:#0b0f14; --panel:#11181f; --panel-2:#161f28; --line:#22303c;
+  /* Neumorphic surface for the doctor capacity tiles. The effect is a light
+     source: a highlight on the top-left and a shadow on the bottom-right of a
+     surface the SAME colour as the page. That is why these are separate tokens
+     rather than --panel — a white card on an off-white page has no surface to
+     be extruded from. Dark themes invert the pair: a white highlight there
+     would read as a glowing edge, so the light is a faint white wash and the
+     depth is near-black. */
+  --neu-bg:#161f28; --neu-light:rgba(255,255,255,.05); --neu-dark:rgba(0,0,0,.55);
+  --neu-inset:rgba(0,0,0,.30);
   --ink:#e8eef3; --ink-2:#9fb0bd; --ink-3:#647686;
   --teal:#3B82F6; --teal-deep:#2563EB;
   --green:#34d399; --green-bg:#0e2820;
@@ -71,6 +80,8 @@
 
 [data-theme="light"] {
   --bg:#F8FAFC; --panel:#FFFFFF; --panel-2:#F8FAFC; --line:#E5E7EB;
+  --neu-bg:#E8ECF2; --neu-light:#FFFFFF; --neu-dark:rgb(163,173,190);
+  --neu-inset:rgb(214,220,229);
   --ink:#111827; --ink-2:#6B7280; --ink-3:#9CA3AF;
   --teal:#2563EB; --teal-deep:#1D4ED8;
   --green:#16A34A; --green-bg:#DCFCE7;
@@ -94,6 +105,8 @@
 
 [data-theme="purple"] {
   --bg:#F3EEFF; --panel:#FFFFFF; --panel-2:#F8F4FF; --line:#E4D9FF;
+  --neu-bg:#EDE6FB; --neu-light:#FFFFFF; --neu-dark:rgb(182,166,214);
+  --neu-inset:rgb(222,212,242);
   --ink:#1E1B4B; --ink-2:#6B7280; --ink-3:#9CA3AF;
   --teal:#7C3AED; --teal-deep:#5B21B6;
   --green:#16A34A; --green-bg:#DCFCE7;
@@ -118,6 +131,8 @@
 
 [data-theme="teal"] {
   --bg:#E8F6F8; --panel:#FFFFFF; --panel-2:#F0FAFB; --line:#B2E8ED;
+  --neu-bg:#DDF0F3; --neu-light:#FFFFFF; --neu-dark:rgb(150,190,196);
+  --neu-inset:rgb(200,228,232);
   --ink:#0F2A2A; --ink-2:#6B7280; --ink-3:#9CA3AF;
   --teal:#14B8A6; --teal-deep:#0D9488;
   --green:#16A34A; --green-bg:#CCFBF1;
@@ -969,6 +984,55 @@ body.hero-gone .appbar{
 [data-theme="dark"] .art-clipboard{background-image:url(/art/clipboard-dark.webp);}
 [data-theme="dark"] .art-chart{background-image:url(/art/chart-dark.webp);}
 [data-theme="dark"] .art-shield{background-image:url(/art/shield-dark.webp);}
+
+/* ── Neumorphic capacity tiles ────────────────────────────────────────────────
+   Applied ONLY to the capacity row: :not(--wide) excludes the four discharge
+   counters, which keep the flat card look and their illustrations. Soft-UI
+   behind artwork would fight it.
+
+   The surface is --neu-bg, not --panel, and matches the page: the whole effect
+   is a shape pressed out of the background, which needs the two to be the same
+   colour. The border is removed for the same reason — an outline states an edge
+   that the shadows are meant to imply. */
+/* The row itself takes the surface, so the tiles are shapes pressed OUT of a
+   continuous ground. Sitting on the page background they read as grey blocks
+   with a shadow — the effect needs something to be extruded from. */
+.doc-statline:not(.doc-statline--wide){
+  background:var(--neu-bg);
+  border-radius:22px;
+  padding:14px;
+  gap:14px;
+}
+.doc-statline:not(.doc-statline--wide) .doc-stat{
+  background:var(--neu-bg);
+  border:none;
+  border-radius:18px;
+  box-shadow:
+    -6px -6px 12px var(--neu-light),
+     6px  6px 12px var(--neu-dark),
+    inset -1px -1px 3px var(--neu-inset);
+}
+/* Pressed IN rather than scaled down: on a raised surface, inverting the light
+   is what a press looks like. The scale is dropped here because moving a shape
+   whose shadow implies a fixed light source breaks the illusion. */
+.doc-statline:not(.doc-statline--wide) .doc-stat:hover{
+  transform:none;
+  box-shadow:
+    -3px -3px 8px var(--neu-light),
+     3px  3px 8px var(--neu-dark),
+    inset -1px -1px 3px var(--neu-inset);
+}
+.doc-statline:not(.doc-statline--wide) .doc-stat:active{
+  transform:none;
+  box-shadow:
+    inset -5px -5px 10px var(--neu-light),
+    inset  5px  5px 10px var(--neu-dark);
+}
+/* The badge sits on the same surface, so it gets the same treatment at a
+   smaller radius — without it the disc looks pasted onto the card. */
+.doc-statline:not(.doc-statline--wide) .doc-stat-ic{
+  box-shadow:-2px -2px 4px var(--neu-light), 2px 2px 4px var(--neu-dark);
+}
 
 /* ── Phone ────────────────────────────────────────────────────────────────────
    Eleven tiles stacked five rows deep push everything below them off the screen,
