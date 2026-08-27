@@ -4856,7 +4856,7 @@ export function DischargePhaseManager({ showToast }) {
                   onChange={(e) => setDraft(d => ({ ...d, label: e.target.value }))} />
                 <div className="row" style={{ gap: 8 }}>
                   <input className="field" maxLength={100} value={draft.department}
-                    placeholder="Department (e.g. Pharmacy)" style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
+                    placeholder="Roles with access (e.g. PRE / Nurse / Pharmacy)" style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
                     onChange={(e) => setDraft(d => ({ ...d, department: e.target.value }))} />
                   <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
                     <input className="field" type="number" min={0} max={1440} value={draft.expected_minutes}

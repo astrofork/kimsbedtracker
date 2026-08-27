@@ -2031,6 +2031,11 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   overflow:hidden;
 }
 
+/* Shimmer bars sized like the text they stand in for. */
+.dq-sk{display:block;height:11px;border-radius:5px;}
+.dq-sk-2{height:9px;margin-top:6px;opacity:.7;}
+.dq-wrap[aria-busy="true"] tbody tr{cursor:default;}
+
 /* ── Discharges top bar ───────────────────────────────────────────────────────
      Title and the four counts in one line. The counts double as the filter, so
      the page no longer carries four stat cards and a select that said the same

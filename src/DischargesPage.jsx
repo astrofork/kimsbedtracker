@@ -10,11 +10,20 @@ import { BackBtn } from "./PREApp.jsx";
 const currentStep = (row) =>
   DISCHARGE_STEP_LABELS.find(([col]) => row[col] !== "NOT_APPLICABLE" && row[col] === "PENDING") || null;
 
+/** The table's columns. The skeleton draws the same ones, so the layout the
+ *  reader sees while loading is the layout they end up with. */
+const COLS = ["Bed & ward", "Patient", "Payer type", "Current stage & roles", "Progress", "SLA status", "Quick actions"];
+/** Rough share of each column filled by a shimmer bar — a flat grid of equal
+ *  bars reads as a chart, not as text about to arrive. */
+const SK_W = ["70%", "80%", "45%", "85%", "100%", "60%", "72%"];
+
 /** The four views of this list — each tab is a count and the filter for it. */
 const TABS = [["ALL", "All discharges"], ["PLANNED", "Planned"], ["RUNNING", "In progress"], ["DELAYED", "Delayed"]];
 
 /** discharge_tracking column → the SLA phase key the backend reports under, so a
- *  row can name the department handling its current stage. */
+ *  row can name the roles that can act on its current stage. The API field is
+ *  still called `department`, but what it holds is a role list ("PRE / Nurse /
+ *  Pharmacy"), which is what the column says. */
 const phaseKey = (col) => col.replace(/_status$/, "").toUpperCase();
 
 /** One table row per discharge. The row is clickable, and the last cell repeats
@@ -26,7 +35,7 @@ function DischargeRow({ row, onOpen }) {
   const cur = currentStep(row);
   const wf = row.workflow;
   const tone = workflowTone(wf);
-  const dept = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : null;
+  const roles = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : null;
 
   return (
     <tr onClick={onOpen}>
@@ -49,7 +58,7 @@ function DischargeRow({ row, onOpen }) {
         ) : (
           <>
             <b>{cur ? cur[1] : "Awaiting checkout"}</b>
-            {dept && <i>{dept}</i>}
+            {roles && <i>{roles}</i>}
             {wf?.eta && (
               <i>Est. {fmtClock(wf.eta)}{wf.etaMinutes != null ? `, ${fmtMins(wf.etaMinutes)} left` : ""}</i>
             )}
@@ -215,18 +224,18 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
   const exportCsv = () => {
     const esc = (c) => `"${String(c ?? "").replace(/"/g, '""')}"`;
     const head = ["Bed", "Ward", "Patient", "IP", "Payer type", "Status",
-      "Current stage", "Department", "Progress %", "SLA status", "Est. completion", "Updated"];
+      "Current stage", "Roles with access", "Progress %", "SLA status", "Est. completion", "Updated"];
     const lines = [head.map(esc).join(",")];
     for (const r of shown) {
       const cur = currentStep(r);
       const wf = r.workflow;
       const prog = dischargeProgress(r);
-      const dept = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : "";
+      const roles = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : "";
       lines.push([
         r.bed_name, r.ward_name, r.patient_name || "", r.ip_last6 || "", r.payer_type || "",
         r.status === "PLANNED" ? `Planned ${r.planned_date}${r.planned_time ? " " + r.planned_time : ""}` : "In progress",
         cur ? cur[1] : (r.status === "PLANNED" ? "" : "Awaiting checkout"),
-        dept || "", prog ? prog.pct : "",
+        roles || "", prog ? prog.pct : "",
         workflowTone(wf)?.label || "", wf?.eta ? fmtClock(wf.eta) : "",
         r.updated_at ? new Date(Number(r.updated_at)).toLocaleString() : "",
       ].map(esc).join(","));
@@ -300,7 +309,27 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
 
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
       {rows === null && !error && (
-        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
+        /* The table's own chrome with shimmer in the cells — the page doesn't
+           reflow from a stack of cards into a table when the data lands. */
+        <div className="tbl-wrap dq-wrap" aria-busy="true">
+          <table className="tbl tbl-pin1 dq-tbl">
+            <thead>
+              <tr>{COLS.map((c) => <th key={c}>{c}</th>)}</tr>
+            </thead>
+            <tbody>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <tr key={i}>
+                  {COLS.map((c, j) => (
+                    <td key={c}>
+                      <span className="preui-sk dq-sk" style={{ width: SK_W[j] }} />
+                      {j < 2 && <span className="preui-sk dq-sk dq-sk-2" style={{ width: "55%" }} />}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {rows && shown.length === 0 && (
         <div className="card empty" style={{ padding: 28 }}>
@@ -323,15 +352,7 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
         <div className="tbl-wrap dq-wrap">
           <table className="tbl tbl-pin1 dq-tbl">
             <thead>
-              <tr>
-                <th>Bed &amp; ward</th>
-                <th>Patient</th>
-                <th>Payer type</th>
-                <th>Current stage &amp; department</th>
-                <th>Progress</th>
-                <th>SLA status</th>
-                <th>Quick actions</th>
-              </tr>
+              <tr>{COLS.map((c) => <th key={c}>{c}</th>)}</tr>
             </thead>
             <tbody>
               {shown.map((row) => (
