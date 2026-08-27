@@ -6,138 +6,77 @@ import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins
 import DischargeTab from "./DischargeTab.jsx";
 import { BackBtn } from "./PREApp.jsx";
 
-// Two-letter code inside each circle — full name appears on hover (title) or tap/hold.
-const STEP_SHORT = {
-  discharge_initiation_status: "DI",
-  discharge_doc_status: "DS",
-  drug_return_status: "DR",
-  pharmacy_clearance_status: "PH",
-  procedure_reconciliation_status: "PR",
-  billing_started_status: "BL",
-  audit_status: "AU",
-  bill_ready_status: "BR",
-  payment_status: "PY",
-  system_checkout_status: "SC",
-  physical_checkout_status: "PX",
-};
+/** discharge_tracking column → the SLA phase key the backend reports under, so a
+ *  row can name the department handling its current stage. */
+const phaseKey = (col) => col.replace(/_status$/, "").toUpperCase();
 
-/** (DS)—(DR)—(PH)—… — one lettered circle per applicable step; completed filled green,
- *  current ringed in primary. Tapping/holding a circle shows the full step name in a
- *  bubble under the stepper (hover shows it as a native tooltip on desktop). */
-function FlowStepper({ t }) {
-  const [sel, setSel] = useState(null); // { label, state } | null
-  const steps = DISCHARGE_STEP_LABELS.filter(([col]) => t[col] !== "NOT_APPLICABLE");
-  const curIdx = steps.findIndex(([col]) => t[col] === "PENDING");
-
-  const pick = (e, label, state) => {
-    e.stopPropagation(); // the whole card is a button — don't navigate
-    setSel((s) => (s && s.label === label ? null : { label, state }));
-  };
-
-  return (
-    <div>
-      <div className="dstep">
-        {steps.map(([col, label], i) => {
-          const done = t[col] === "COMPLETED";
-          const cur = i === curIdx;
-          const state = done ? "Completed" : cur ? "Current step" : "Pending";
-          return (
-            <React.Fragment key={col}>
-              {i > 0 && <span className={"l" + (done ? " done" : "")} />}
-              <span
-                className={"c" + (done ? " done" : cur ? " cur" : "")}
-                title={`${label} — ${state}`}
-                role="button"
-                tabIndex={0}
-                onClick={(e) => pick(e, label, state)}
-                onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && pick(e, label, state)}
-              >
-                {STEP_SHORT[col]}
-              </span>
-            </React.Fragment>
-          );
-        })}
-      </div>
-      {sel && (
-        <span className="dstep-tip" onClick={(e) => e.stopPropagation()}>
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-            background: sel.state === "Completed" ? "var(--st-v)" : sel.state === "Current step" ? "var(--primary)" : "var(--ink-3)",
-          }} />
-          {sel.label} — {sel.state}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function DischargeCard({ row, onOpen }) {
+/** One table row per discharge. The row is clickable, and the last cell repeats
+ *  it as an explicit button for anyone who wants a target to aim at. */
+function DischargeRow({ row, onOpen }) {
   const planned = row.status === "PLANNED";
   const prog = dischargeProgress(row);
-  // Current stage name: first pending applicable step (or the plan date when not started)
+  // Current stage = first pending applicable step.
   const cur = DISCHARGE_STEP_LABELS.find(([col]) => row[col] !== "NOT_APPLICABLE" && row[col] === "PENDING");
   const wf = row.workflow;
   const tone = workflowTone(wf);
-  const isDelayed = wf?.state === "DELAYED";
+  const dept = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : null;
 
   return (
-    <button className="card" style={{
-      display: "block", width: "100%", textAlign: "left", padding: "14px 16px", cursor: "pointer",
-      // A delayed discharge earns the red edge — it's the one thing on this list
-      // that needs picking up before the others.
-      borderLeft: `4px solid ${planned ? "var(--st-vr)" : isDelayed ? "var(--red)" : "var(--primary)"}`,
-    }} onClick={onOpen}>
-      <div className="row between" style={{ gap: 10, flexWrap: "wrap" }}>
-        <div className="row" style={{ gap: 9, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ fontWeight: 800, fontSize: 15 }}>{row.bed_name}</span>
-          <span className="dim" style={{ fontSize: 12, fontWeight: 600 }}>{row.ward_name}</span>
-        </div>
-        <span className="tag" style={{
-          fontSize: 10.5, flexShrink: 0,
-          background: planned ? "var(--st-vr-bg)" : "var(--blue-bg)",
-          color: planned ? "var(--st-vr)" : "var(--blue)",
-        }}>
-          {planned ? `PLANNED · ${row.planned_date}${row.planned_time ? " " + row.planned_time : ""}` : "IN PROGRESS"}
-        </span>
-      </div>
+    <tr onClick={onOpen}>
+      <td className="dq-bed">
+        <b>{row.bed_name}</b>
+        <i>{row.ward_name}</i>
+      </td>
 
-      <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>{fmtIpLast6(row.ip_last6)}</div>
+      <td className="dq-pt">
+        <b className={row.patient_name ? "" : "dim"}>{row.patient_name || "Not recorded"}</b>
+        <i>{fmtIpLast6(row.ip_last6)}</i>
+        <i>Updated <RelativeTime ts={row.updated_at} /></i>
+      </td>
 
-      {!planned && (
-        <>
-          <FlowStepper t={row} />
-          <div className="row between" style={{ gap: 10, marginTop: 2 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--primary)" }}>
-              {cur ? `Current: ${cur[1]}` : "All steps complete — awaiting checkout"}
+      <td className="dq-pay">{row.payer_type || "—"}</td>
+
+      <td className="dq-stage">
+        {planned ? (
+          <b>Planned {row.planned_date}{row.planned_time ? " " + row.planned_time : ""}</b>
+        ) : (
+          <>
+            <b>{cur ? cur[1] : "Awaiting checkout"}</b>
+            {dept && <i>{dept}</i>}
+            {wf?.eta && (
+              <i>Est. {fmtClock(wf.eta)}{wf.etaMinutes != null ? `, ${fmtMins(wf.etaMinutes)} left` : ""}</i>
+            )}
+          </>
+        )}
+      </td>
+
+      <td className="dq-prog">
+        {prog ? (
+          <>
+            <em>{prog.pct}%</em>
+            <span className="doc-bar">
+              <i style={{ width: `${prog.pct}%`, background: "var(--primary)" }} />
             </span>
-            {prog && <span className="dim" style={{ fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>{prog.done}/{prog.total} · {prog.pct}%</span>}
-          </div>
-          {/* SLA line — backend-computed ETA plus which phases have slipped. */}
-          {wf && (
-            <div className="row between" style={{ gap: 8, marginTop: 5, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11.5, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                <Ic d={icons.clock} s={11} style={{ color: "var(--ink-3)" }} />
-                {wf.eta ? `Est. ${fmtClock(wf.eta)}` : "—"}
-                {wf.etaMinutes != null && (
-                  <span className="dim" style={{ fontWeight: 600 }}>· {fmtMins(wf.etaMinutes)} left</span>
-                )}
-              </span>
-              {tone && (
-                <span style={{
-                  fontSize: 9.5, fontWeight: 800, padding: "2px 7px", borderRadius: 99,
-                  background: tone.bg, color: tone.color, flexShrink: 0, letterSpacing: ".03em",
-                }}>{tone.label.toUpperCase()}</span>
-              )}
-            </div>
-          )}
-        </>
-      )}
+          </>
+        ) : <span className="dim">Not started</span>}
+      </td>
 
-      <div className="row between" style={{ marginTop: 8 }}>
-        <span className="dim" style={{ fontSize: 10.5 }}>Updated <RelativeTime ts={row.updated_at} /></span>
-        <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)" }} />
-      </div>
-    </button>
+      <td className="dq-sla">
+        {planned ? (
+          <span className="dq-pill" style={{ background: "var(--st-vr-bg)", color: "var(--st-vr)" }}>Planned</span>
+        ) : tone ? (
+          <span className="dq-pill" style={{ background: tone.bg, color: tone.color }}>{tone.label}</span>
+        ) : (
+          <span className="dq-pill" style={{ background: "var(--blue-bg)", color: "var(--blue)" }}>In progress</span>
+        )}
+      </td>
+
+      <td className="dq-act">
+        <button className="btn btn-ghost dq-view" onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+          <Ic d={icons.eye} s={13} /> View details
+        </button>
+      </td>
+    </tr>
   );
 }
 
@@ -243,49 +182,8 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
 
   return (
     <div className="slide-up">
-
-        {/* Its own row, not a fifth cell in the counter grid. As a grid cell it
-            landed alone on a third row filling about a third of it, reading as a
-            stat that had lost its number rather than as a control. */}
-        <div className="row between" style={{ gap: 8, marginBottom: 14 }}>
-          <span className="dim" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>
-            Showing
-          </span>
-          <select className="field" aria-label="Filter discharges" value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ width: "auto", flex: "0 0 auto", maxWidth: 190, fontWeight: 600 }}>
-            <option value="ALL">All</option>
-            <option value="PLANNED">Planned only</option>
-            <option value="RUNNING">In progress only</option>
-            <option value="DELAYED">Delayed only</option>
-          </select>
-        </div>
-
-      {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
-      {rows === null && !error && (
-        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
-      )}
-      {rows && shown.length === 0 && (
-        <div className="card empty" style={{ padding: 28 }}>
-          <Ic d={icons.clipboard} s={28} />
-          <div style={{ marginTop: 10, fontWeight: 700, fontSize: 14 }}>No active discharges</div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-            Planned and in-progress discharges across your wards appear here.
-          </div>
-        </div>
-      )}
-
-      {rows && shown.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {shown.map((row) => (
-            <DischargeCard key={row.admission_id} row={row}
-              onOpen={() => { saveScroll(); setOpenBed({ id: row.bed_id, bed_name: row.bed_name, ward_id: row.ward_id }); }} />
-          ))}
-        </div>
-      )}
-        {/* Counters at the BOTTOM, matching the Manage tab — they summarise the
-            list above them, so they read as its footer rather than a header
-            the reader has to scroll past to reach the discharges. */}
+      {/* The four counts read as the page's headline: how much is running and
+          how much of it has slipped, before the queue itself. */}
       <div className="stat-grid" style={{ marginBottom: 14 }}>
         <div className="stat">
           <div className="row" style={{ gap: 10 }}>
@@ -321,6 +219,64 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
           <div className="l">DELAYED</div>
         </div>
         </div>
+
+        {/* Its own row, not a fifth cell in the counter grid. As a grid cell it
+            landed alone on a third row filling about a third of it, reading as a
+            stat that had lost its number rather than as a control. */}
+        <div className="row between" style={{ gap: 8, marginBottom: 14 }}>
+          <span className="dim" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>
+            Showing
+          </span>
+          <select className="field" aria-label="Filter discharges" value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ width: "auto", flex: "0 0 auto", maxWidth: 190, fontWeight: 600 }}>
+            <option value="ALL">All</option>
+            <option value="PLANNED">Planned only</option>
+            <option value="RUNNING">In progress only</option>
+            <option value="DELAYED">Delayed only</option>
+          </select>
+        </div>
+
+      {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
+      {rows === null && !error && (
+        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
+      )}
+      {rows && shown.length === 0 && (
+        <div className="card empty" style={{ padding: 28 }}>
+          <Ic d={icons.clipboard} s={28} />
+          <div style={{ marginTop: 10, fontWeight: 700, fontSize: 14 }}>No active discharges</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            Planned and in-progress discharges across your wards appear here.
+          </div>
+        </div>
+      )}
+
+      {rows && shown.length > 0 && (
+        /* The app's own table, same as the dashboard's: header band, hairline
+           rows, first column pinned so the bed stays readable while the rest
+           scrolls sideways on a phone. */
+        <div className="tbl-wrap dq-wrap">
+          <table className="tbl tbl-pin1 dq-tbl">
+            <thead>
+              <tr>
+                <th>Bed &amp; ward</th>
+                <th>Patient</th>
+                <th>Payer type</th>
+                <th>Current stage &amp; department</th>
+                <th>Progress</th>
+                <th>SLA status</th>
+                <th>Quick actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((row) => (
+                <DischargeRow key={row.admission_id} row={row}
+                  onOpen={() => { saveScroll(); setOpenBed({ id: row.bed_id, bed_name: row.bed_name, ward_id: row.ward_id }); }} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
