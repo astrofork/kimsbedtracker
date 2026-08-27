@@ -2499,13 +2499,11 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 }
 .seg-tabs button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 
-/* Filled pill search — the app's .field, rounded and without the border. Scoped
-   to the input: a select sharing this row keeps its own border, or it reads as
-   a label floating in space rather than a control. */
-.pill-search input.field{
-  border-radius:99px;background:var(--panel-2);border-color:transparent;box-shadow:none;
-}
-.pill-search input.field:focus{background:var(--panel);border-color:var(--primary);}
+/* Pill search — the app's .field, only rounder. It keeps the panel background
+   and the --line border: the filled-grey version of this sat on a page that is
+   nearly the same grey, so the box had no visible edge at all. */
+.pill-search input.field{border-radius:99px;}
+.pill-search input.field:focus{border-color:var(--primary);}
 
 /* Counted filter chips */
 .chip-row{
