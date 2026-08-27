@@ -2559,12 +2559,6 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .fchip.warn:hover{border-color:var(--red);}
 .fchip.warn.on{background:var(--red);border-color:var(--red);color:#fff;}
 
-/* A select that matches the chips beside it. */
-.chip-select{
-  flex:0 0 auto;width:auto;padding:8px 14px;border-radius:99px;
-  font-size:12.5px;font-weight:700;max-width:150px;
-}
-
 /* ── WardPage search row — stack selects side-by-side on mobile ─────────── */
 @media(max-width:479px){
   .ward-search-row{flex-wrap:wrap;}

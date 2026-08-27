@@ -247,6 +247,12 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
     const o = occOf(w); a.total += o.total; a.occ += o.occ; return a;
   }, { total: 0, occ: 0 });
 
+  // Same rule as the block card on Home: operational wards, operational beds,
+  // discharge lounge excluded. Two screens counting the same block two ways is
+  // worse than either number on its own.
+  const usableWards = data.wards.filter((w) => w.operational && !w.is_discharge_lounge);
+  const usableBeds = usableWards.reduce((n, w) => n + (Number(w.usable_beds) || 0), 0);
+
   return (
     <div className="slide-up">
       {/* Header — back · block name + meta · doctors dropdown + Mark Reviewed */}
@@ -255,7 +261,9 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
           <BackBtn onClick={onBack} />
           <div style={{ minWidth: 0 }}>
             <div className="h1" style={{ fontSize: 20, letterSpacing: "-.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
-            <div className="ward-sub">{data.wards.length} ward{data.wards.length === 1 ? "" : "s"}</div>
+            <div className="ward-sub">
+              {usableWards.length} ward{usableWards.length === 1 ? "" : "s"}, {usableBeds} bed{usableBeds === 1 ? "" : "s"}
+            </div>
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
@@ -272,25 +280,36 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
         <div className="card empty"><Ic d={icons.grid} s={28} /><div style={{ marginTop: 8, fontWeight: 600 }}>No wards assigned</div></div>
       ) : (
         <>
-          <div className="floor-head">Wards</div>
           {ipNotFound && (
             <div className="dim" style={{ fontSize: 13, padding: "10px 2px", marginBottom: 8 }}>
               No patient found with that IP in your wards.
             </div>
           )}
-          {/* Search + ward picker */}
           {searchRow({
             value: wardSearch,
             onChange: setWardSearch,
-            placeholder: "Search ward / patient / IP…",
-            select: data.wards.length > 1 && (
-              <select className="field chip-select" aria-label="Filter by ward" value={wardFilter}
-                onChange={(e) => setWardFilter(e.target.value)}>
-                <option value="all">All ({data.wards.length})</option>
-                {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
-              </select>
-            ),
+            placeholder: "Search ward, patient, IP…",
           })}
+          {/* One chip per ward with its bed count — the same picker as the ward
+              page's bed filter, and it shows what is in the block without being
+              opened. */}
+          {data.wards.length > 1 && (
+            <div className="chip-row" role="group" aria-label="Filter by ward">
+              <button className={"fchip" + (wardFilter === "all" ? " on" : "")}
+                aria-pressed={wardFilter === "all"} onClick={() => setWardFilter("all")}>
+                All <span className="n">({data.wards.length})</span>
+              </button>
+              {data.wards.map((w) => (
+                <button key={w.id}
+                  className={"fchip" + (wardFilter === String(w.id) ? " on" : "")}
+                  aria-pressed={wardFilter === String(w.id)}
+                  onClick={() => setWardFilter(String(w.id))}>
+                  {w.name} <span className="n">({Number(w.usable_beds) || 0})</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="floor-head">Wards ({data.wards.length})</div>
           <div className="card-grid">
             {data.wards.filter((w) => {
               const dq = wardSearch.trim().toLowerCase();
