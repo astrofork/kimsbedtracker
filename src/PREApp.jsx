@@ -2601,7 +2601,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
             <div className="ward-sub">
               {beds.length} bed{beds.length !== 1 ? "s" : ""}
               {tab === "manage" && reviewedAt
-                ? <> <Ic d={icons.check} s={11} /> Reviewed <RelativeTime ts={reviewedAt} /></>
+                ? <>, <span className="ward-reviewed">reviewed <RelativeTime ts={reviewedAt} /></span></>
                 : tab === "manage" && cfg.reviewWard ? ", not reviewed yet" : ""}
             </div>
           </div>

@@ -256,8 +256,8 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
   return (
     <div className="slide-up">
       {/* Header — back · block name + meta · doctors dropdown + Mark Reviewed */}
-      <div className="row between" style={{ marginBottom: 16, gap: 10, flexWrap: "wrap" }}>
-        <div className="row" style={{ gap: 12, minWidth: 0, flex: "1 1 240px" }}>
+      <div className="block-hdr">
+        <div className="row" style={{ gap: 12, minWidth: 0, flex: "1 1 auto" }}>
           <BackBtn onClick={onBack} />
           <div style={{ minWidth: 0 }}>
             <div className="h1" style={{ fontSize: 20, letterSpacing: "-.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
@@ -266,7 +266,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
             </div>
           </div>
         </div>
-        <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+        <div className="row" style={{ gap: 8, flexShrink: 0 }}>
           <button className="btn-fly" disabled={reviewing || data.wards.length === 0} onClick={review}>
             <div className="svg-wrapper"><Ic d={icons.send} s={17} /></div>
             <span>{reviewing ? "Saving…" : "Mark Reviewed"}</span>

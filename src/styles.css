@@ -1182,7 +1182,12 @@ body.hero-gone .appbar{
 .doc-block-occ{font-size:12px;font-weight:800;color:var(--st-o);min-width:34px;text-align:right;}
 
 /* Ward card (block detail) */
-.doc-ward{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px;box-shadow:var(--shadow);display:flex;flex-direction:column;}
+/* min-width:0 — a grid item defaults to min-width:auto, so these cards refused
+   to shrink below their content and pushed the two-column grid ~21px past its
+   container in the narrow band just above 768px, scrolling the whole page
+   sideways. The mini stats inside shrink with it. */
+.doc-ward{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px;box-shadow:var(--shadow);display:flex;flex-direction:column;min-width:0;}
+.doc-minis > *{min-width:0;}
 .doc-ward-name{font-size:15px;font-weight:700;letter-spacing:-.01em;}
 .doc-ward-loc{font-size:11px;color:var(--ink-3);margin-bottom:1px;}
 .doc-minis{display:flex;gap:7px;margin:12px 0;}
@@ -2472,6 +2477,18 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   .ward-page-hdr-right{flex-basis:100%;}
 }
 
+/* Block header — the review action stays on the title's row at every width.
+   With wrap on, a narrow window dropped it onto a line of its own, which pushed
+   the search and chips down and read as a stray button under the name. */
+.block-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:10px;margin-bottom:16px;flex-wrap:nowrap;
+}
+.block-hdr .h1{min-width:0;}
+@media (max-width:420px){
+  .block-hdr .btn-fly{font-size:12px;}
+}
+
 /* ── Review button ────────────────────────────────────────────────────────────
      The supplied "send" button: on hover the tick lifts off and the label slides
      out behind it. Sizes are in em so the whole thing scales with font-size, and
@@ -2486,19 +2503,28 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   transition:all .2s;cursor:pointer;
 }
 .btn-fly:hover{background:var(--primary-deep);}
-.btn-fly span{display:block;margin-left:.3em;white-space:nowrap;transition:all .3s ease-in-out;}
-.btn-fly .svg-wrapper{display:flex;}
-.btn-fly svg{display:block;transform-origin:center center;transition:transform .3s ease-in-out;}
+.btn-fly span{display:block;margin-left:.3em;white-space:nowrap;transition:all .35s ease-in-out;}
+/* left, not transform: the wrapper's transform is spoken for by the bob
+   animation, and the two would overwrite each other. A percentage in `left`
+   resolves against the button's content box, so this lands the plane on the
+   button's centre whatever the label says — "Review" and "Mark Reviewed" both. */
+.btn-fly .svg-wrapper{display:flex;position:relative;left:0;transition:left .35s ease-in-out;}
+.btn-fly svg{display:block;transform-origin:center center;transition:transform .35s ease-in-out;}
 /* :not(:disabled) — a button that can't be pressed shouldn't invite the press. */
-.btn-fly:not(:disabled):hover .svg-wrapper{animation:fly-1 .6s ease-in-out infinite alternate;}
-.btn-fly:not(:disabled):hover svg{transform:translateX(1.2em) rotate(45deg) scale(1.1);}
-.btn-fly:not(:disabled):hover span{transform:translateX(5em);}
+.btn-fly:not(:disabled):hover .svg-wrapper{
+  left:calc(50% - 8.5px);
+  animation:fly-1 .6s ease-in-out infinite alternate;
+}
+.btn-fly:not(:disabled):hover svg{transform:rotate(45deg) scale(1.1);}
+/* 100% of the label's own width clears its starting box; the extra em carries
+   it past the button's padding so no sliver of it is left showing. */
+.btn-fly:not(:disabled):hover span{transform:translateX(calc(100% + 1.6em));}
 .btn-fly:not(:disabled):active{transform:scale(.95);}
 .btn-fly:disabled{opacity:.5;cursor:default;}
 .btn-fly:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 @media (prefers-reduced-motion:reduce){
-  .btn-fly,.btn-fly span,.btn-fly svg{transition:none;}
-  .btn-fly:hover .svg-wrapper{animation:none;}
+  .btn-fly,.btn-fly span,.btn-fly svg,.btn-fly .svg-wrapper{transition:none;}
+  .btn-fly:hover .svg-wrapper{animation:none;left:0;}
   .btn-fly:hover svg,.btn-fly:hover span{transform:none;}
   .btn-fly:active{transform:none;}
 }
@@ -2509,9 +2535,16 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
      instead of a dropdown you have to open to see what is in the ward. — */
 .ward-page-hdr .h1{font-size:20px;letter-spacing:-.02em;}
 .ward-page-hdr .ward-sub{font-size:12px;color:var(--ink-2);margin-top:2px;display:flex;align-items:center;gap:4px;}
+/* The review state carries the theme colour instead of a tick glyph — the icon
+   was doing the job of a separator and a status marker at once, and read as
+   neither. */
+.ward-reviewed{color:var(--primary);font-weight:700;}
 
 .seg-tabs{
-  display:flex;gap:4px;padding:4px;margin-bottom:14px;max-width:460px;
+  /* Centred: on a wide screen the bar is far narrower than the page, and pinned
+     left it drifted away from the content below it. On a phone the container is
+     narrower than the max-width, so the bar fills the row and this is a no-op. */
+  display:flex;gap:4px;padding:4px;margin:0 auto 14px;max-width:460px;
   background:var(--panel);border:1px solid var(--line);border-radius:99px;box-shadow:var(--shadow);
 }
 .seg-tabs button{
