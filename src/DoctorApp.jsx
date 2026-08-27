@@ -23,7 +23,6 @@ const DOCTOR_CFG = {
 import DischargeMiniWidget from "./DischargeMiniWidget.jsx";
 
 // ── Small helpers ───────────────────────────────────────────────────────────────
-const initialsOf = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
 const occOf = (w) => {
   const total = w.total_beds ?? w.total ?? 0;
   const on = w.occupied ?? 0, or = w.occupied_reserved ?? 0, vr = w.reserved ?? 0, vn = w.vacant ?? 0;
@@ -184,7 +183,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
   // and the grid describing the same block at all times.
   useEffect(() => { setData(getDoctorBlock(blockId)); }, [blockId]);
 
-  const [docsOpen, setDocsOpen] = useState(false); // doctors-list dropdown
   const [wardFilter, setWardFilter] = useState("all"); // "all" | ward id
   const [wardSearch, setWardSearch] = useState("");
   const [ipMatch, setIpMatch] = useState(null); // { wardId } | null — resolved IP lookup
@@ -260,29 +258,6 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-          {data.doctors.length > 0 && (
-            <div style={{ position: "relative" }}>
-              <button className="chip" onClick={() => setDocsOpen(o => !o)} aria-expanded={docsOpen}>
-                <Ic d={icons.users} s={13} /> {data.doctors.length} doctor{data.doctors.length !== 1 ? "s" : ""}
-                <Ic d={icons.chevron} s={12} style={{ transform: docsOpen ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform .15s" }} />
-              </button>
-              {docsOpen && (
-                <div style={{
-                  position: "absolute", left: 0, top: "calc(100% + 6px)", zIndex: 60,
-                  minWidth: 200, maxWidth: "calc(100vw - 32px)",
-                  background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 12,
-                  boxShadow: "var(--shadow-md)", padding: 6,
-                }}>
-                  {data.doctors.map((d) => (
-                    <div key={d.id} className="row" style={{ gap: 10, padding: "8px 10px", borderRadius: 8 }}>
-                      <span className="doc-chip-av">{initialsOf(d.name)}</span>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>{d.name}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
           <button className="btn btn-primary" style={{ padding: "10px 16px", fontSize: 13, whiteSpace: "nowrap" }} disabled={reviewing || data.wards.length === 0} onClick={review}>
             <Ic d={icons.check} s={15} /> {reviewing ? "Saving…" : "Mark Reviewed"}
           </button>
