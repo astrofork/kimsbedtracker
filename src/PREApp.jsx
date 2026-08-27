@@ -502,33 +502,33 @@ function Entry({ data, submitRound, submitting, alarmActive, onRefresh, onEngage
     <div>
       <OccupancyCards data={data} />
 
-      {/* Search + ward picker */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
-          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+      {/* Search + ward picker — one row that stays a row, the two controls the
+          same height and shape as the ward page's. */}
+      <div className="pill-search entry-tools">
+        <div className="entry-search">
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
             <Ic d={icons.search} s={15} />
           </span>
           <input
             className="field"
             value={wardSearch}
-            placeholder="Search ward / patient / IP…"
-            style={{ paddingLeft: 36, paddingRight: wardSearch ? 36 : 13 }}
+            placeholder="Search ward, patient, or IP…"
+            style={{ paddingLeft: 38, paddingRight: wardSearch ? 36 : 15 }}
             onChange={(e) => setWardSearch(e.target.value)}
           />
           {wardSearch && (
             <button
               onClick={() => setWardSearch("")}
               aria-label="Clear search"
-              style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
             >
               <Ic d={icons.x} s={14} />
             </button>
           )}
         </div>
         {data.wards.length > 1 && (
-          <select className="field" aria-label="Filter by ward" value={wardFilter}
-            onChange={(e) => setWardFilter(e.target.value)}
-            style={{ width: "auto", flex: "0 1 auto", maxWidth: 200, fontWeight: 600 }}>
+          <select className="field pill-select" aria-label="Filter by ward" value={wardFilter}
+            onChange={(e) => setWardFilter(e.target.value)}>
             <option value="all">All wards ({data.wards.length})</option>
             {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.ward}</option>)}
           </select>

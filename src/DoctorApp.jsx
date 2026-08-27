@@ -288,7 +288,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
           {searchRow({
             value: wardSearch,
             onChange: setWardSearch,
-            placeholder: "Search ward, patient, IP…",
+            placeholder: "Search ward, patient, or IP…",
           })}
           {/* One chip per ward with its bed count — the same picker as the ward
               page's bed filter, and it shows what is in the block without being
