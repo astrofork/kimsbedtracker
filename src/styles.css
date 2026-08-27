@@ -1062,7 +1062,11 @@ body.hero-gone .appbar{
      monitor does rather than a rearranged one. */
   .doc-tilescroll .doc-statline,
   .doc-tilescroll .doc-statline--wide{
-    min-width:700px;
+    /* 7 columns out of this width leaves ~115px each. At 700px they were ~100px
+       and "OCCUPIED" clipped against its badge — the label sits BESIDE the disc,
+       so the usable text width is the column minus the badge, the gap and the
+       padding, not the column itself. */
+    min-width:880px;
     grid-auto-flow:row;
     grid-auto-rows:auto;
   }
@@ -1079,10 +1083,13 @@ body.hero-gone .appbar{
    scroll and the bar would be a control for nothing. */
 .doc-scrollbar{display:none;}
 @media (max-width:640px){
+  /* Short and centred: a full-width bar reads as a divider under the row. At
+     this length it is unmistakably a position indicator, and the thumb's travel
+     across it is still the whole story. */
   .doc-scrollbar{
     display:block;position:relative;height:3px;border-radius:99px;
     background:color-mix(in srgb, var(--ink-3) 20%, transparent);
-    margin:0 0 12px;overflow:hidden;
+    width:110px;margin:2px auto 12px;overflow:hidden;
   }
   .doc-scrollbar span{
     position:absolute;top:0;bottom:0;border-radius:99px;
