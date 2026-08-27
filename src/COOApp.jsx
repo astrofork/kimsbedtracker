@@ -18,7 +18,7 @@ import {
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
 } from "./snapshot.js";
-import { naturalSort, calculateWardTotals } from "./bedUtils.js";
+import { naturalSort, calculateWardTotals, normalizeQuery, fmtIpLast6 } from "./bedUtils.js";
 import BedExplorerModal from "./BedExplorerModal.jsx";
 
 const HOSPITAL_NAME = "KIMS Hospitals";
@@ -5980,9 +5980,19 @@ function overstayTier(days) {
   return { bg: "var(--blue-bg)", color: "var(--blue)", label: `${n}d overdue` };
 }
 
+/** The four views of the overstay list — each tab is a count and its filter. */
+const OV_TABS = [["ALL", "All"], ["T1", "1 day over"], ["T2", "2–3 days"], ["T3", "4+ days"]];
+const OV_COLS = ["Bed & ward", "Patient", "Doctor", "Planned discharge", "Discharge status", "Overstay"];
+const OV_SK = ["70%", "80%", "60%", "50%", "65%", "55%"];
+
 export function OverstayPanel({ loadFn = api.cooOverstay }) {
   const [ov, setOv] = useState(null);
   const [err, setErr] = useState("");
+  const [filter, setFilter] = useState("ALL"); // ALL | T1 | T2 | T3
+  const [q, setQ] = useState("");
+  const [wardF, setWardF] = useState("");
+  const [docF, setDocF] = useState("");
+  const [statusF, setStatusF] = useState("");
 
   const load = useCallback(() => {
     loadFn()
@@ -6006,99 +6016,165 @@ export function OverstayPanel({ loadFn = api.cooOverstay }) {
     return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   };
 
+  // Tabs + toolbar work on the rows already loaded — the server sends the whole
+  // list, so narrowing it is instant and costs no request.
+  const rows = ov?.rows || [];
+  const uniq = (v) => [...new Set(v.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b)));
+  const nq = normalizeQuery(q);
+  const hit = (v) => normalizeQuery(v).includes(nq);
+  const pool = rows.filter((r) =>
+    (!nq || hit(r.bed) || hit(r.ward) || hit(r.patient_name) || hit(r.ip_last6) || hit(r.doctor)) &&
+    (!wardF || r.ward === wardF) &&
+    (!docF || r.doctor === docF) &&
+    (!statusF || r.discharge_status === statusF));
+
+  const days = (r) => Number(r.days_overdue);
+  const inTier = (r, k) => k === "T1" ? days(r) === 1 : k === "T2" ? days(r) >= 2 && days(r) <= 3 : days(r) >= 4;
+  const shown = filter === "ALL" ? pool : pool.filter((r) => inTier(r, filter));
+  const counts = {
+    ALL: pool.length,
+    T1: pool.filter((r) => inTier(r, "T1")).length,
+    T2: pool.filter((r) => inTier(r, "T2")).length,
+    T3: pool.filter((r) => inTier(r, "T3")).length,
+  };
+  const filtered = !!(nq || wardF || docF || statusF);
+  const clearAll = () => { setQ(""); setWardF(""); setDocF(""); setStatusF(""); };
+
+  /** Exports exactly what the table is showing. */
+  const exportCsv = () => {
+    const esc = (c) => `"${String(c ?? "").replace(/"/g, '""')}"`;
+    const head = ["Bed", "Ward", "Patient", "IP", "Doctor", "Planned discharge", "Discharge status", "Days overdue"];
+    const lines = [head.map(esc).join(",")];
+    for (const r of shown)
+      lines.push([r.bed, r.ward, r.patient_name || "", r.ip_last6 || "", r.doctor,
+        r.planned_date, String(r.discharge_status).replace(/_/g, " "), days(r)].map(esc).join(","));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    a.download = `overstay-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
   return (
     <div className="slide-up">
-      {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
-      {!ov && !err && (
-        <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
-      )}
-      {ov && (
-        <>
-          <div className="stat-grid" style={{ marginBottom: 16 }}>
-            <div className="stat">
-              <div className="row" style={{ gap: 10 }}>
-                <span className="ic" style={{ background: ov.total ? "var(--red-bg)" : "var(--panel-2)", color: ov.total ? "var(--red)" : "var(--ink-3)" }}>
-                  <Ic d={icons.alert} s={16} />
-                </span>
-                <div className="n" style={{ fontSize: 18, color: ov.total ? "var(--red)" : undefined }}>{ov.total}</div>
-              </div>
-              <div className="l">TOTAL OVERSTAY</div>
-            </div>
-            <div className="stat">
-              <div className="row" style={{ gap: 10 }}>
-                <span className="ic" style={{ background: "var(--blue-bg)", color: "var(--blue)" }}>
-                  <Ic d={icons.clock} s={16} />
-                </span>
-                <div className="n" style={{ fontSize: 18 }}>{ov.tier1}</div>
-              </div>
-              <div className="l">1 DAY OVER</div>
-            </div>
-            <div className="stat">
-              <div className="row" style={{ gap: 10 }}>
-                <span className="ic" style={{ background: "rgba(245,158,11,.12)", color: "#d97706" }}>
-                  <Ic d={icons.alert} s={16} />
-                </span>
-                <div className="n" style={{ fontSize: 18 }}>{ov.tier2}</div>
-              </div>
-              <div className="l">2–3 DAYS OVER</div>
-            </div>
-            <div className="stat">
-              <div className="row" style={{ gap: 10 }}>
-                <span className="ic" style={{ background: "var(--red-bg)", color: "var(--red)" }}>
-                  <Ic d={icons.alert} s={16} />
-                </span>
-                <div className="n" style={{ fontSize: 18, color: ov.tier3 ? "var(--red)" : undefined }}>{ov.tier3}</div>
-              </div>
-              <div className="l">4+ DAYS OVER</div>
-            </div>
-            <div className="stat" style={{ justifyContent: "center" }}>
-              <button className="btn" onClick={load} style={{ gap: 6 }}>
-                <Ic d={icons.refresh} s={14} /> Refresh
+      {/* Same shape as the Discharges page: the counts are the filter, the list
+          is a table, and the toolbar narrows it. */}
+      <div className="dq-top">
+        <div className="dq-title">Overstay Alerts</div>
+        <div className="dq-tabs" role="tablist" aria-label="Filter overstay">
+          {OV_TABS.map(([key, label]) => {
+            const n = ov ? counts[key] : null;
+            return (
+              <button key={key} role="tab" aria-selected={filter === key}
+                className={"dq-tab" + (filter === key ? " on" : "")}
+                onClick={() => setFilter(key)}>
+                {label} {n === null ? "" : `(${n})`}
+                {key === "T3" && n > 0 && <span className="dq-tab-badge">{n}</span>}
               </button>
-            </div>
-          </div>
+            );
+          })}
+        </div>
+      </div>
 
-          {ov.rows.length === 0 ? (
-            <div className="card empty" style={{ padding: 32 }}>
-              <Ic d={icons.check} s={28} />
-              <div style={{ fontWeight: 700, fontSize: 14, marginTop: 10 }}>No overstay patients</div>
-              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>No one's been waiting on Physical Checkout for over an hour after System Checkout.</div>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {ov.rows.map((r) => {
+      <div className="dq-tools">
+        <div className="dq-search">
+          <Ic d={icons.search} s={15} />
+          <input className="field" value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Search bed, patient, ward, or IP…" aria-label="Search overstay" />
+          {q && (
+            <button className="dq-clear" onClick={() => setQ("")} aria-label="Clear search">
+              <Ic d={icons.x} s={13} />
+            </button>
+          )}
+        </div>
+        <select className="field dq-sel" value={wardF} onChange={(e) => setWardF(e.target.value)} aria-label="Filter by ward">
+          <option value="">Ward</option>
+          {uniq(rows.map((r) => r.ward)).map((w) => <option key={w} value={w}>{w}</option>)}
+        </select>
+        <select className="field dq-sel" value={docF} onChange={(e) => setDocF(e.target.value)} aria-label="Filter by doctor">
+          <option value="">Doctor</option>
+          {uniq(rows.map((r) => r.doctor)).map((w) => <option key={w} value={w}>{w}</option>)}
+        </select>
+        <select className="field dq-sel" value={statusF} onChange={(e) => setStatusF(e.target.value)} aria-label="Filter by discharge status">
+          <option value="">Discharge status</option>
+          {uniq(rows.map((r) => r.discharge_status)).map((w) => (
+            <option key={w} value={w}>{String(w).replace(/_/g, " ")}</option>
+          ))}
+        </select>
+        {filtered && <button className="dq-reset" onClick={clearAll}>Clear</button>}
+        <button className="btn btn-ghost dq-export" onClick={load} title="Reload the list">
+          <Ic d={icons.refresh} s={14} /> Refresh
+        </button>
+        <button className="btn btn-ghost dq-export" onClick={exportCsv} disabled={shown.length === 0}>
+          <Ic d={icons.fileText} s={14} /> Export CSV
+        </button>
+      </div>
+
+      {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
+
+      {!ov && !err && (
+        <div className="tbl-wrap dq-wrap" aria-busy="true">
+          <table className="tbl tbl-pin1 dq-tbl ov-tbl">
+            <thead><tr>{OV_COLS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+            <tbody>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <tr key={i}>
+                  {OV_COLS.map((c, j) => (
+                    <td key={c}>
+                      <span className="preui-sk dq-sk" style={{ width: OV_SK[j] }} />
+                      {j < 2 && <span className="preui-sk dq-sk dq-sk-2" style={{ width: "55%" }} />}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {ov && shown.length === 0 && (
+        <div className="card empty" style={{ padding: 32 }}>
+          <Ic d={icons.check} s={28} />
+          <div style={{ fontWeight: 700, fontSize: 14, marginTop: 10 }}>
+            {rows.length ? "Nothing matches these filters" : "No overstay patients"}
+          </div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            {rows.length
+              ? `${rows.length} overstay patient${rows.length === 1 ? "" : "s"} are hidden by the search or filters.`
+              : "No one's been waiting on Physical Checkout for over an hour after System Checkout."}
+          </div>
+        </div>
+      )}
+
+      {ov && shown.length > 0 && (
+        <div className="tbl-wrap dq-wrap">
+          <table className="tbl tbl-pin1 dq-tbl ov-tbl">
+            <thead><tr>{OV_COLS.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+            <tbody>
+              {shown.map((r) => {
                 const tier = overstayTier(r.days_overdue);
                 return (
-                  <div key={r.admission_id} className="card" style={{ padding: "14px 16px", borderLeft: `4px solid ${tier.color}` }}>
-                    <div className="row between" style={{ flexWrap: "wrap", gap: 8 }}>
-                      <div className="row" style={{ gap: 8, flexWrap: "wrap", minWidth: 0 }}>
-                        <span style={{ fontWeight: 800, fontSize: 15 }}>{r.bed}</span>
-                        <span className="dim" style={{ fontSize: 12, fontWeight: 600 }}>{r.ward}</span>
-                      </div>
-                      <span className="tag" style={{ background: tier.bg, color: tier.color, fontWeight: 800, fontSize: 11, flexShrink: 0 }}>
-                        {tier.label.toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="dim" style={{ fontSize: 11, marginTop: 2 }}>IP ···{r.ip_last6}</div>
-                    <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 12 }}>
-                        <span className="dim">Doctor: </span><span style={{ fontWeight: 700 }}>{r.doctor}</span>
-                      </span>
-                      <span style={{ fontSize: 12 }}>
-                        <span className="dim">Planned: </span>
-                        <span style={{ fontWeight: 700, color: "var(--red)" }}>{fmtPlanDate(r.planned_date)}</span>
-                      </span>
-                      <span style={{ fontSize: 12 }}>
-                        <span className="dim">Status: </span>
-                        <span style={{ fontWeight: 700 }}>{r.discharge_status.replace(/_/g, " ")}</span>
-                      </span>
-                    </div>
-                  </div>
+                  <tr key={r.admission_id}>
+                    <td className="dq-bed">
+                      <b>{r.bed}</b>
+                      <i>{r.ward}</i>
+                    </td>
+                    <td className="dq-pt">
+                      <b className={r.patient_name ? "" : "dim"}>{r.patient_name || "Not recorded"}</b>
+                      <i>{fmtIpLast6(r.ip_last6)}</i>
+                    </td>
+                    <td className="ov-doc">{r.doctor}</td>
+                    <td className="ov-plan">{fmtPlanDate(r.planned_date)}</td>
+                    <td className="ov-status">{String(r.discharge_status).replace(/_/g, " ")}</td>
+                    <td className="dq-sla">
+                      <span className="dq-pill" style={{ background: tier.bg, color: tier.color }}>{tier.label}</span>
+                    </td>
+                  </tr>
                 );
               })}
-            </div>
-          )}
-        </>
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
