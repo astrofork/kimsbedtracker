@@ -1425,7 +1425,6 @@ export function useLiveBedDashboardData(scope, active) {
   const [snaps, setSnaps] = useState(null);
   const [payerTypes, setPayerTypes] = useState(null);
   const [consultantData, setConsultantData] = useState(null);
-  const [lastSync, setLastSync] = useState(new Date());
   // Hospital Snapshot / Occupancy / Transaction boards + their sparkline
   // history. These are Unit-FILTERED, and `viewBy` (which unit is selected)
   // lives here rather than in LiveBedDashboard so that both the selection and
@@ -1510,7 +1509,7 @@ export function useLiveBedDashboardData(scope, active) {
     if (w.wards !== versions.wards) {
       const at = versions.wards; w.wards = at;
       (scoped ? scoped.liveWards() : api.cooLiveWards())
-        .then((d) => { setLiveData(d); setLastSync(new Date()); })
+        .then((d) => { setLiveData(d); })
         .catch(() => { if (w.wards === at) w.wards = -1; /* keep stale, retry later */ });
     }
 
@@ -1571,7 +1570,7 @@ export function useLiveBedDashboardData(scope, active) {
     }
   }, [active, versions, scope, activeUnit, hospitalWide]);
 
-  return { liveData, snaps, payerTypes, consultantData, lastSync, adminCards, adminHistory, viewBy, setViewBy, unitOptions, activeUnit };
+  return { liveData, snaps, payerTypes, consultantData, adminCards, adminHistory, viewBy, setViewBy, unitOptions, activeUnit };
 }
 
 // `data` comes from useLiveBedDashboardData(), owned by the caller's top-level
@@ -1584,12 +1583,12 @@ export function LiveBedDashboard({ data, userName = "Admin", currentUsername = n
   // a ward-scoped user gate on this rather than on `scoped`.
   const hospitalWide = !scoped || scoped.hospitalWide === true;
   const topBarSlot = useTopBarSlot();
-  // liveData/snaps/payerTypes/consultantData/lastSync now come from the
+  // liveData/snaps/payerTypes/consultantData now come from the
   // caller's useLiveBedDashboardData() (see above) instead of being fetched
   // in here — this lets that data survive LiveBedDashboard itself
   // unmounting on tab switch. Named identically to the old local state so
   // every read further down in this function needs no other changes.
-  const { liveData, snaps, payerTypes, consultantData, lastSync,
+  const { liveData, snaps, payerTypes, consultantData,
     adminCards, adminHistory, setViewBy, unitOptions, activeUnit } = data;
   const [search, setSearch] = useState("");
   const [searchBy, setSearchBy] = useState("ward");
@@ -2669,17 +2668,6 @@ export function LiveBedDashboard({ data, userName = "Admin", currentUsername = n
       {hospitalWide && consultantData && consultantData.consultants.length > 0 && (
         <div id="nav-consultants" style={{ scrollMarginTop: 72 }}>
           <ConsultantsTable data={consultantData} search={search} searchBy={searchBy} />
-        </div>
-      )}
-
-      {hospitalWide && (
-        <div className="row between" style={{ marginTop: 4, flexWrap: "wrap", gap: 8 }}>
-          <span className="dim" style={{ fontSize: 11 }}>
-            Note: Occupancy % = (On Bed + Occ+Res) / Total Beds × 100 · "–" = not yet reported this round
-          </span>
-          <span className="dim" style={{ fontSize: 11 }}>
-            Last updated {lastSync.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} {lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </span>
         </div>
       )}
 
