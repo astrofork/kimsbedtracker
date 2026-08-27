@@ -145,7 +145,7 @@ function DischargeCard({ row, onOpen }) {
  *  Tapping a card opens the full discharge page for that bed. Live via websocket.
  *  props: role ("PRE"|"NURSE"|"DOCTOR"),
  *  wardId (optional — scopes the list to a single ward, e.g. embedded in WardPage's Discharges tab) */
-export default function DischargesPage({ role, wardId, onRequestReopen }) {
+export default function DischargesPage({ role, wardId, onRequestReopen, onDetailOpen }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL | PLANNED | RUNNING
@@ -154,6 +154,15 @@ export default function DischargesPage({ role, wardId, onRequestReopen }) {
   // restore scroll across that swap. saveScroll() must be called wherever
   // openBed is opened, before setOpenBed — see useScrollRestore's doc comment.
   const saveScroll = useScrollRestore(!!openBed);
+
+  // Tell the parent when the detail view takes over. Rendered inside WardPage,
+  // this component sits below a ward header and a Manage/Discharges tab bar —
+  // so the phase list appeared as a third thing stacked under two levels of
+  // chrome, with two different back controls visible at once. The parent hides
+  // its own header while this is true, letting the detail be the whole page.
+  useEffect(() => { onDetailOpen?.(!!openBed); }, [openBed, onDetailOpen]);
+  // Leaving the page counts as closing it, or the parent stays collapsed.
+  useEffect(() => () => onDetailOpen?.(false), [onDetailOpen]);
 
   const load = useCallback(() => {
     api.dischargesActive(wardId)

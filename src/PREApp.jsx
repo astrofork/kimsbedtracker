@@ -2424,13 +2424,10 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           <option key={o.key} value={o.key}>{o.label} ({fc[o.key] ?? fc.ALL})</option>
         ))}
       </select>
-      {/* Jump straight to one bed — opens the bed's edit page. }
-            Styled as an ACTION, not a form field: beside the bed filter in identical
-            styling, two controls that looked the same did different things — one
-            narrows what you see, the other navigates away from it. */}
+      {/* Jump straight to one bed — opens the bed's edit page. } */}
       {sortedBeds.length > 1 && (
         <select
-          className="field field-select field-jump"
+          className="field field-select"
           aria-label="Go to bed"
           value=""
           onChange={(e) => {
@@ -2441,7 +2438,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           }}
           style={{ width: "auto", flex: "0 1 auto", maxWidth: 150, fontWeight: 600 }}
         >
-          <option value="">Open bed</option>
+          <option value="">Go to bed…</option>
           {sortedBeds.map((b) => <option key={b.id} value={String(b.id)}>{b.bed_name}</option>)}
         </select>
       )}
@@ -2484,6 +2481,11 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
     occupied: sortedBeds.filter(b => b.physical_status === "OCCUPIED").length,
     planned: sortedBeds.filter(b => b.discharge_tracking?.status === "PLANNED").length,
   };
+  // True while DischargesPage has a phase detail open. WardPage then hides its
+  // own header and tab bar so the detail is the whole page, rather than a third
+  // level stacked under two others with two back controls on screen at once.
+  const [dischargeDetail, setDischargeDetail] = useState(false);
+
   const summaryStrip = (
     <div className="wsum">
       {[
@@ -2590,6 +2592,10 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
 
   return (
     <div className="slide-up">
+      {/* Hidden while a discharge detail is open, so that view is the whole
+          page rather than a third level under a ward header and a tab bar,
+          with two different back controls on screen at once. */}
+      {!dischargeDetail && (
       <div className="ward-page-hdr">
         <div className="row" style={{ gap: 12, minWidth: 0 }}>
           <BackBtn onClick={onBack} />
@@ -2616,8 +2622,10 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           )}
         </div>
       </div>
+      )}
 
       {/* Tab bar — Discharges is a first-class tab, not a popup */}
+      {!dischargeDetail && (
       <div className="seg" style={{ marginBottom: 14, maxWidth: 420 }}>
         <button className={tab === "manage" ? "on" : ""} onClick={() => setTab("manage")}>
           <Ic d={icons.bed} s={14} /> Manage
@@ -2626,11 +2634,12 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
           <Ic d={icons.clipboard} s={14} /> Discharges
         </button>
       </div>
+      )}
 
       {/* Tab content — Discharges reuses the same full page as the left-nav "Discharges"
           tab, just scoped to this ward, so both places show identical planned/in-progress data. */}
       {tab === "discharge" ? (
-        <DischargesPage role={cfg.role} wardId={ward.id} />
+        <DischargesPage role={cfg.role} wardId={ward.id} onDetailOpen={setDischargeDetail} />
       ) : (
         <>
           {!firstLoadPending && beds.length > 0 && searchBar}
