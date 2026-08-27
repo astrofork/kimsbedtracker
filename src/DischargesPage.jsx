@@ -224,7 +224,7 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
             landed alone on a third row filling about a third of it, reading as a
             stat that had lost its number rather than as a control. */}
         <div className="row between" style={{ gap: 8, marginBottom: 14 }}>
-          <span className="dim" style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase" }}>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--ink)" }}>
             Showing
           </span>
           <select className="field" aria-label="Filter discharges" value={filter}

@@ -2041,10 +2041,15 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .dq-tbl tbody td{vertical-align:middle;}
 /* Roomier than the dense ward tables this borrows its pinning from. */
 .dq-tbl tbody td{padding:11px 14px;}
-.dq-tbl thead th{padding:10px 14px;font-size:11px;}
+/* Headings and second lines carry real information here — the shared table's
+   grey is too faint to read them at 11px, so both step toward --ink. The mix
+   raises contrast in every theme: toward black on light, toward white on dark. */
+.dq-tbl thead th{padding:10px 14px;font-size:11px;font-weight:800;color:var(--ink);}
+.dq-tbl i{color:color-mix(in srgb,var(--ink) 62%,var(--ink-2));}
+.dq-tbl .dim{color:var(--ink-2);}
 
 .dq-tbl b{display:block;font-size:13px;font-weight:700;line-height:1.3;}
-.dq-tbl i{display:block;font-style:normal;font-size:11px;color:var(--ink-2);line-height:1.35;}
+.dq-tbl i{display:block;font-style:normal;font-size:11px;line-height:1.35;}
 .dq-bed{min-width:152px;}
 /* Ward names run long; wrap rather than cut one short mid-word. */
 .dq-bed i{white-space:normal;overflow:visible;text-overflow:clip;}
