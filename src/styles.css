@@ -2463,13 +2463,44 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .ward-page-hdr-left{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 0;}
 .ward-page-hdr-right{display:flex;align-items:center;gap:8px;flex-shrink:0;}
 @media(max-width:479px){
-  .ward-review-btn{padding:8px 10px!important;}
+  .ward-review-btn{font-size:12.5px;}
 }
 /* Hide freshness dot text on very tiny phones */
 @media(max-width:360px){
   .ward-freshness{display:none;}
   .ward-page-hdr{flex-wrap:wrap;}
   .ward-page-hdr-right{flex-basis:100%;}
+}
+
+/* ── Review button ────────────────────────────────────────────────────────────
+     The supplied "send" button: on hover the tick lifts off and the label slides
+     out behind it. Sizes are in em so the whole thing scales with font-size, and
+     royalblue becomes --primary so it follows the theme. — */
+@keyframes fly-1{from{transform:translateY(.1em);}to{transform:translateY(-.1em);}}
+.btn-fly{
+  font-family:inherit;font-size:13.5px;font-weight:700;
+  background:var(--primary);color:#fff;
+  padding:.7em 1em;padding-left:.9em;
+  display:inline-flex;align-items:center;
+  border:none;border-radius:16px;overflow:hidden;
+  transition:all .2s;cursor:pointer;
+}
+.btn-fly:hover{background:var(--primary-deep);}
+.btn-fly span{display:block;margin-left:.3em;white-space:nowrap;transition:all .3s ease-in-out;}
+.btn-fly .svg-wrapper{display:flex;}
+.btn-fly svg{display:block;transform-origin:center center;transition:transform .3s ease-in-out;}
+/* :not(:disabled) — a button that can't be pressed shouldn't invite the press. */
+.btn-fly:not(:disabled):hover .svg-wrapper{animation:fly-1 .6s ease-in-out infinite alternate;}
+.btn-fly:not(:disabled):hover svg{transform:translateX(1.2em) rotate(45deg) scale(1.1);}
+.btn-fly:not(:disabled):hover span{transform:translateX(5em);}
+.btn-fly:not(:disabled):active{transform:scale(.95);}
+.btn-fly:disabled{opacity:.5;cursor:default;}
+.btn-fly:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+@media (prefers-reduced-motion:reduce){
+  .btn-fly,.btn-fly span,.btn-fly svg{transition:none;}
+  .btn-fly:hover .svg-wrapper{animation:none;}
+  .btn-fly:hover svg,.btn-fly:hover span{transform:none;}
+  .btn-fly:active{transform:none;}
 }
 
 /* ── Ward page chrome ─────────────────────────────────────────────────────────

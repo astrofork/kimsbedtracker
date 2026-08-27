@@ -2608,13 +2608,14 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0 }}>
           {tab === "manage" && cfg.reviewWard && (
-            <button className="btn btn-ghost ward-review-btn"
+            <button className="btn-fly ward-review-btn"
               disabled={reviewing || inCooldown} onClick={reviewWard}
               title={inCooldown ? `Available again in ${Math.ceil(cooldownMsLeft / 60000)}m` : "No changes needed — mark this ward reviewed"}>
+              <div className="svg-wrapper"><Ic d={icons.check} s={16} /></div>
               {/* "Wait 3m", not a bare "3m": alone the number read as an unlabelled
                   chip beside the ward name, and it repeated the "Reviewed 3m ago"
                   line directly beneath it. */}
-              {reviewing ? "…" : inCooldown ? `Wait ${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}
+              <span>{reviewing ? "…" : inCooldown ? `Wait ${Math.ceil(cooldownMsLeft / 60000)}m` : "Review"}</span>
             </button>
           )}
         </div>
