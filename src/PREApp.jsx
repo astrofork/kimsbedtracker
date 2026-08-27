@@ -2611,7 +2611,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
             <button className="btn-fly ward-review-btn"
               disabled={reviewing || inCooldown} onClick={reviewWard}
               title={inCooldown ? `Available again in ${Math.ceil(cooldownMsLeft / 60000)}m` : "No changes needed — mark this ward reviewed"}>
-              <div className="svg-wrapper"><Ic d={icons.check} s={16} /></div>
+              <div className="svg-wrapper"><Ic d={icons.send} s={17} /></div>
               {/* "Wait 3m", not a bare "3m": alone the number read as an unlabelled
                   chip beside the ward name, and it repeated the "Reviewed 3m ago"
                   line directly beneath it. */}

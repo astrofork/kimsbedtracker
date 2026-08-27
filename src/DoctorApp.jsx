@@ -260,7 +260,7 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
           <button className="btn-fly" disabled={reviewing || data.wards.length === 0} onClick={review}>
-            <div className="svg-wrapper"><Ic d={icons.check} s={16} /></div>
+            <div className="svg-wrapper"><Ic d={icons.send} s={17} /></div>
             <span>{reviewing ? "Saving…" : "Mark Reviewed"}</span>
           </button>
         </div>
