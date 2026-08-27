@@ -2,9 +2,13 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { api, toastErr, getSocket, onReconnect, coalesce } from "./lib.js";
 import { RelativeTime } from "./relativeClock.jsx";
 import { Ic, icons, useScrollRestore } from "./ui.jsx";
-import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins, workflowTone } from "./bedUtils.js";
+import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins, workflowTone, normalizeQuery } from "./bedUtils.js";
 import DischargeTab from "./DischargeTab.jsx";
 import { BackBtn } from "./PREApp.jsx";
+
+/** The stage a row is sitting in right now — the first pending applicable step. */
+const currentStep = (row) =>
+  DISCHARGE_STEP_LABELS.find(([col]) => row[col] !== "NOT_APPLICABLE" && row[col] === "PENDING") || null;
 
 /** The four views of this list — each tab is a count and the filter for it. */
 const TABS = [["ALL", "All discharges"], ["PLANNED", "Planned"], ["RUNNING", "In progress"], ["DELAYED", "Delayed"]];
@@ -19,7 +23,7 @@ function DischargeRow({ row, onOpen }) {
   const planned = row.status === "PLANNED";
   const prog = dischargeProgress(row);
   // Current stage = first pending applicable step.
-  const cur = DISCHARGE_STEP_LABELS.find(([col]) => row[col] !== "NOT_APPLICABLE" && row[col] === "PENDING");
+  const cur = currentStep(row);
   const wf = row.workflow;
   const tone = workflowTone(wf);
   const dept = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : null;
@@ -91,6 +95,10 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("ALL"); // ALL | PLANNED | RUNNING
+  const [q, setQ] = useState("");
+  const [wardF, setWardF] = useState("");   // ward name, "" = any
+  const [payerF, setPayerF] = useState(""); // payer type, "" = any
+  const [stageF, setStageF] = useState(""); // current stage label, "" = any
   const [openBed, setOpenBed] = useState(null); // { id, bed_name, ward_id } | null
   // Opening a bed replaces this whole list with its discharge detail — save/
   // restore scroll across that swap. saveScroll() must be called wherever
@@ -175,14 +183,60 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
     </div>
   );
 
-  const planned = (rows || []).filter((r) => r.status === "PLANNED");
-  const running = (rows || []).filter((r) => r.status !== "PLANNED");
-  const delayed = (rows || []).filter((r) => r.workflow?.state === "DELAYED");
-  const counts = { ALL: (rows || []).length, PLANNED: planned.length, RUNNING: running.length, DELAYED: delayed.length };
+  const all = rows || [];
+  // Dropdown options come from what is actually in the list — no ward, payer or
+  // stage is offered that would return nothing.
+  const uniq = (vals) => [...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const wardOpts = uniq(all.map((r) => r.ward_name));
+  const payerOpts = uniq(all.map((r) => r.payer_type));
+  const stageOpts = uniq(all.map((r) => currentStep(r)?.[1]));
+
+  // Search + the three dropdowns narrow the list; the tabs then split whatever
+  // is left, so their counts always describe what you are looking at.
+  const nq = normalizeQuery(q);
+  const hit = (v) => normalizeQuery(v).includes(nq);
+  const pool = all.filter((r) =>
+    (!nq || hit(r.bed_name) || hit(r.patient_name) || hit(r.ip_last6) || hit(r.ward_name)) &&
+    (!wardF || r.ward_name === wardF) &&
+    (!payerF || r.payer_type === payerF) &&
+    (!stageF || currentStep(r)?.[1] === stageF));
+
+  const planned = pool.filter((r) => r.status === "PLANNED");
+  const running = pool.filter((r) => r.status !== "PLANNED");
+  const delayed = pool.filter((r) => r.workflow?.state === "DELAYED");
+  const counts = { ALL: pool.length, PLANNED: planned.length, RUNNING: running.length, DELAYED: delayed.length };
   const shown = filter === "PLANNED" ? planned
     : filter === "RUNNING" ? running
     : filter === "DELAYED" ? delayed
-    : (rows || []);
+    : pool;
+  const filtered = !!(nq || wardF || payerF || stageF);
+
+  /** Exports exactly what the table is showing — same rows, same order. */
+  const exportCsv = () => {
+    const esc = (c) => `"${String(c ?? "").replace(/"/g, '""')}"`;
+    const head = ["Bed", "Ward", "Patient", "IP", "Payer type", "Status",
+      "Current stage", "Department", "Progress %", "SLA status", "Est. completion", "Updated"];
+    const lines = [head.map(esc).join(",")];
+    for (const r of shown) {
+      const cur = currentStep(r);
+      const wf = r.workflow;
+      const prog = dischargeProgress(r);
+      const dept = cur ? (wf?.phases || []).find((ph) => ph.key === phaseKey(cur[0]))?.department : "";
+      lines.push([
+        r.bed_name, r.ward_name, r.patient_name || "", r.ip_last6 || "", r.payer_type || "",
+        r.status === "PLANNED" ? `Planned ${r.planned_date}${r.planned_time ? " " + r.planned_time : ""}` : "In progress",
+        cur ? cur[1] : (r.status === "PLANNED" ? "" : "Awaiting checkout"),
+        dept || "", prog ? prog.pct : "",
+        workflowTone(wf)?.label || "", wf?.eta ? fmtClock(wf.eta) : "",
+        r.updated_at ? new Date(Number(r.updated_at)).toLocaleString() : "",
+      ].map(esc).join(","));
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" }));
+    a.download = `discharges-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   return (
     <div className="slide-up">
@@ -205,6 +259,45 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
         </div>
       </div>
 
+      {/* Search and the three narrowing dropdowns, then the export of whatever
+          they leave behind. */}
+      <div className="dq-tools">
+        <div className="dq-search">
+          <Ic d={icons.search} s={15} />
+          <input className="field" value={q} onChange={(e) => setQ(e.target.value)}
+            placeholder="Search bed, patient, or IP…" aria-label="Search discharges" />
+          {q && (
+            <button className="dq-clear" onClick={() => setQ("")} aria-label="Clear search">
+              <Ic d={icons.x} s={13} />
+            </button>
+          )}
+        </div>
+
+        {!wardId && (
+          <select className="field dq-sel" value={wardF} onChange={(e) => setWardF(e.target.value)} aria-label="Filter by ward">
+            <option value="">Ward / Floor</option>
+            {wardOpts.map((w) => <option key={w} value={w}>{w}</option>)}
+          </select>
+        )}
+        <select className="field dq-sel" value={payerF} onChange={(e) => setPayerF(e.target.value)} aria-label="Filter by payer type">
+          <option value="">Payer type</option>
+          {payerOpts.map((w) => <option key={w} value={w}>{w}</option>)}
+        </select>
+        <select className="field dq-sel" value={stageF} onChange={(e) => setStageF(e.target.value)} aria-label="Filter by current stage">
+          <option value="">Current stage</option>
+          {stageOpts.map((w) => <option key={w} value={w}>{w}</option>)}
+        </select>
+
+        {filtered && (
+          <button className="dq-reset" onClick={() => { setQ(""); setWardF(""); setPayerF(""); setStageF(""); }}>
+            Clear
+          </button>
+        )}
+        <button className="btn btn-ghost dq-export" onClick={exportCsv} disabled={shown.length === 0}>
+          <Ic d={icons.fileText} s={14} /> Export CSV
+        </button>
+      </div>
+
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
       {rows === null && !error && (
         <div className="card-grid">{[0, 1, 2].map(i => <div key={i} className="preui-sk preui-sk-card" />)}</div>
@@ -212,9 +305,13 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
       {rows && shown.length === 0 && (
         <div className="card empty" style={{ padding: 28 }}>
           <Ic d={icons.clipboard} s={28} />
-          <div style={{ marginTop: 10, fontWeight: 700, fontSize: 14 }}>No active discharges</div>
+          <div style={{ marginTop: 10, fontWeight: 700, fontSize: 14 }}>
+            {all.length ? "Nothing matches these filters" : "No active discharges"}
+          </div>
           <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-            Planned and in-progress discharges across your wards appear here.
+            {all.length
+              ? `${all.length} active discharge${all.length === 1 ? "" : "s"} are hidden by the search or filters.`
+              : "Planned and in-progress discharges across your wards appear here."}
           </div>
         </div>
       )}

@@ -2077,6 +2077,39 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   font-size:10px;font-weight:800;vertical-align:1px;
 }
 
+/* ── Discharges toolbar ───────────────────────────────────────────────────────
+     Search, three narrowing dropdowns, and the export of what's left. All of it
+     works on the rows already loaded — no round trip per keystroke. — */
+.dq-tools{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;
+}
+.dq-search{position:relative;flex:1 1 210px;min-width:0;display:flex;align-items:center;}
+.dq-search > svg{position:absolute;left:11px;color:var(--ink-3);pointer-events:none;}
+.dq-search .field{padding:9px 30px 9px 33px;font-size:13px;}
+.dq-clear{
+  position:absolute;right:8px;display:flex;align-items:center;justify-content:center;
+  width:19px;height:19px;border-radius:50%;border:none;cursor:pointer;
+  background:var(--panel-2);color:var(--ink-2);
+}
+.dq-clear:hover{color:var(--ink);}
+.dq-sel{
+  flex:0 0 auto;width:auto;max-width:190px;
+  padding:9px 11px;font-size:12.5px;font-weight:600;
+}
+.dq-reset{
+  flex:0 0 auto;padding:9px 12px;font-size:12.5px;font-weight:700;
+  background:none;border:none;color:var(--primary);cursor:pointer;border-radius:var(--radius-sm);
+}
+.dq-reset:hover{background:var(--blue-bg);}
+.dq-export{flex:0 0 auto;margin-left:auto;padding:9px 13px;font-size:12.5px;font-weight:700;}
+
+@media (max-width:640px){
+  /* Search takes its own line; the dropdowns share the next one. */
+  .dq-search{flex:1 1 100%;}
+  .dq-sel{flex:1 1 0;max-width:none;min-width:0;}
+  .dq-export{margin-left:0;flex:1 1 100%;}
+}
+
 /* ── Discharges table ─────────────────────────────────────────────────────────
      The dashboard's table, with a few discharge-specific columns. Wide by
      design: on a phone it scrolls sideways with the bed column pinned, rather
