@@ -6,6 +6,9 @@ import { DISCHARGE_STEP_LABELS, dischargeProgress, fmtIpLast6, fmtClock, fmtMins
 import DischargeTab from "./DischargeTab.jsx";
 import { BackBtn } from "./PREApp.jsx";
 
+/** The four views of this list — each tab is a count and the filter for it. */
+const TABS = [["ALL", "All discharges"], ["PLANNED", "Planned"], ["RUNNING", "In progress"], ["DELAYED", "Delayed"]];
+
 /** discharge_tracking column → the SLA phase key the backend reports under, so a
  *  row can name the department handling its current stage. */
 const phaseKey = (col) => col.replace(/_status$/, "").toUpperCase();
@@ -175,6 +178,7 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
   const planned = (rows || []).filter((r) => r.status === "PLANNED");
   const running = (rows || []).filter((r) => r.status !== "PLANNED");
   const delayed = (rows || []).filter((r) => r.workflow?.state === "DELAYED");
+  const counts = { ALL: (rows || []).length, PLANNED: planned.length, RUNNING: running.length, DELAYED: delayed.length };
   const shown = filter === "PLANNED" ? planned
     : filter === "RUNNING" ? running
     : filter === "DELAYED" ? delayed
@@ -182,60 +186,24 @@ export default function DischargesPage({ role, wardId, onRequestReopen, onDetail
 
   return (
     <div className="slide-up">
-      {/* The four counts read as the page's headline: how much is running and
-          how much of it has slipped, before the queue itself. */}
-      <div className="stat-grid" style={{ marginBottom: 14 }}>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic"><Ic d={icons.clipboard} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{rows ? rows.length : "—"}</div>
-          </div>
-          <div className="l">ACTIVE DISCHARGES</div>
+      {/* One compact bar instead of four counter cards plus a separate filter:
+          each tab is both the count and the way to filter by it. */}
+      <div className="dq-top">
+        {!wardId && <div className="dq-title">Discharge Operations</div>}
+        <div className="dq-tabs" role="tablist" aria-label="Filter discharges">
+          {TABS.map(([key, label]) => {
+            const n = rows ? counts[key] : null;
+            return (
+              <button key={key} role="tab" aria-selected={filter === key}
+                className={"dq-tab" + (filter === key ? " on" : "")}
+                onClick={() => setFilter(key)}>
+                {label} {n === null ? "" : `(${n})`}
+                {key === "DELAYED" && n > 0 && <span className="dq-tab-badge">{n}</span>}
+              </button>
+            );
+          })}
         </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{ background: "var(--st-vr-bg)", color: "var(--st-vr)" }}><Ic d={icons.clock} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{rows ? planned.length : "—"}</div>
-          </div>
-          <div className="l">PLANNED</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{ background: "var(--blue-bg)", color: "var(--blue)" }}><Ic d={icons.chart} s={16} /></span>
-            <div className="n" style={{ fontSize: 18 }}>{rows ? running.length : "—"}</div>
-          </div>
-          <div className="l">IN PROGRESS</div>
-        </div>
-        <div className="stat">
-          <div className="row" style={{ gap: 10 }}>
-            <span className="ic" style={{
-              background: delayed.length ? "var(--red-bg)" : "var(--panel-2)",
-              color: delayed.length ? "var(--red)" : "var(--ink-3)",
-            }}><Ic d={icons.alert} s={16} /></span>
-            <div className="n" style={{ fontSize: 18, color: delayed.length ? "var(--red)" : undefined }}>
-              {rows ? delayed.length : "—"}
-            </div>
-          </div>
-          <div className="l">DELAYED</div>
-        </div>
-        </div>
-
-        {/* Its own row, not a fifth cell in the counter grid. As a grid cell it
-            landed alone on a third row filling about a third of it, reading as a
-            stat that had lost its number rather than as a control. */}
-        <div className="row between" style={{ gap: 8, marginBottom: 14 }}>
-          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--ink)" }}>
-            Showing
-          </span>
-          <select className="field" aria-label="Filter discharges" value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ width: "auto", flex: "0 0 auto", maxWidth: 190, fontWeight: 600 }}>
-            <option value="ALL">All</option>
-            <option value="PLANNED">Planned only</option>
-            <option value="RUNNING">In progress only</option>
-            <option value="DELAYED">Delayed only</option>
-          </select>
-        </div>
+      </div>
 
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 10 }}>{error}</div>}
       {rows === null && !error && (
