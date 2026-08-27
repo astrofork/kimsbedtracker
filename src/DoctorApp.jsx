@@ -50,16 +50,16 @@ function searchRow({ value, onChange, placeholder, select }) {
   return (
     // nowrap: the filter belongs beside the search, not under it. On a phone the
     // wrapped version cost a whole extra row for one short control.
-    <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "nowrap", alignItems: "center" }}>
+    <div className="pill-search" style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "nowrap", alignItems: "center" }}>
       <div style={{ position: "relative", flex: "1 1 auto", minWidth: 0 }}>
-        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+        <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
           <Ic d={icons.search} s={15} />
         </span>
         <input
           className="field"
           value={value}
           placeholder={placeholder}
-          style={{ paddingLeft: 36, paddingRight: value ? 36 : 13 }}
+          style={{ paddingLeft: 38, paddingRight: value ? 36 : 15 }}
           onChange={(e) => onChange(e.target.value)}
         />
         {value && (
@@ -254,7 +254,8 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
         <div className="row" style={{ gap: 12, minWidth: 0, flex: "1 1 240px" }}>
           <BackBtn onClick={onBack} />
           <div style={{ minWidth: 0 }}>
-            <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
+            <div className="h1" style={{ fontSize: 20, letterSpacing: "-.02em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{data.name}</div>
+            <div className="ward-sub">{data.wards.length} ward{data.wards.length === 1 ? "" : "s"}</div>
           </div>
         </div>
         <div className="row" style={{ gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
@@ -282,9 +283,8 @@ function BlockDetail({ blockId, onBack, onOpenWard, showToast, reloadKey, ipInde
             onChange: setWardSearch,
             placeholder: "Search ward / patient / IP…",
             select: data.wards.length > 1 && (
-              <select className="field" aria-label="Filter by ward" value={wardFilter}
-                onChange={(e) => setWardFilter(e.target.value)}
-                style={{ width: "auto", flex: "0 0 auto", maxWidth: 124, fontWeight: 600 }}>
+              <select className="field chip-select" aria-label="Filter by ward" value={wardFilter}
+                onChange={(e) => setWardFilter(e.target.value)}>
                 <option value="all">All ({data.wards.length})</option>
                 {data.wards.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
               </select>

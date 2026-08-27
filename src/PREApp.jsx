@@ -788,6 +788,16 @@ const STATE_KEY = (p, r) =>
 const STATE_LABEL = (p, r) =>
   p === "OCCUPIED" ? (r === "RESERVED" ? "OCC[RES]" : "OCCUPIED") : (r === "RESERVED" ? "VAC[RES]" : "VACANT");
 
+/** Overstay — System Checkout done but the patient hasn't actually left yet
+ *  (the same condition the Admin dashboard counts as "overstay"). patient_left
+ *  can never be true here while still Occupied — completeIfEligible vacates the
+ *  bed the moment both are true, so checking it is enough. */
+export function isOverstay(bed) {
+  return bed.physical_status === "OCCUPIED"
+    && bed.discharge_tracking?.system_checkout_status === "COMPLETED"
+    && bed.discharge_tracking?.patient_left !== true;
+}
+
 export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardLabel, hideDoctorDept }) {
   const sk = STATE_KEY(bed.physical_status, bed.reservation_status);
   const dimmed = bed.operational_status === false;
@@ -798,12 +808,7 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
   const dischargeStarted = !!badge && bed.discharge_tracking?.status !== "PLANNED";
   const color = bedStateColor(bed.physical_status, bed.reservation_status);
   const bg = bedStateBg(bed.physical_status, bed.reservation_status);
-  // Overstay — System Checkout done but the patient hasn't actually left yet
-  // (same condition the Admin dashboard counts as "overstay"). patient_left can
-  // never be true here while still Occupied — completeIfEligible vacates the bed
-  // the moment both are true, so checking it is enough, no need for physical_checkout_status too.
-  const overstay = occupied && bed.discharge_tracking?.system_checkout_status === "COMPLETED"
-    && bed.discharge_tracking?.patient_left !== true;
+  const overstay = isOverstay(bed);
   const hasRows = !!(
     (occupied && (bed.payer_type || bed.ip_last6 || bed.admission_type || (!hideDoctorDept && (bed.consultant_name || bed.department_name)))) || dischargeStarted ||
     (occupied && bed.reservation_status === "RESERVED" && bed.destination) ||
@@ -2311,6 +2316,7 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
     if (filter === "Vacant") return b.physical_status === "VACANT";
     if (filter === "Occupied") return b.physical_status === "OCCUPIED";
     if (filter === "Reserved") return b.reservation_status === "RESERVED";
+    if (filter === "Overstay") return isOverstay(b);
     return true;
   });
 
@@ -2370,18 +2376,22 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   );
 
   // Facet counts for the filter dropdown — options with nothing behind them are hidden.
-  const fc = { ALL: sortedBeds.length, KIMS: 0, Renova: 0, "Non-Op": 0, Vacant: 0, Occupied: 0, Reserved: 0 };
+  const fc = { ALL: sortedBeds.length, KIMS: 0, Renova: 0, "Non-Op": 0, Vacant: 0, Occupied: 0, Reserved: 0, Overstay: 0 };
   for (const b of sortedBeds) {
     if (b.unit_type?.includes("Renova")) fc["Renova"]++;
     else if (b.unit_type === "KIMS") fc["KIMS"]++;
     if (b.operational_status === false) fc["Non-Op"]++;
     if (b.physical_status === "VACANT") fc["Vacant"]++; else fc["Occupied"]++;
     if (b.reservation_status === "RESERVED") fc["Reserved"]++;
+    if (isOverstay(b)) fc["Overstay"]++;
   }
   const FILTER_OPTIONS = [
     { key: "ALL", label: "All beds" },
-    { key: "Vacant", label: "Vacant" },
+    // Same red flag the bed cards already carry, promoted to a filter — it is
+    // the one state in a ward that someone has to go and deal with.
+    { key: "Overstay", label: "Overstay", warn: true },
     { key: "Occupied", label: "Occupied" },
+    { key: "Vacant", label: "Vacant" },
     { key: "Reserved", label: "Reserved" },
     { key: "Non-Op", label: "Non-operational" },
     { key: "KIMS", label: "KIMS" },
@@ -2391,58 +2401,45 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
   // Rendered inline in WardPage (NOT as a nested component) so the input keeps
   // focus across keystrokes — a component defined inside render remounts every time.
   const searchBar = (
-    <div className="ward-search-row" style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-      <div className="field-search" style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
-        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
-          <Ic d={icons.search} s={15} />
-        </span>
-        <input
-          className="field"
-          value={search}
-          placeholder="Search bed / patient / IP…"
-          style={{ paddingLeft: 36, paddingRight: search ? 36 : 13 }}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {search && (
-          <button
-            onClick={() => setSearch("")}
-            aria-label="Clear search"
-            style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4 }}
-          >
-            <Ic d={icons.x} s={14} />
-          </button>
-        )}
+    <>
+      <div className="ward-search-row pill-search" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div className="field-search" style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+          <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+            <Ic d={icons.search} s={15} />
+          </span>
+          <input
+            className="field"
+            value={search}
+            placeholder="Search bed, patient, or IP…"
+            style={{ paddingLeft: 38, paddingRight: search ? 36 : 15 }}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4 }}
+            >
+              <Ic d={icons.x} s={14} />
+            </button>
+          )}
+        </div>
       </div>
-      <select
-        className="field field-select"
-        aria-label="Filter beds"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        style={{ width: "auto", flex: "0 1 auto", maxWidth: 150, fontWeight: 600 }}
-      >
-        {FILTER_OPTIONS.map(o => (
-          <option key={o.key} value={o.key}>{o.label} ({fc[o.key] ?? fc.ALL})</option>
+
+      {/* Every facet and its count on one scrollable line — what is in this ward
+          is readable without opening anything. */}
+      <div className="chip-row" role="group" aria-label="Filter beds">
+        {FILTER_OPTIONS.map((o) => (
+          <button key={o.key}
+            className={"fchip" + (o.warn ? " warn" : "") + (filter === o.key ? " on" : "")}
+            aria-pressed={filter === o.key}
+            onClick={() => setFilter(o.key)}>
+            {o.warn && <Ic d={icons.alert} s={13} />}
+            {o.label} <span className="n">({fc[o.key] ?? fc.ALL})</span>
+          </button>
         ))}
-      </select>
-      {/* Jump straight to one bed — opens the bed's edit page. } */}
-      {sortedBeds.length > 1 && (
-        <select
-          className="field field-select"
-          aria-label="Go to bed"
-          value=""
-          onChange={(e) => {
-            const b = sortedBeds.find((x) => String(x.id) === e.target.value);
-            if (!b) return;
-            if (b.operational_status !== false) { saveBedScroll(); setEditingBed(b); }
-            else { setSearch(b.bed_name); setFilter("ALL"); }
-          }}
-          style={{ width: "auto", flex: "0 1 auto", maxWidth: 150, fontWeight: 600 }}
-        >
-          <option value="">Go to bed…</option>
-          {sortedBeds.map((b) => <option key={b.id} value={String(b.id)}>{b.bed_name}</option>)}
-        </select>
-      )}
-    </div>
+      </div>
+    </>
   );
 
   // ── Shared grid renderer — grid + empty state only ─────────────────────────
@@ -2600,12 +2597,12 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
         <div className="row" style={{ gap: 12, minWidth: 0 }}>
           <BackBtn onClick={onBack} />
           <div style={{ minWidth: 0 }}>
-            <div className="h1" style={{ fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ward.ward}</div>
-            <div className="dim" style={{ fontSize: 11.5 }}>
+            <div className="h1" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ward.ward}</div>
+            <div className="ward-sub">
               {beds.length} bed{beds.length !== 1 ? "s" : ""}
               {tab === "manage" && reviewedAt
                 ? <> <Ic d={icons.check} s={11} /> Reviewed <RelativeTime ts={reviewedAt} /></>
-                : tab === "manage" && cfg.reviewWard ? " Not reviewed yet" : ""}
+                : tab === "manage" && cfg.reviewWard ? ", not reviewed yet" : ""}
             </div>
           </div>
         </div>
@@ -2626,12 +2623,12 @@ export function WardPage({ ward, initialTab, onBack, cfg = PRE_CFG, focusBedId, 
 
       {/* Tab bar — Discharges is a first-class tab, not a popup */}
       {!dischargeDetail && (
-      <div className="seg" style={{ marginBottom: 14, maxWidth: 420 }}>
-        <button className={tab === "manage" ? "on" : ""} onClick={() => setTab("manage")}>
-          <Ic d={icons.bed} s={14} /> Manage
+      <div className="seg-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "manage"} className={tab === "manage" ? "on" : ""} onClick={() => setTab("manage")}>
+          <Ic d={icons.bed} s={15} /> Manage beds
         </button>
-        <button className={tab === "discharge" ? "on" : ""} onClick={() => setTab("discharge")}>
-          <Ic d={icons.clipboard} s={14} /> Discharges
+        <button role="tab" aria-selected={tab === "discharge"} className={tab === "discharge" ? "on" : ""} onClick={() => setTab("discharge")}>
+          <Ic d={icons.clipboard} s={15} /> Discharges
         </button>
       </div>
       )}
