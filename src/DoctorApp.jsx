@@ -524,7 +524,7 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
               <div style={{ fontSize: 13, marginTop: 5, color: "var(--ink-3)" }}>Please contact your administrator to get access.</div>
             </div>
           ) : (
-            <div className="card-grid">
+            <div className="doc-block-grid">
               {me.blocks.map((b) => (
                 // Renders instantly, like the ward cards it leads to — same
                 // staggered slide-up, same "looks like it is still loading".
@@ -537,9 +537,9 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
                       <div className="doc-block-name">{b.name}</div>
                       <div className="doc-block-meta">{b.ward_count} ward{b.ward_count === 1 ? "" : "s"}, {b.total_beds} beds</div>
                     </div>
-                    <Ic d={icons.chevron} s={18} style={{ color: "var(--ink-3)" }} />
                   </div>
-                  {b.description && <div className="dim" style={{ fontSize: 12, padding: "0 16px 12px", marginTop: -4 }}>{b.description}</div>}
+                  {b.description && <div className="dim" style={{ fontSize: 12, padding: "0 46px 12px 16px", marginTop: -4 }}>{b.description}</div>}
+                  <DotGrid />
                 </div>
               ))}
             </div>
@@ -547,6 +547,16 @@ function Dashboard({ me, user, onOpenBlock, showSummary, showSearch, onOpenWard,
         </>
       )}
     </div>
+  );
+}
+
+// Dot grid that marks a block card as openable, in place of the old chevron.
+function DotGrid() {
+  const at = [3, 11, 19];
+  return (
+    <svg className="doc-block-dots" viewBox="0 0 22 22" aria-hidden="true">
+      {at.map((y) => at.map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="2.1" />))}
+    </svg>
   );
 }
 

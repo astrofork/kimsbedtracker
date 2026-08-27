@@ -1123,14 +1123,53 @@ body.hero-gone .appbar{
 .doc-bar .seg-or{background:var(--st-or);}
 .doc-bar .seg-vr{background:var(--st-vr);}
 
+/* Block list. auto-fit rather than a fixed column count: these cards hold a
+   short name and one line of meta, so they pack four or five across a monitor
+   instead of three stretched ones with an empty middle — and collapse to one per
+   row on a phone without a breakpoint to maintain. */
+.doc-block-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;
+}
+@media (max-width:560px){.doc-block-grid{grid-template-columns:1fr;}}
+
 /* Block card */
 .doc-block{
-  background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;
-  box-shadow:var(--shadow);cursor:pointer;transition:transform .14s,box-shadow .14s,border-color .14s;
+  background:var(--panel);border:1px solid var(--line);border-radius:18px;overflow:hidden;
+  box-shadow:var(--shadow);cursor:pointer;
+  /* .4s ease, matching the supplied card: slow enough that the shrink reads as
+     the card yielding to the press rather than snapping. */
+  transition:transform .4s ease, box-shadow .4s ease, border-color .4s ease;
 }
-.doc-block:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:var(--primary);}
+/* Scales down on hover and further on click, with the contents easing back a
+   touch more than the card — that difference is what makes it feel pressed
+   rather than merely smaller. Blue border kept as the hover signal. */
+.doc-block:hover{transform:scale(.97);box-shadow:var(--shadow-md);border-color:var(--primary);}
+.doc-block:hover .doc-block-top{transform:scale(.96);}
+.doc-block:active{transform:scale(.93);}
+.doc-block-top{transition:transform .4s ease;}
+/* Ambient list; a scale animation is exactly what this preference is for. */
+@media (prefers-reduced-motion:reduce){
+  .doc-block,.doc-block-top{transition:none;}
+  .doc-block:hover,.doc-block:active{transform:none;}
+  .doc-block:hover .doc-block-top{transform:none;}
+}
 .doc-block:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
-.doc-block-top{display:flex;align-items:center;gap:12px;padding:15px 16px 12px;}
+.doc-block-top{display:flex;align-items:center;gap:11px;padding:13px 14px;}
+/* Corner dot grid instead of a chevron: the whole card is the target, so a
+   single arrow pointing at one edge of it was always a bit of a lie. Sits in
+   the space the chevron used, and leans in with the card on hover. */
+.doc-block{position:relative;}
+.doc-block-top{padding-right:46px;}
+.doc-block-dots{
+  position:absolute;right:13px;bottom:11px;width:20px;height:20px;
+  fill:var(--ink-3);opacity:.35;pointer-events:none;
+  transition:transform .4s ease,opacity .4s ease,fill .4s ease;
+}
+.doc-block:hover .doc-block-dots{transform:scale(1.05);opacity:.85;fill:var(--primary);}
+@media (prefers-reduced-motion:reduce){
+  .doc-block-dots{transition:none;}
+  .doc-block:hover .doc-block-dots{transform:none;}
+}
 .doc-badge{
   width:42px;height:42px;border-radius:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;
   color:#fff;background:linear-gradient(135deg,var(--primary),var(--primary-deep));
@@ -2003,8 +2042,6 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .preui .doc-ward.tap{cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;}
 .preui .doc-ward.tap:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
 .preui .doc-ward.tap:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
-.preui .doc-block{cursor:pointer;transition:transform .15s ease,box-shadow .15s ease;}
-.preui .doc-block:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
 .preui .doc-block:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 
 /* — Doctor block cards — uniform size on Dashboard and My Blocks: equal height per
