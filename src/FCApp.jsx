@@ -30,6 +30,30 @@ const SECTIONS = [
   { key: "SYSTEM_CHECKOUT", label: "System Checkout Pending", color: "#0f766e", bg: "#ccfbf1", emptyIcon: icons.logout, emptyMsg: "No discharges awaiting System Checkout." },
 ];
 
+/** Billing and Audit share this app with FC — same screens, different queues.
+ *  Kept in step with STEPS_BY_ROLE in the backend's routes/fc.ts; the server is
+ *  what enforces it, this only decides what a role is shown. */
+const ROLE_STEPS = {
+  FC:             ["BILL_READY", "PAYMENT", "SYSTEM_CHECKOUT"],
+  MASTER_FC:      ["BILL_READY", "PAYMENT", "SYSTEM_CHECKOUT"],
+  AUDIT:          ["AUDIT"],
+  MASTER_AUDIT:   ["AUDIT"],
+  BILLING:        ["BILLING_STARTED", "BILL_READY", "PAYMENT", "SYSTEM_CHECKOUT"],
+  MASTER_BILLING: ["BILLING_STARTED", "BILL_READY", "PAYMENT", "SYSTEM_CHECKOUT"],
+};
+/** Page title and the badge beside the user's name. */
+const ROLE_TITLE = {
+  FC:             ["Finance Coordinator", "FC"],
+  MASTER_FC:      ["Master FC", "MASTER FC"],
+  AUDIT:          ["Audit", "AUDIT"],
+  MASTER_AUDIT:   ["Master Audit", "MASTER AUDIT"],
+  BILLING:        ["Billing", "BILLING"],
+  MASTER_BILLING: ["Master Billing", "MASTER BILLING"],
+};
+
+/** Short tile captions — the section labels are too long for a stat tile. */
+const TILE_LABEL = { BILLING_STARTED: "PREP", AUDIT: "AUDIT", BILL_READY: "FINALIZE", PAYMENT: "PAYMENT", SYSTEM_CHECKOUT: "CHECKOUT" };
+
 const STEP_LABEL = { SYSTEM_CHECKOUT: "System Checkout", BILLING_STARTED: "Bill Prep", AUDIT: "Audit", BILL_READY: "Bill Finalized", PAYMENT: "Payment" };
 
 const BILLING_STEPS_ORDER = [
@@ -270,7 +294,13 @@ export default function FCApp({ user, onLogout }) {
   const dashboardData = useLiveBedDashboardData("fc", tab === "beds");
   const [txnFilter, setTxnFilter] = useState("ALL"); // My Transactions ribbon filter
   const loadRef = useRef(() => {});
-  const isMaster = user.role === "MASTER_FC";
+  const isMaster = String(user.role).startsWith("MASTER_");
+  // Only the queues this role can actually act on — an Audit user seeing a
+  // Payment queue they cannot tick is worse than not seeing it.
+  const mySteps = ROLE_STEPS[user.role] || ROLE_STEPS.FC;
+  const sections = SECTIONS.filter((sec) => mySteps.includes(sec.key));
+  const [roleTitle, roleBadge] = ROLE_TITLE[user.role] || ROLE_TITLE.FC;
+  const totalLabel = mySteps.length === 1 ? "TOTAL PENDING" : "TOTAL BILLING";
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
 
@@ -470,7 +500,7 @@ export default function FCApp({ user, onLogout }) {
     </div>
   );
 
-  const totalPending = SECTIONS.reduce((n, s) => n + (data[s.key]?.length || 0), 0);
+  const totalPending = sections.reduce((n, s) => n + (data[s.key]?.length || 0), 0);
 
   const menu = [
     { key: "beds", icon: icons.home, label: "Dashboard" },
@@ -487,20 +517,23 @@ export default function FCApp({ user, onLogout }) {
       menu={menu}
       active={tab}
       onSelect={(k) => { setTab(k); setOpenWard(null); }}
-      title={openWard ? "Bed Entry" : (isMaster ? "Master FC" : "Finance Coordinator")}
-      user={{ name: user.name || user.username || "FC", role: isMaster ? "MASTER FC" : "FC" }}
+      title={openWard ? "Bed Entry" : roleTitle}
+      user={{ name: user.name || user.username || roleBadge, role: roleBadge }}
       onLogout={onLogout}
       topExtra={null}
     >
       {tab === "dashboard" && (
         <>
           <div className="stat-grid" style={{ marginBottom: 16 }}>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{totalPending}</div><div className="l">TOTAL BILLING</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILLING_STARTED?.length || 0}</div><div className="l">PREP</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.AUDIT?.length || 0}</div><div className="l">AUDIT</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.BILL_READY?.length || 0}</div><div className="l">FINALIZE</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.PAYMENT?.length || 0}</div><div className="l">PAYMENT</div></div>
-            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{data.SYSTEM_CHECKOUT?.length || 0}</div><div className="l">CHECKOUT</div></div>
+            <div className="stat"><div className="n" style={{ fontSize: 18 }}>{totalPending}</div><div className="l">{totalLabel}</div></div>
+            {/* One tile per queue this role works — an Audit user has no reason
+                to see a Payment backlog they cannot clear. */}
+            {sections.map((sec) => (
+              <div className="stat" key={sec.key}>
+                <div className="n" style={{ fontSize: 18 }}>{data[sec.key]?.length || 0}</div>
+                <div className="l">{TILE_LABEL[sec.key]}</div>
+              </div>
+            ))}
             <div className="stat">
               <div className="n" style={{ fontSize: 18 }}>{lastSync ? lastSync.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</div>
               <div className="l">LAST UPDATE</div>
@@ -529,7 +562,7 @@ export default function FCApp({ user, onLogout }) {
               onClick={() => setTxnFilter("ALL")}>
               All ({totalPending})
             </button>
-            {SECTIONS.map((sec) => (
+            {sections.map((sec) => (
               <button key={sec.key} className={"fchip" + (txnFilter === sec.key ? " on" : "")}
                 style={{ padding: "8px 16px", fontSize: 13, flexShrink: 0, whiteSpace: "nowrap" }}
                 onClick={() => setTxnFilter(sec.key)}>
@@ -538,7 +571,7 @@ export default function FCApp({ user, onLogout }) {
             ))}
           </div>
 
-          {SECTIONS.filter((sec) => txnFilter === "ALL" || txnFilter === sec.key).map((sec) => (
+          {sections.filter((sec) => txnFilter === "ALL" || txnFilter === sec.key).map((sec) => (
             <CollapsibleSection key={sec.key} section={sec} rows={data[sec.key] || []}
               onComplete={(admissionId) => completeStep(admissionId, sec.key)} busyId={busyId}
               onRequestReopen={!isMaster ? handleRequestReopen : null} isMaster={isMaster} />

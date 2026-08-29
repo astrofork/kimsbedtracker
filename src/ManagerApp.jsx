@@ -7200,6 +7200,10 @@ const SIMPLE_LOGIN_TABS = [
   { role: "MASTER_FC", label: "Master FC" },
   { role: "PHARMACY", label: "Pharmacy" },
   { role: "MASTER_PHARMACY", label: "Master Pharmacy" },
+  { role: "BILLING", label: "Billing" },
+  { role: "MASTER_BILLING", label: "Master Billing" },
+  { role: "AUDIT", label: "Audit" },
+  { role: "MASTER_AUDIT", label: "Master Audit" },
 ];
 
 // Patient Welfare Officers are the same shape of account (username/password, no
@@ -7312,8 +7316,8 @@ function SimpleLoginEditor({ user, roleLabel, onClose, onSaved, showToast, activ
 export function SimpleLoginManager({
   showToast,
   tabs = SIMPLE_LOGIN_TABS,
-  title = "FC & Pharmacy Users",
-  blurb = "Manage Finance Coordinator and Pharmacy logins. Master roles can approve reopen requests.",
+  title = "Finance & Pharmacy Users",
+  blurb = "Manage Finance, Billing, Audit and Pharmacy logins. Master roles can approve reopen requests for their own steps.",
 }) {
   const [activeRole, setActiveRole] = useState(tabs[0].role);
   const [logins, setLogins] = useState([]);

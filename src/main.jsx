@@ -83,7 +83,10 @@ function App() {
       )}
     </div>
   );
-  if (user.role === "FC" || user.role === "MASTER_FC") return <><FCApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
+  // Billing and Audit run the FC app — same screens, queues filtered to their
+  // own steps. See ROLE_STEPS in FCApp.jsx.
+  if (["FC", "MASTER_FC", "AUDIT", "MASTER_AUDIT", "BILLING", "MASTER_BILLING"].includes(user.role))
+    return <><FCApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "COO")        return <><COOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "NURSE")      return <><NurseApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "DOCTOR")     return <><DoctorApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;

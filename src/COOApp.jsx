@@ -268,7 +268,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "nurses", icon: icons.user, label: "Nurse Users" },
         { key: "doctors", icon: icons.stethoscope, label: "DMO Users" },
         { key: "consultants", icon: icons.stethoscope, label: "Consultant Users" },
-        { key: "fcpharmacy", icon: icons.list, label: "FC & Pharmacy" },
+        { key: "fcpharmacy", icon: icons.list, label: "Finance & Pharmacy" },
         { key: "welfare", icon: icons.shield, label: "Welfare Officers" },
       ]
     },

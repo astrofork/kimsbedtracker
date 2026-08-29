@@ -19,11 +19,11 @@ const STEPS = [
   { key: "DRUG_RETURN", label: "Drug Return", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2 },
   { key: "PHARMACY_CLEARANCE", label: "Pharmacy Clearance", roles: ["PRE", "NURSE", "PHARMACY", "MASTER_PHARMACY"], group: 2, after: "DRUG_RETURN" },
   { key: "PROCEDURE_RECONCILIATION", label: "Procedure Reconciliation (OT / Cath Lab)", roles: ["PRE"], allowNA: true, group: 2, after: "DRUG_RETURN" },
-  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE", "FC", "MASTER_FC"], group: 3, afterAll: ["PHARMACY_CLEARANCE", "PROCEDURE_RECONCILIATION"] },
-  { key: "AUDIT", label: "Audit", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
-  { key: "BILL_READY", label: "Bill Finalized", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
-  { key: "PAYMENT", label: "Payment Status", roles: ["PRE", "FC", "MASTER_FC"], group: 3 },
-  { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE", "FC", "MASTER_FC"], group: 4 },
+  { key: "BILLING_STARTED", label: "Bill Prep", roles: ["PRE", "BILLING", "MASTER_BILLING"], group: 3, afterAll: ["PHARMACY_CLEARANCE", "PROCEDURE_RECONCILIATION"] },
+  { key: "AUDIT", label: "Audit", roles: ["PRE", "AUDIT", "MASTER_AUDIT"], group: 3 },
+  { key: "BILL_READY", label: "Bill Finalized", roles: ["PRE", "FC", "MASTER_FC", "BILLING", "MASTER_BILLING"], group: 3 },
+  { key: "PAYMENT", label: "Payment Status", roles: ["PRE", "FC", "MASTER_FC", "BILLING", "MASTER_BILLING"], group: 3 },
+  { key: "SYSTEM_CHECKOUT", label: "System Checkout", roles: ["PRE", "FC", "MASTER_FC", "BILLING", "MASTER_BILLING"], group: 4 },
   { key: "PHYSICAL_CHECKOUT", label: "Physical Checkout", roles: ["PRE", "NURSE"], needsPatientLeft: true, group: 5 },
 ];
 const GROUPS = [...new Set(STEPS.map((s) => s.group))].map((id) => ({
@@ -36,7 +36,7 @@ const PRE_SYSTEM_CHECKOUT_STEPS = STEPS.filter((s) => !s.hidden && !["SYSTEM_CHE
 const PRE_PHYSICAL_CHECKOUT_STEPS = [];
 const PLAN_ROLES = ["PRE", "DOCTOR", "CONSULTANT"];
 
-const ROLE_SHORT = { PRE: "PRE", NURSE: "Nurse", DOCTOR: "Doctor", CONSULTANT: "Consultant", FC: "FC", MASTER_FC: "FC", PHARMACY: "Pharmacy", MASTER_PHARMACY: "Pharmacy" };
+const ROLE_SHORT = { PRE: "PRE", NURSE: "Nurse", DOCTOR: "Doctor", CONSULTANT: "Consultant", FC: "FC", MASTER_FC: "FC", PHARMACY: "Pharmacy", MASTER_PHARMACY: "Pharmacy", AUDIT: "Audit", MASTER_AUDIT: "Audit", BILLING: "Billing", MASTER_BILLING: "Billing" };
 function friendlyRoles(roles) {
   const unique = [...new Set(roles.map(r => ROLE_SHORT[r] || r))];
   return unique.join(" / ");
@@ -130,7 +130,14 @@ function StepRow({ step, status, role, onSetStatus, onRequestReopen, saving, loc
     ["COMPLETED", "NOT_APPLICABLE"].includes(tracking.pharmacy_clearance_status) ||
     ["COMPLETED", "NOT_APPLICABLE"].includes(tracking.procedure_reconciliation_status)
   );
-  const canDirectReopen = !(role === "PHARMACY" && isPharmacyStep) && !(role === "FC" && isBillingStep) && !drugReturnReopenBlocked;
+  // A worker account cannot un-tick its own step directly — it files a request
+  // for its Master to approve. Masters and PRE are unaffected.
+  const canDirectReopen =
+    !(role === "PHARMACY" && isPharmacyStep) &&
+    !(role === "FC" && isBillingStep) &&
+    !(role === "AUDIT" && step.key === "AUDIT") &&
+    !(role === "BILLING" && isBillingStep) &&
+    !drugReturnReopenBlocked;
   const showPatientLeft = step.needsPatientLeft && status === "COMPLETED";
   // Finished AND we know who finished it — the only case that shows a byline
   // instead of the "who may act" role hint.
