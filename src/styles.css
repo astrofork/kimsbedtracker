@@ -821,40 +821,48 @@ body.hero-gone .appbar{
 .mp-row-card-stats{display:flex;gap:18px;flex-shrink:0;}
 
 /* ── Consultant "My Patients" page — redesign v2 ─────────────────────
-   Clinical, dense, professional. All mp2-* classes are scoped to this
-   page only; no shared class (.card, .tbl, .field, .btn…) is touched. */
+   All mp2-* classes are scoped to this page only; no shared class is touched. */
 
-/* KPI strip — 3 metrics, colored left accent, no wrapping card */
-.mp2-kpis{
-  display:grid;grid-template-columns:repeat(3,1fr);gap:0;
-  border:1px solid var(--line);border-radius:8px;overflow:hidden;
-  margin-bottom:14px;background:var(--panel);
-}
+/* KPI cards — three distinct-colored cards with a faint icon watermark */
+.mp2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
+@media (max-width:560px){.mp2-kpis{grid-template-columns:1fr;}}
 .mp2-kpi{
-  padding:14px 16px;border-left:3px solid var(--kpi-accent,var(--ink-3));
-  position:relative;
+  position:relative;overflow:hidden;
+  padding:16px 18px;border-radius:10px;
+  border:1px solid var(--line);background:var(--panel);
 }
-.mp2-kpi+.mp2-kpi{border-left-width:0;}
-.mp2-kpi+.mp2-kpi::before{
-  content:"";position:absolute;left:0;top:20%;bottom:20%;width:1px;background:var(--line);
+.mp2-kpi-icon{
+  position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  opacity:.08;pointer-events:none;
 }
-.mp2-kpi:first-child{border-left-width:3px;}
-.mp2-kpi-val{font-size:22px;font-weight:800;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums;}
-.mp2-kpi-lbl{font-size:11px;font-weight:500;color:var(--ink-3);margin-top:4px;white-space:nowrap;}
-@media (max-width:520px){
-  .mp2-kpis{grid-template-columns:1fr;}
-  .mp2-kpi{border-left-width:3px !important;padding:10px 14px;}
-  .mp2-kpi+.mp2-kpi{border-top:1px solid var(--line);}
-  .mp2-kpi+.mp2-kpi::before{display:none;}
-}
+.mp2-kpi-icon svg{width:40px;height:40px;}
+.mp2-kpi-val{font-size:26px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+.mp2-kpi-lbl{font-size:11.5px;font-weight:600;margin-top:6px;letter-spacing:.01em;}
 
-/* Toolbar — search + sort + view toggle on one row */
+.mp2-kpi-green{border-left:3px solid var(--st-v);}
+.mp2-kpi-green .mp2-kpi-val{color:var(--st-v);}
+.mp2-kpi-green .mp2-kpi-lbl{color:var(--ink-2);}
+.mp2-kpi-green .mp2-kpi-icon{color:var(--st-v);}
+
+.mp2-kpi-purple{border-left:3px solid #8b5cf6;}
+.mp2-kpi-purple .mp2-kpi-val{color:#8b5cf6;}
+.mp2-kpi-purple .mp2-kpi-lbl{color:var(--ink-2);}
+.mp2-kpi-purple .mp2-kpi-icon{color:#8b5cf6;}
+
+.mp2-kpi-orange{border-left:3px solid var(--st-o);}
+.mp2-kpi-orange .mp2-kpi-val{color:var(--st-o);}
+.mp2-kpi-orange .mp2-kpi-lbl{color:var(--ink-2);}
+.mp2-kpi-orange .mp2-kpi-icon{color:var(--st-o);}
+
+/* Toolbar — search + sort + view toggle */
 .mp2-bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
 .mp2-search{
   flex:1 1 220px;display:flex;align-items:center;gap:8px;
-  height:36px;padding:0 10px;background:var(--panel);
-  border:1px solid var(--line);border-radius:8px;
+  height:38px;padding:0 12px;background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;
+  transition:border-color .15s,box-shadow .15s;
 }
+.mp2-search:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.1);}
 .mp2-search svg{color:var(--ink-3);flex-shrink:0;}
 .mp2-search input{border:none;background:none;outline:none;color:var(--ink);font-size:13px;width:100%;height:100%;}
 @media (max-width:767px){.mp2-search input{font-size:16px;}}
@@ -865,71 +873,87 @@ body.hero-gone .appbar{
 .mp2-search-x:hover{background:var(--panel-2);color:var(--ink);}
 .mp2-bar-r{display:flex;gap:6px;align-items:center;}
 .mp2-sort{
-  height:32px;padding:0 8px;border:1px solid var(--line);border-radius:6px;
+  height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;
   background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;outline:none;
 }
-.mp2-vtog{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+.mp2-vtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .mp2-vtog button{
   display:flex;align-items:center;justify-content:center;
-  width:32px;height:30px;color:var(--ink-3);transition:background .1s,color .1s;
+  width:34px;height:32px;color:var(--ink-3);transition:background .12s,color .12s;
 }
 .mp2-vtog button+button{border-left:1px solid var(--line);}
 .mp2-vtog button:hover{background:var(--panel-2);}
-.mp2-vtog button.on{background:var(--panel-2);color:var(--primary);}
+.mp2-vtog button.on{background:var(--primary);color:#fff;}
 
-/* Table — clean, no wrapping card, compact header */
+/* List header */
+.mp2-list-head{
+  display:flex;align-items:baseline;gap:8px;margin-bottom:8px;padding:0 2px;
+}
+.mp2-list-head>span:first-child{font-size:14px;font-weight:700;color:var(--ink);}
+.mp2-list-count{
+  font-size:11px;font-weight:600;color:var(--ink-3);
+  background:var(--panel-2);padding:2px 8px;border-radius:99px;
+}
+
+/* Table — clean rows, hover lift */
 .mp2-tbl-wrap{
-  border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel);
+  box-shadow:var(--shadow);
 }
 .mp2-tbl{width:100%;border-collapse:collapse;}
 .mp2-tbl thead th{
-  text-align:left;padding:8px 16px;font-size:10.5px;font-weight:700;
-  text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);
-  border-bottom:1px solid var(--line);background:var(--panel-2);
+  text-align:left;padding:10px 16px;font-size:10.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);
+  border-bottom:2px solid var(--line);background:var(--panel);
 }
-.mp2-th-count{text-align:right;width:90px;}
-.mp2-th-arr{width:36px;}
-.mp2-tbl tbody tr{cursor:pointer;transition:background .08s;}
+.mp2-th-count{text-align:right;width:100px;}
+.mp2-th-arr{width:40px;}
+.mp2-tbl tbody tr{cursor:pointer;transition:background .1s;}
 .mp2-tbl tbody tr:hover{background:var(--panel-2);}
-.mp2-tbl tbody td{padding:0 16px;height:48px;border-bottom:1px solid var(--line);font-size:13.5px;}
+.mp2-tbl tbody tr:hover .mp2-td-arr{color:var(--primary);}
+.mp2-tbl tbody td{padding:0 16px;height:52px;border-bottom:1px solid var(--line);font-size:13.5px;}
 .mp2-tbl tbody tr:last-child td{border-bottom:none;}
-.mp2-td-count{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:14px;}
-.mp2-td-arr{text-align:center;color:var(--ink-3);}
+.mp2-td-count{
+  text-align:right;font-weight:800;font-variant-numeric:tabular-nums;font-size:15px;
+  color:var(--ink);
+}
+.mp2-td-arr{text-align:center;color:var(--ink-3);transition:color .15s;}
 
 .mp2-ward-cell{display:flex;align-items:center;gap:10px;font-weight:600;}
 .mp2-ward-sq{
-  width:28px;height:28px;border-radius:6px;flex-shrink:0;
+  width:30px;height:30px;border-radius:7px;flex-shrink:0;
   display:inline-flex;align-items:center;justify-content:center;
-  color:#fff;font-size:10px;font-weight:800;letter-spacing:.02em;
+  color:#fff;font-size:10.5px;font-weight:800;letter-spacing:.02em;
+  box-shadow:0 1px 3px rgba(0,0,0,.15);
 }
 
-/* Mobile rows — stacked when <680px, hidden otherwise (via existing mp-tbl-* rules) */
+/* Mobile rows */
 .mp2-mrow{
   display:flex;align-items:center;justify-content:space-between;
-  padding:10px 14px;background:var(--panel);cursor:pointer;
-  border:1px solid var(--line);border-top:none;transition:background .08s;
+  padding:12px 14px;background:var(--panel);cursor:pointer;
+  border:1px solid var(--line);border-top:none;transition:background .1s;
 }
-.mp2-mrow:first-child{border-top:1px solid var(--line);border-radius:8px 8px 0 0;}
-.mp2-mrow:last-child{border-radius:0 0 8px 8px;}
+.mp2-mrow:first-child{border-top:1px solid var(--line);border-radius:10px 10px 0 0;}
+.mp2-mrow:last-child{border-radius:0 0 10px 10px;}
 .mp2-mrow:hover{background:var(--panel-2);}
 .mp2-mrow-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .mp2-mrow-r{display:flex;align-items:center;gap:10px;color:var(--ink-3);flex-shrink:0;}
-.mp2-mrow-ct{font-weight:700;font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums;}
+.mp2-mrow-ct{font-weight:800;font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums;}
 
-/* Card view grid — compact ward tiles with colored left accent */
-.mp2-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;}
+/* Card view — tiles with colored accent bar + subtle shadow on hover */
+.mp2-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px;}
 .mp2-wcard{
-  display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;
-  background:var(--panel);border:1px solid var(--line);border-radius:8px;
-  transition:background .1s,border-color .15s;
+  display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  transition:transform .12s,box-shadow .15s,border-color .15s;
 }
-.mp2-wcard:hover{background:var(--panel-2);border-color:color-mix(in srgb,var(--ink-3) 50%,var(--line));}
+.mp2-wcard:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);border-color:color-mix(in srgb,var(--ink-3) 40%,var(--line));}
 .mp2-wcard-bar{width:4px;align-self:stretch;border-radius:2px;flex-shrink:0;}
 .mp2-wcard-body{flex:1;min-width:0;}
-.mp2-wcard-name{font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.mp2-wcard-ct{font-size:11.5px;color:var(--ink-3);margin-top:2px;}
+.mp2-wcard-name{font-weight:600;font-size:13.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mp2-wcard-ct{font-size:12px;color:var(--ink-3);margin-top:2px;}
 
-/* No-match / empty / center states */
+/* States */
 .mp2-no-match{padding:40px 16px;text-align:center;color:var(--ink-3);font-size:13px;}
 .mp2-center{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 20px;text-align:center;}
 .mp2-notice{
@@ -939,10 +963,10 @@ body.hero-gone .appbar{
 .mp2-notice-err{background:var(--st-or-bg);color:var(--st-or);border:1px solid color-mix(in srgb,var(--st-or) 20%,transparent);}
 .mp2-notice button{font-weight:700;text-decoration:underline;background:none;border:none;color:inherit;padding:0;cursor:pointer;margin-left:auto;}
 
-/* Pagination — clean, minimal */
+/* Pagination */
 .mp2-pag{
   display:flex;align-items:center;justify-content:space-between;
-  padding:10px 2px;margin-top:6px;flex-wrap:wrap;gap:8px;
+  padding:10px 2px;margin-top:8px;flex-wrap:wrap;gap:8px;
 }
 .mp2-pag-info{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 .mp2-pag-r{display:flex;align-items:center;gap:2px;}
@@ -959,6 +983,7 @@ body.hero-gone .appbar{
   background:var(--panel);color:var(--ink);font-size:11px;font-weight:600;
   margin-left:6px;outline:none;
 }
+
 
 
 /* Auto-flow grid: 1→2→4 columns as space grows */

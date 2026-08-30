@@ -253,17 +253,20 @@ function MyPatientsPage() {
 
       {!error && patients !== null && patients.length > 0 && (
         <>
-          {/* ── KPI strip ── */}
+          {/* ── KPI cards ── */}
           <div className="mp2-kpis">
-            <div className="mp2-kpi" style={{ "--kpi-accent": "var(--st-v)" }}>
+            <div className="mp2-kpi mp2-kpi-green">
+              <div className="mp2-kpi-icon"><Ic d={icons.users} s={18} /></div>
               <div className="mp2-kpi-val">{totalPatientsCount}</div>
               <div className="mp2-kpi-lbl">Total Patients</div>
             </div>
-            <div className="mp2-kpi" style={{ "--kpi-accent": "#8b5cf6" }}>
+            <div className="mp2-kpi mp2-kpi-purple">
+              <div className="mp2-kpi-icon"><Ic d={icons.exchange} s={18} /></div>
               <div className="mp2-kpi-val">{dischargeLoungeCount}</div>
               <div className="mp2-kpi-lbl">Discharge Lounge</div>
             </div>
-            <div className="mp2-kpi" style={{ "--kpi-accent": "var(--st-o)" }}>
+            <div className="mp2-kpi mp2-kpi-orange">
+              <div className="mp2-kpi-icon"><Ic d={icons.clock} s={18} /></div>
               <div className="mp2-kpi-val">{dischargeTodayCount}</div>
               <div className="mp2-kpi-lbl">Discharge Today</div>
             </div>
@@ -298,6 +301,12 @@ function MyPatientsPage() {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* ── Ward list header ── */}
+          <div className="mp2-list-head">
+            <span>Wards Overview</span>
+            <span className="mp2-list-count">{sortedWardGroups.length} ward{sortedWardGroups.length !== 1 ? "s" : ""}</span>
           </div>
 
           {/* ── Ward list ── */}
