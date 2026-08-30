@@ -265,7 +265,6 @@ function MyPatientsPage() {
 
       {!error && patients !== null && patients.length > 0 && (
         <>
-          <div className="mp2-body">
           {/* ── KPI cards ── */}
           <div className="mp2-kpis">
             <div className="mp2-kpi mp2-kpi-green">
@@ -397,8 +396,6 @@ function MyPatientsPage() {
               ))}
             </div>
           )}
-
-          </div>{/* end mp2-body */}
 
           {/* ── Pagination ── */}
           {sortedWardGroups.length > 0 && (

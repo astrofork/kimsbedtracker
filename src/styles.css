@@ -823,9 +823,8 @@ body.hero-gone .appbar{
 /* ── Consultant "My Patients" page — redesign v2 ─────────────────────
    All mp2-* classes are scoped to this page only; no shared class is touched. */
 
-/* Page layout — flex column so pagination sticks at the bottom */
-.mp2{display:flex;flex-direction:column;min-height:calc(100vh - 100px);}
-.mp2-body{flex:1;}
+/* Page layout — extra bottom padding so content isn't hidden behind the fixed pagination */
+.mp2{padding-bottom:56px;}
 
 /* KPI cards — compact row: circle icon | number+label | sparkline */
 .mp2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
@@ -980,9 +979,13 @@ body.hero-gone .appbar{
 /* Pagination */
 .mp2-pag{
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 2px;flex-wrap:wrap;gap:8px;
-  margin-top:auto;border-top:1px solid var(--line);
+  padding:10px 20px;flex-wrap:wrap;gap:8px;
+  position:fixed;bottom:0;left:240px;right:0;z-index:600;
+  background:var(--bg);border-top:1px solid var(--line);
+  transition:left 300ms cubic-bezier(.22,.8,.2,1);
 }
+.shell.sb-collapsed .mp2-pag{left:70px;}
+@media (max-width:767px){.mp2-pag{left:0 !important;}}
 .mp2-pag-info{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 .mp2-pag-r{display:flex;align-items:center;gap:2px;}
 .mp2-pag-r button{
