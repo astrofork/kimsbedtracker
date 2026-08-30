@@ -100,6 +100,15 @@ function MyPatientsPage() {
     return () => socket.off("consultant:patient-update", onPatientUpdate);
   }, []);
 
+  // Pre-fetch the ward's beds as soon as the user drills into a ward, so
+  // tapping a card resolves from cache instantly — same UX as PRE's grid
+  // where the beds are already in state when you see them.
+  useEffect(() => {
+    if (!openWard) return;
+    if (getWardBeds(openWard.key)) return;
+    api.consultantBeds(openWard.key).then(r => setWardBeds(openWard.key, r.beds || [])).catch(() => {});
+  }, [openWard]);
+
   const openBed = async (p) => {
     saveBedScroll();
     const cached = getWardBeds(p.ward_id);
