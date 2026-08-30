@@ -320,51 +320,56 @@ function MyPatientsPage() {
               panel token from styles.css). Real counts only, no "vs yesterday"
               trend badges: there's no history of your own patient counts to
               compare against, and fabricating a percentage would be actively
-              misleading here. */}
-          <div className="mp-stats">
-            <div className="mp-stat">
-              <span className="mp-stat-ico" style={{ background: "var(--st-v-bg)", color: "var(--st-v)" }}>
-                <Ic d={icons.users} s={14} />
-              </span>
-              <div>
-                <div className="mp-stat-num">{totalPatientsCount}</div>
-                <div className="mp-stat-lbl">Total Patients</div>
-              </div>
-            </div>
-            <div className="mp-stat">
-              <span className="mp-stat-ico" style={{ background: "rgba(139,92,246,.12)", color: "#8b5cf6" }}>
-                <Ic d={icons.exchange} s={14} />
-              </span>
-              <div>
-                <div className="mp-stat-num">{dischargeLoungeCount}</div>
-                <div className="mp-stat-lbl">Discharge Lounge</div>
-              </div>
-            </div>
-            <div className="mp-stat">
-              <span className="mp-stat-ico" style={{ background: "var(--st-o-bg)", color: "var(--st-o)" }}>
-                <Ic d={icons.clock} s={14} />
-              </span>
-              <div>
-                <div className="mp-stat-num">{dischargeTodayCount}</div>
-                <div className="mp-stat-lbl">Discharge Today</div>
-              </div>
-            </div>
+              misleading here — shown as a flat meta row (Jira's breadcrumb/
+              info-bar style) instead of three separate boxed stat cards. */}
+          <div className="mp-meta-row">
+            <span className="mp-meta-item">
+              <Ic d={icons.users} s={13} style={{ color: "var(--st-v)" }} />
+              <b>{totalPatientsCount}</b> Total Patients
+            </span>
+            <span className="mp-meta-dot" />
+            <span className="mp-meta-item">
+              <Ic d={icons.exchange} s={13} style={{ color: "#8b5cf6" }} />
+              <b>{dischargeLoungeCount}</b> Discharge Lounge
+            </span>
+            <span className="mp-meta-dot" />
+            <span className="mp-meta-item">
+              <Ic d={icons.clock} s={13} style={{ color: "var(--st-o)" }} />
+              <b>{dischargeTodayCount}</b> Discharge Today
+            </span>
           </div>
 
-          {/* Toolbar row — Jira's search + Filter pill + view-toggle group,
-              just laid out with this app's own field/pill styling. */}
+          {/* Toolbar row — Jira's search + avatar facepile + Filter pill +
+              view-toggle group, laid out with this app's own field styling. */}
           <div className="mp-toolbar">
             <div className="mp-search">
               <Ic d={icons.search} s={14} />
               <input placeholder="Search by ward name, bed no. or IP number…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
+            {/* Decorative facepile of this consultant's own wards — not a
+                control, nothing to click; it just gives the toolbar the same
+                "who/what's here at a glance" flourish Jira's list toolbar has
+                next to its search box. */}
+            {sortedWardGroups.length > 0 && (
+              <div className="mp-facepile" aria-hidden="true">
+                {sortedWardGroups.slice(0, 4).map((g) => (
+                  <span key={g.key} className="mp-facepile-av" style={{ background: wardAvatarColor(g.key) }}>
+                    {wardInitials(g.wardName)}
+                  </span>
+                ))}
+                {sortedWardGroups.length > 4 && (
+                  <span className="mp-facepile-av mp-facepile-more">+{sortedWardGroups.length - 4}</span>
+                )}
+              </div>
+            )}
             <div className="mp-toolbar-actions">
               <label className="mp-filter-pill">
-                <Ic d={icons.sort} s={13} />
+                <Ic d={icons.filter} s={13} />
                 <select aria-label="Sort wards" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                   <option value="ward-asc">Ward Name (A-Z)</option>
                   <option value="count-desc">Most Patients</option>
                 </select>
+                <Ic d={icons.chevron} s={11} style={{ transform: "rotate(90deg)", color: "var(--ink-3)", pointerEvents: "none" }} />
               </label>
               <div className="mp-seg">
                 <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")}>
