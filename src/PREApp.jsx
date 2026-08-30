@@ -861,7 +861,14 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
 
         <div className="pbed-foot">
           <span>Updated <RelativeTime ts={bed.updated_at} /></span>
-          {onClick && <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)" }} />}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {bed.reservation_status === "RESERVED" && (
+              <span className="pbed-stamp">
+                <Ic d={icons.bookmark} s={11} /> RESERVED
+              </span>
+            )}
+            {onClick && <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)" }} />}
+          </div>
         </div>
       </div>
     );
