@@ -909,6 +909,18 @@ body.hero-gone .appbar{
 .mp2-clear:hover:not(:disabled){color:var(--ink);border-color:var(--ink-3);}
 .mp2-clear:disabled{opacity:.35;cursor:default;}
 @media (max-width:767px){.mp2-clear{height:28px;padding:0 7px;font-size:10px;}}
+.mp2-suggest{
+  position:absolute;top:100%;left:0;right:0;z-index:20;margin-top:4px;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 6px 20px rgba(0,0,0,.12);overflow:hidden;
+}
+.mp2-suggest-item{
+  display:flex;align-items:center;gap:8px;width:100%;padding:9px 14px;
+  font-size:13px;color:var(--ink);background:none;border:none;cursor:pointer;
+  text-align:left;
+}
+.mp2-suggest-item:hover{background:color-mix(in srgb,var(--primary) 8%,var(--panel));}
+.mp2-suggest-item+.mp2-suggest-item{border-top:1px solid var(--line);}
 .mp2-vtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .mp2-vtog button{
   display:flex;align-items:center;justify-content:center;

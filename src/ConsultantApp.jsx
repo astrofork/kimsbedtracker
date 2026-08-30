@@ -240,10 +240,14 @@ function MyPatientsPage({ visible, onSubTitle }) {
       if (!bq) return true;
       return (p.bed_name || "").toLowerCase().includes(bq)
         || (p.ip_last6 || "").toLowerCase().includes(bq)
+        || (p.patient_name || "").toLowerCase().includes(bq)
         || (p.payer_type || "").toLowerCase().includes(bq)
         || (p.admission_type || "").toLowerCase().includes(bq)
         || (p.destination || "").toLowerCase().includes(bq);
     });
+    const nameSuggestions = bq && bq.length >= 2
+      ? [...new Set(groupPatients.map((p) => p.patient_name).filter((n) => n && n.toLowerCase().includes(bq)))]
+      : [];
     const fc = {
       ALL: groupPatients.length,
       DISCHARGE: groupPatients.filter((p) => p.discharge_tracking).length,
@@ -266,7 +270,7 @@ function MyPatientsPage({ visible, onSubTitle }) {
             <input
               className="field"
               value={bedSearch}
-              placeholder="Search bed, IP, payer…"
+              placeholder="Search bed, patient, IP…"
               style={{ paddingLeft: 38, paddingRight: bedSearch ? 36 : 15 }}
               onChange={(e) => setBedSearch(e.target.value)}
             />
@@ -278,6 +282,16 @@ function MyPatientsPage({ visible, onSubTitle }) {
               >
                 <Ic d={icons.x} s={14} />
               </button>
+            )}
+            {nameSuggestions.length > 0 && (
+              <div className="mp2-suggest">
+                {nameSuggestions.slice(0, 5).map((name) => (
+                  <button key={name} className="mp2-suggest-item" onClick={() => setBedSearch(name)}>
+                    <Ic d={icons.users} s={13} />
+                    {name}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
         </div>
