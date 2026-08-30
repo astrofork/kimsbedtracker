@@ -809,9 +809,8 @@ export function isOverstay(bed) {
     && bed.discharge_tracking?.patient_left !== true;
 }
 
-// Reservation watermark for a cleaning-card bed — sits behind the rest of
-// the card's content (see .pbed-stamp's z-index / .pbed.st-clean's stacking
-// context in styles.css) so it reads as a stamp, not another row of text.
+// Reservation stamp for a cleaning-card bed — sits in its own row just
+// below the icon, so it never overlaps the "Cleaning in progress" caption.
 function ReservedStamp() {
   return <span className="pbed-stamp">RESERVED</span>;
 }
@@ -846,7 +845,6 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
         tabIndex={onClick ? 0 : undefined}
         onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
       >
-        {bed.reservation_status === "RESERVED" && <ReservedStamp />}
         {wardLabel && (
           <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", letterSpacing: ".02em", marginBottom: -2, paddingTop: 2 }}>{wardLabel}</div>
         )}
@@ -862,6 +860,8 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
             <Ic d={CLEAN_ICON} s={20} style={{ pointerEvents: "none" }} />
           </span>
         </div>
+
+        {bed.reservation_status === "RESERVED" && <ReservedStamp />}
 
         <div style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
           {cleaningInProgress ? "Cleaning in progress" : "Awaiting cleaning"}
