@@ -823,6 +823,10 @@ body.hero-gone .appbar{
 /* ── Consultant "My Patients" page — redesign v2 ─────────────────────
    All mp2-* classes are scoped to this page only; no shared class is touched. */
 
+/* Page layout — flex column so pagination sticks at the bottom */
+.mp2{display:flex;flex-direction:column;min-height:calc(100vh - 100px);}
+.mp2-body{flex:1;}
+
 /* KPI cards — compact row: circle icon | number+label | sparkline */
 .mp2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
 @media (max-width:560px){
@@ -845,19 +849,24 @@ body.hero-gone .appbar{
 .mp2-kpi-body{flex:1;min-width:0;}
 .mp2-kpi-val{font-size:22px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;}
 .mp2-kpi-lbl{font-size:11px;font-weight:600;margin-top:3px;color:var(--ink-3);}
-.mp2-kpi-spark{width:56px;height:24px;flex-shrink:0;opacity:.35;}
+.mp2-kpi-spark{width:56px;height:24px;flex-shrink:0;}
+
+.mp2-spark-fill{opacity:.12;}
 
 .mp2-kpi-green .mp2-kpi-ico{background:color-mix(in srgb,var(--st-v) 14%,transparent);color:var(--st-v);}
 .mp2-kpi-green .mp2-kpi-val{color:var(--ink);}
 .mp2-kpi-green .mp2-kpi-spark{color:var(--st-v);}
+.mp2-kpi-green .mp2-spark-fill{fill:var(--st-v);}
 
 .mp2-kpi-purple .mp2-kpi-ico{background:color-mix(in srgb,#8b5cf6 14%,transparent);color:#8b5cf6;}
 .mp2-kpi-purple .mp2-kpi-val{color:var(--ink);}
 .mp2-kpi-purple .mp2-kpi-spark{color:#8b5cf6;}
+.mp2-kpi-purple .mp2-spark-fill{fill:#8b5cf6;}
 
 .mp2-kpi-orange .mp2-kpi-ico{background:color-mix(in srgb,var(--st-o) 14%,transparent);color:var(--st-o);}
 .mp2-kpi-orange .mp2-kpi-val{color:var(--ink);}
 .mp2-kpi-orange .mp2-kpi-spark{color:var(--st-o);}
+.mp2-kpi-orange .mp2-spark-fill{fill:var(--st-o);}
 
 /* Toolbar — search + sort + view toggle */
 .mp2-bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
@@ -971,10 +980,8 @@ body.hero-gone .appbar{
 /* Pagination */
 .mp2-pag{
   display:flex;align-items:center;justify-content:space-between;
-  padding:10px 16px;flex-wrap:wrap;gap:8px;
-  position:sticky;bottom:0;z-index:3;
-  background:var(--bg);border-top:1px solid var(--line);
-  margin:0 -16px;
+  padding:12px 2px;flex-wrap:wrap;gap:8px;
+  margin-top:auto;border-top:1px solid var(--line);
 }
 .mp2-pag-info{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 .mp2-pag-r{display:flex;align-items:center;gap:2px;}
