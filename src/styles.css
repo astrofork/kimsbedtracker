@@ -824,6 +824,7 @@ body.hero-gone .appbar{
    All mp2-* classes are scoped to this page only; no shared class is touched. */
 
 /* Page layout */
+.mp2{padding-bottom:56px;}
 
 /* KPI cards — compact row: circle icon | number+label | sparkline */
 .mp2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
@@ -975,12 +976,19 @@ body.hero-gone .appbar{
 .mp2-notice-err{background:var(--st-or-bg);color:var(--st-or);border:1px solid color-mix(in srgb,var(--st-or) 20%,transparent);}
 .mp2-notice button{font-weight:700;text-decoration:underline;background:none;border:none;color:inherit;padding:0;cursor:pointer;margin-left:auto;}
 
-/* Pagination */
+/* Pagination — fixed bottom bar */
 .mp2-pag{
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 2px;margin-top:10px;flex-wrap:wrap;gap:8px;
+  padding:12px 24px;flex-wrap:wrap;gap:8px;
+  position:fixed;bottom:0;left:240px;right:0;z-index:600;
+  height:52px;box-sizing:border-box;
+  background:var(--panel);
   border-top:1px solid var(--line);
+  box-shadow:0 -2px 8px rgba(0,0,0,.06);
+  transition:left 300ms cubic-bezier(.22,.8,.2,1);
 }
+.shell.sb-collapsed .mp2-pag{left:70px;}
+@media (max-width:767px){.mp2-pag{left:0 !important;padding:10px 16px;}}
 .mp2-pag-info{font-size:12.5px;color:var(--ink-3);font-weight:500;font-variant-numeric:tabular-nums;}
 .mp2-pag-r{display:flex;align-items:center;gap:4px;}
 .mp2-pag-r button{
