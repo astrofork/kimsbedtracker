@@ -10,20 +10,6 @@ import { BedGridCard, BedDetailSheet, BackBtn } from "./PREApp.jsx";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const initialsOf = (s) => (s || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
 
-// Spinner shown while a tapped bed's details are fetched.
-//
-// This used to be a body-portaled `.overlay` — a full-screen dark scrim with a
-// backdrop blur. Every other role shows loading as a plain inline block instead
-// (FCApp, NurseApp, DoctorApp, PharmacyApp, PWOApp, COOApp and main.jsx all use
-// this exact markup), so blacking out the screen made Consultant look like a
-// different product. It is the same in-page wait as everywhere else, so it now
-// looks like it.
-//
-// Dropping the portal also retires the containing-block problem the old comment
-// documented: `.overlay` is position:fixed, and both call sites sit inside a
-// `.slide-up` whose transform made it the containing block, so `inset:0`
-// resolved against the page rather than the viewport. Nothing here is fixed, so
-// none of that applies.
 function BedLoadingInline() {
   return (
     <div className="empty" style={{ paddingTop: 60 }}>
@@ -33,22 +19,13 @@ function BedLoadingInline() {
   );
 }
 
-// Consultant cfg — same WardPage as PRE/Nurse but readOnly=true locks all bed edits;
-// only the DischargeTab (role="CONSULTANT") remains interactive.
 const CONSULTANT_CFG = {
   role: "CONSULTANT",
   readOnly: true,
   listBeds: (wardId) => api.consultantBeds(wardId),
   payerTypes: () => api.consultantPayerTypes(),
-  // updateBedStatus intentionally absent → no status save
-  // updateAdmission intentionally absent → no Edit Patient Info button
-  // reviewWard intentionally absent → no Review button
 };
 
-// IST day string, matching how discharge_tracking.planned_date is stored
-// server-side (see planDischarge in dischargeService.ts) — needed to compare
-// "is this patient's planned discharge today" correctly regardless of the
-// browser's own timezone.
 function todayIST() {
   return new Date(Date.now() + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
@@ -67,49 +44,26 @@ function wardInitials(name) {
     : (name || "?").slice(0, 2).toUpperCase();
 }
 
-// ── My Patients page — flat bed grid with ward label on each card ────────────
-// Real-time: this page stays mounted for the whole ConsultantApp session (see
-// the always-rendered/CSS-hidden wrapper in ConsultantApp below) and keeps its
-// own dedicated socket listener for "consultant:patient-update" — a targeted,
-// ownership-scoped event (never broadcast to "overview"). Every patient/discharge
-// action anywhere in the app that touches one of this consultant's admissions
-// patches the in-memory `patients` array directly; the only REST call is the
-// one-time initial load. No polling, no refetch-on-every-event, no page reload.
+// ── My Patients page ────────────────────────────────────────────────────────
 function MyPatientsPage() {
   const [patients, setPatients] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [selectedBed, setSelectedBed] = useState(null);
-  // Opening a bed replaces this whole page with BedDetailSheet — save/restore
-  // scroll across that swap. saveBedScroll() must be called wherever
-  // selectedBed is opened, before setSelectedBed.
   const saveBedScroll = useScrollRestore(!!selectedBed);
   const [loadingBed, setLoadingBed] = useState(false);
   const [toast, setToast] = useState("");
   const [payerTypes, setPayerTypes] = useState([]);
-  // No `destinations` here on purpose: BedDetailSheet only uses that list for
-  // ReservationPopup, which a read-only CONSULTANT_CFG can never open. It used
-  // to be declared and passed while nothing ever set it, so it was permanently
-  // [] — dead state that read like an oversight. The sheet already defaults the
-  // prop to [], so omitting it says the same thing honestly.
   const [departments, setDepartments] = useState([]);
-  // Which ward's patient list is currently open — same "grid of cards, click
-  // one to drill in" flow as PRE Entry's ward-card → WardPage, just landing on
-  // this ward's own patient grid instead of a full bed-management page.
-  const [openWard, setOpenWard] = useState(null); // { key, wardName } | null
-  // saveWardScroll() must be called wherever openWard is opened, before
-  // setOpenWard — see useScrollRestore's doc comment for why.
+  const [openWard, setOpenWard] = useState(null);
   const saveWardScroll = useScrollRestore(!!openWard);
-  const [viewMode, setViewMode] = useState("table"); // "table" | "card"
-  const [sortBy, setSortBy] = useState("ward-asc"); // "ward-asc" | "count-desc"
+  const [viewMode, setViewMode] = useState("table");
+  const [sortBy, setSortBy] = useState("ward-asc");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(5);
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2000); }, []);
 
-  // Must sit above any early return (selectedBed/openWard below) — hooks can't
-  // be called conditionally, so this can't live further down with the values
-  // it actually depends on.
   useEffect(() => { setPage(1); }, [search, sortBy, rowsPerPage]);
 
   const load = useCallback(async () => {
@@ -125,9 +79,6 @@ function MyPatientsPage() {
     api.departments().then(r => setDepartments(r.departments || [])).catch(() => {});
   }, []);
 
-  // Dedicated socket, separate from ConsultantApp's dashboard-refresh socket —
-  // this one only ever receives events this consultant actually owns (room-scoped
-  // server-side), so every event here is guaranteed relevant, no filtering needed.
   useEffect(() => {
     const socket = getSocket();
     const onPatientUpdate = (payload) => {
@@ -138,7 +89,6 @@ function MyPatientsPage() {
         if (action === "REMOVE") {
           return prev.filter((p) => p.admission_id !== admission_id);
         }
-        // UPSERT — replace the matching row if present, otherwise add it.
         const idx = prev.findIndex((p) => p.admission_id === admission_id);
         if (idx === -1) return [...prev, payload];
         const next = prev.slice();
@@ -150,15 +100,8 @@ function MyPatientsPage() {
     return () => socket.off("consultant:patient-update", onPatientUpdate);
   }, []);
 
-  // A patient card only needs ONE bed, but the endpoint returns the whole ward —
-  // so this used to pay a full round-trip per tap, which is what the spinner was
-  // covering. The ward-beds cache in lib.js already holds that list and is
-  // dropped the moment anything could have changed it, so a ward opened before
-  // resolves instantly with no request and no spinner at all. A miss falls back
-  // to the fetch and populates the cache for the next tap.
   const openBed = async (p) => {
     saveBedScroll();
-
     const cached = getWardBeds(p.ward_id);
     const hit = cached?.find((b) => b.id === p.bed_id);
     if (hit) { setSelectedBed(hit); return; }
@@ -183,9 +126,6 @@ function MyPatientsPage() {
       <BedDetailSheet
         bed={selectedBed}
         cfg={CONSULTANT_CFG}
-        // No load() here — every discharge action a CONSULTANT can take (plan,
-        // reschedule, initiate, step updates) already emits a targeted
-        // consultant:patient-update event that patches `patients` directly.
         onClose={() => setSelectedBed(null)}
         onChanged={() => {}}
         onToast={showToast}
@@ -206,10 +146,6 @@ function MyPatientsPage() {
       })
     : null;
 
-  // Ward-wise grouping — same idea as PRE Entry's ward-card grid, keyed by
-  // this consultant's own patients instead of ward-wide bed stats. ward_id is
-  // preferred over ward_name for the key (two wards could share a display
-  // name); alphabetical by name matches every other grouped view in the app.
   const wardGroups = filtered ? (() => {
     const map = new Map();
     for (const p of filtered) {
@@ -220,9 +156,6 @@ function MyPatientsPage() {
     return [...map.values()].sort((a, b) => a.wardName.localeCompare(b.wardName));
   })() : [];
 
-  // Top stat cards — computed from the full unfiltered patient list, not
-  // `filtered`, so typing in the search box doesn't change these summary
-  // numbers out from under the user.
   const totalPatientsCount = patients ? patients.length : 0;
   const dischargeLoungeCount = patients ? patients.filter((p) => p.ward_name === "Discharge Lounge").length : 0;
   const todayStr = todayIST();
@@ -239,7 +172,6 @@ function MyPatientsPage() {
   const pageStart = (pageClamped - 1) * rowsPerPage;
   const pagedWardGroups = sortedWardGroups.slice(pageStart, pageStart + rowsPerPage);
 
-  // Drilled into one ward — full-page swap, same pattern as PRE's WardPage.
   if (openWard) {
     const group = wardGroups.find((g) => g.key === openWard.key);
     const groupPatients = group ? group.patients : [];
@@ -275,257 +207,179 @@ function MyPatientsPage() {
             />
           ))}
         </div>
-        {loadingBed && (
-          <BedLoadingInline />
-        )}
+        {loadingBed && <BedLoadingInline />}
         {toast && <div className="toast show">{toast}</div>}
       </div>
     );
   }
 
   return (
-    <div className="slide-up">
-      {/* No "My Patients" heading here — the AppShell topbar title already
-          says it (see `title` in ConsultantApp below), so repeating it in the
-          body was pure duplication. */}
+    <div className="slide-up mp2">
 
       {error && (
-        <div className="card empty" style={{ padding: "24px 20px" }}>
-          <Ic d={icons.alert} s={28} />
-          <div style={{ marginTop: 8, fontWeight: 600 }}>{error}</div>
-          <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={load}>Retry</button>
+        <div className="mp2-notice mp2-notice-err">
+          <Ic d={icons.alert} s={18} />
+          <span>{error}</span>
+          <button onClick={load}>Retry</button>
         </div>
       )}
 
       {!error && patients === null && (
-        <div className="empty" style={{ paddingTop: 60 }}>
-          <span className="spin"><Ic d={icons.refresh} s={24} /></span>
-        </div>
+        <div className="mp2-center"><span className="spin"><Ic d={icons.refresh} s={22} /></span></div>
       )}
 
       {!error && patients !== null && patients.length === 0 && (
-        <div className="card empty" style={{ padding: "32px 20px" }}>
-          <div style={{ width: 52, height: 52, borderRadius: 14, background: "var(--panel-2)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto" }}>
-            <Ic d={icons.bed} s={26} />
-          </div>
-          <div style={{ marginTop: 14, fontWeight: 700, fontSize: 15 }}>No patients assigned</div>
-          <div className="dim" style={{ fontSize: 13, marginTop: 5 }}>Beds with your name will appear here once admitted.</div>
+        <div className="mp2-center">
+          <Ic d={icons.bed} s={28} style={{ color: "var(--ink-3)" }} />
+          <div style={{ fontWeight: 700, fontSize: 15, marginTop: 12 }}>No patients assigned</div>
+          <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>Beds with your name will appear here once admitted.</div>
         </div>
       )}
 
       {!error && patients !== null && patients.length > 0 && (
         <>
-          {/* Jira List-view inspired dressing (100% layout inspiration, zero
-              palette change — every color below is still an existing st/ink/
-              panel token from styles.css). Real counts only, no "vs yesterday"
-              trend badges: there's no history of your own patient counts to
-              compare against, and fabricating a percentage would be actively
-              misleading here — shown as a flat meta row (Jira's breadcrumb/
-              info-bar style) instead of three separate boxed stat cards. */}
-          <div className="mp-meta-row">
-            <span className="mp-meta-item">
-              <Ic d={icons.users} s={13} style={{ color: "var(--st-v)" }} />
-              <b>{totalPatientsCount}</b> Total Patients
-            </span>
-            <span className="mp-meta-dot" />
-            <span className="mp-meta-item">
-              <Ic d={icons.exchange} s={13} style={{ color: "#8b5cf6" }} />
-              <b>{dischargeLoungeCount}</b> Discharge Lounge
-            </span>
-            <span className="mp-meta-dot" />
-            <span className="mp-meta-item">
-              <Ic d={icons.clock} s={13} style={{ color: "var(--st-o)" }} />
-              <b>{dischargeTodayCount}</b> Discharge Today
-            </span>
+          {/* ── KPI strip ── */}
+          <div className="mp2-kpis">
+            <div className="mp2-kpi" style={{ "--kpi-accent": "var(--st-v)" }}>
+              <div className="mp2-kpi-val">{totalPatientsCount}</div>
+              <div className="mp2-kpi-lbl">Total Patients</div>
+            </div>
+            <div className="mp2-kpi" style={{ "--kpi-accent": "#8b5cf6" }}>
+              <div className="mp2-kpi-val">{dischargeLoungeCount}</div>
+              <div className="mp2-kpi-lbl">Discharge Lounge</div>
+            </div>
+            <div className="mp2-kpi" style={{ "--kpi-accent": "var(--st-o)" }}>
+              <div className="mp2-kpi-val">{dischargeTodayCount}</div>
+              <div className="mp2-kpi-lbl">Discharge Today</div>
+            </div>
           </div>
 
-          {/* Toolbar row — Jira's search + avatar facepile + Filter pill +
-              view-toggle group, laid out with this app's own field styling. */}
-          <div className="mp-toolbar">
-            <div className="mp-search">
-              <Ic d={icons.search} s={14} />
-              <input placeholder="Search by ward name, bed no. or IP number…" value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-            {/* Decorative facepile of this consultant's own wards — not a
-                control, nothing to click; it just gives the toolbar the same
-                "who/what's here at a glance" flourish Jira's list toolbar has
-                next to its search box. */}
-            {sortedWardGroups.length > 0 && (
-              <div className="mp-facepile" aria-hidden="true">
-                {sortedWardGroups.slice(0, 4).map((g) => (
-                  <span key={g.key} className="mp-facepile-av" style={{ background: wardAvatarColor(g.key) }}>
-                    {wardInitials(g.wardName)}
-                  </span>
-                ))}
-                {sortedWardGroups.length > 4 && (
-                  <span className="mp-facepile-av mp-facepile-more">+{sortedWardGroups.length - 4}</span>
-                )}
-              </div>
-            )}
-            <div className="mp-toolbar-actions">
-              <label className="mp-filter-pill">
-                <Ic d={icons.filter} s={13} />
-                <select aria-label="Sort wards" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                  <option value="ward-asc">Ward Name (A-Z)</option>
-                  <option value="count-desc">Most Patients</option>
-                </select>
-                <Ic d={icons.chevron} s={11} style={{ transform: "rotate(90deg)", color: "var(--ink-3)", pointerEvents: "none" }} />
-              </label>
-              <div className="mp-seg">
-                <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")}>
-                  <Ic d={icons.list} s={13} /> Table
+          {/* ── Toolbar ── */}
+          <div className="mp2-bar">
+            <div className="mp2-search">
+              <Ic d={icons.search} s={15} />
+              <input
+                placeholder="Search by ward, bed or IP number…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button className="mp2-search-x" onClick={() => setSearch("")} aria-label="Clear search">
+                  <Ic d={icons.x} s={12} />
                 </button>
-                <button className={viewMode === "card" ? "on" : undefined} onClick={() => setViewMode("card")}>
-                  <Ic d={icons.grid} s={13} /> Card
+              )}
+            </div>
+            <div className="mp2-bar-r">
+              <select className="mp2-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort wards">
+                <option value="ward-asc">Ward A–Z</option>
+                <option value="count-desc">Most Patients</option>
+              </select>
+              <div className="mp2-vtog">
+                <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")} aria-label="Table view">
+                  <Ic d={icons.list} s={14} />
+                </button>
+                <button className={viewMode === "card" ? "on" : undefined} onClick={() => setViewMode("card")} aria-label="Card view">
+                  <Ic d={icons.grid} s={14} />
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="card mp-panel" style={{ padding: 0, overflow: "hidden" }}>
-            <div className="mp-panel-head">
-              <div className="row" style={{ gap: 8 }}>
-                <span style={{ fontWeight: 700, fontSize: 15 }}>Wards Overview</span>
-                <span className="chip">{sortedWardGroups.length}</span>
-              </div>
-              <button className="mp-refresh" onClick={load} aria-label="Refresh" title="Refresh">
-                <Ic d={icons.refresh} s={14} />
-              </button>
-            </div>
-
-            {sortedWardGroups.length === 0 ? (
-              <div className="dim" style={{ padding: "22px 16px", textAlign: "center", fontSize: 13 }}>
-                No wards match your search.
-              </div>
-            ) : viewMode === "table" ? (
-              <>
-                {/* ≥680px: real table. No Action column — the whole row is
-                    the click target now, same as Card View's cards already are. */}
-                <div className="tbl-wrap mp-tbl-desktop mp-jira-tbl" style={{ border: "none", borderRadius: 0 }}>
-                  <table className="tbl">
-                    <thead>
-                      <tr>
-                        <th>Ward</th>
-                        <th style={{ textAlign: "center" }}>Total Patients</th>
+          {/* ── Ward list ── */}
+          {sortedWardGroups.length === 0 ? (
+            <div className="mp2-no-match">No wards match your search.</div>
+          ) : viewMode === "table" ? (
+            <>
+              {/* Desktop table */}
+              <div className="mp2-tbl-wrap mp-tbl-desktop">
+                <table className="mp2-tbl">
+                  <thead>
+                    <tr>
+                      <th className="mp2-th-ward">Ward</th>
+                      <th className="mp2-th-count">Patients</th>
+                      <th className="mp2-th-arr" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedWardGroups.map((g) => (
+                      <tr key={g.key} onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
+                        <td>
+                          <div className="mp2-ward-cell">
+                            <span className="mp2-ward-sq" style={{ background: wardAvatarColor(g.key) }}>
+                              {wardInitials(g.wardName)}
+                            </span>
+                            {g.wardName}
+                          </div>
+                        </td>
+                        <td className="mp2-td-count">{g.patients.length}</td>
+                        <td className="mp2-td-arr"><Ic d={icons.chevron} s={14} /></td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {pagedWardGroups.map((g) => (
-                        <tr key={g.key} style={{ cursor: "pointer" }}
-                          onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
-                          <td>
-                            <div className="row" style={{ gap: 10 }}>
-                              <div style={{
-                                width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-                                background: wardAvatarColor(g.key), color: "#fff",
-                                display: "flex", alignItems: "center", justifyContent: "center",
-                                fontWeight: 800, fontSize: 12,
-                              }}>
-                                {wardInitials(g.wardName)}
-                              </div>
-                              <span style={{ fontWeight: 700 }}>{g.wardName}</span>
-                            </div>
-                          </td>
-                          <td style={{ textAlign: "center" }}>
-                            <span className="mp-count-pill">{g.patients.length}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-                {/* <680px: same data, stacked full-width row-cards instead of a
-                    cramped table — no horizontal scrolling/clipped columns. */}
-                <div className="mp-tbl-mobile">
-                  {pagedWardGroups.map((g) => (
-                    <div key={g.key} className="mp-row-card"
-                      onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
-                      <div className="row" style={{ gap: 10, minWidth: 0 }}>
-                        <div style={{
-                          width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-                          background: wardAvatarColor(g.key), color: "#fff",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontWeight: 800, fontSize: 12,
-                        }}>
-                          {wardInitials(g.wardName)}
-                        </div>
-                        <span style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.wardName}</span>
-                      </div>
-                      <div className="mp-row-card-stats">
-                        <span className="mp-count-pill">{g.patients.length}</span>
-                        <Ic d={icons.chevron} s={15} style={{ color: "var(--ink-3)" }} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="card-grid" style={{ padding: 16 }}>
-                {/* Same PRE Entry ward-card style, minus the "Complete" badge
-                    (PRE's own round-status, not applicable here), the
-                    Vacant/Occupied stat row (ward-wide bed occupancy, not
-                    specific to this consultant's patients), and Manage Beds /
-                    Discharges buttons (Consultant is read-only). */}
+              {/* Mobile stacked rows */}
+              <div className="mp-tbl-mobile">
                 {pagedWardGroups.map((g) => (
-                  // Renders instantly, like BedGridCard — see PREApp's ward grid.
-                  <div className="ward-card" key={g.key}
-                    style={{ padding: 16, cursor: "pointer" }}
-                    onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
-                    <div className="row between">
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 15 }}>{g.wardName}</div>
-                        <div className="dim" style={{ fontSize: 12 }}>{g.patients.length} patient{g.patients.length !== 1 ? "s" : ""}</div>
-                      </div>
-                      <Ic d={icons.chevron} s={16} style={{ color: "var(--ink-3)" }} />
+                  <div key={g.key} className="mp2-mrow" onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
+                    <div className="mp2-ward-cell">
+                      <span className="mp2-ward-sq" style={{ background: wardAvatarColor(g.key) }}>
+                        {wardInitials(g.wardName)}
+                      </span>
+                      <span className="mp2-mrow-name">{g.wardName}</span>
+                    </div>
+                    <div className="mp2-mrow-r">
+                      <span className="mp2-mrow-ct">{g.patients.length}</span>
+                      <Ic d={icons.chevron} s={14} />
                     </div>
                   </div>
                 ))}
               </div>
-            )}
-
-            {sortedWardGroups.length > 0 && (
-              <div className="row between mp-pagination" style={{ padding: "12px 16px", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
-                <span className="dim" style={{ fontSize: 12 }}>
-                  Showing {pageStart + 1} to {Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
-                </span>
-                <div className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <button className="btn btn-ghost" disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)}
-                    style={{ padding: "6px 10px" }} aria-label="Previous page">
-                    <Ic d={icons.chevron} s={13} style={{ transform: "rotate(180deg)" }} />
-                  </button>
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                    <button key={n} className="btn btn-ghost" onClick={() => setPage(n)}
-                      style={{
-                        padding: "6px 11px", minWidth: 32,
-                        background: n === pageClamped ? "var(--st-v)" : undefined,
-                        color: n === pageClamped ? "#fff" : undefined,
-                      }}>
-                      {n}
-                    </button>
-                  ))}
-                  <button className="btn btn-ghost" disabled={pageClamped >= totalPages} onClick={() => setPage(pageClamped + 1)}
-                    style={{ padding: "6px 10px" }} aria-label="Next page">
-                    <Ic d={icons.chevron} s={13} />
-                  </button>
-                  <select className="field" aria-label="Rows per page" value={rowsPerPage}
-                    onChange={(e) => setRowsPerPage(Number(e.target.value))}
-                    style={{ width: "auto", minWidth: 88, height: 32, fontSize: 12, marginLeft: 8, paddingTop: 0, paddingBottom: 0, paddingLeft: 10, paddingRight: 10 }}>
-                    <option value={5}>5 / page</option>
-                    <option value={10}>10 / page</option>
-                    <option value={25}>25 / page</option>
-                  </select>
+            </>
+          ) : (
+            <div className="mp2-cards">
+              {pagedWardGroups.map((g) => (
+                <div className="mp2-wcard" key={g.key} onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
+                  <span className="mp2-wcard-bar" style={{ background: wardAvatarColor(g.key) }} />
+                  <div className="mp2-wcard-body">
+                    <div className="mp2-wcard-name">{g.wardName}</div>
+                    <div className="mp2-wcard-ct">{g.patients.length} patient{g.patients.length !== 1 ? "s" : ""}</div>
+                  </div>
+                  <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)", flexShrink: 0 }} />
                 </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Pagination ── */}
+          {sortedWardGroups.length > 0 && (
+            <div className="mp2-pag">
+              <span className="mp2-pag-info">
+                {pageStart + 1}–{Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
+              </span>
+              <div className="mp2-pag-r">
+                <button disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)} aria-label="Previous page">
+                  <Ic d={icons.chevron} s={13} style={{ transform: "rotate(180deg)" }} />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                  <button key={n} className={n === pageClamped ? "on" : undefined} onClick={() => setPage(n)}>{n}</button>
+                ))}
+                <button disabled={pageClamped >= totalPages} onClick={() => setPage(pageClamped + 1)} aria-label="Next page">
+                  <Ic d={icons.chevron} s={13} />
+                </button>
+                <select value={rowsPerPage} onChange={(e) => setRowsPerPage(Number(e.target.value))} aria-label="Rows per page">
+                  <option value={5}>5 / page</option>
+                  <option value={10}>10 / page</option>
+                  <option value={25}>25 / page</option>
+                </select>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </>
       )}
 
-      {loadingBed && (
-        <BedLoadingInline />
-      )}
-
+      {loadingBed && <BedLoadingInline />}
       {toast && <div className="toast show">{toast}</div>}
     </div>
   );
@@ -537,18 +391,8 @@ function MyPatientsPage() {
 export default function ConsultantApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
-  // Lives here, above the tab switch, so it survives navigating away from and
-  // back to the Dashboard tab — see useLiveBedDashboardData.
   const dashboardData = useLiveBedDashboardData("consultant", tab === "dashboard");
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2600); }, []);
-
-  // NOTE: there used to be a second socket effect here subscribing to
-  // bed:update / discharge:update / discharge:overstay purely to bump a
-  // `liveKey` counter. Nothing ever read that counter, so every bed change
-  // anywhere in the hospital re-rendered this whole component for nothing.
-  // The dashboard already refreshes itself through useLiveBedDashboardData
-  // above, and the patient list is patched in place by the consultant:
-  // patient-update handler further up — neither needed the bump.
 
   const menu = [
     { key: "dashboard",   icon: icons.home,        label: "Dashboard" },
@@ -577,10 +421,6 @@ export default function ConsultantApp({ user, meta, onLogout }) {
             hideUnitFilter
           />
         )}
-        {/* Stays mounted across tab switches (CSS-hidden, not unmounted) — its
-              patient list is kept live via its own dedicated socket listener, so
-              unmounting/remounting here would force a full refetch and defeat
-              the incremental real-time patching entirely. */}
         <div style={{ display: tab === "mypatients" ? "block" : "none" }}>
           <MyPatientsPage showToast={showToast} />
         </div>

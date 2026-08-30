@@ -820,42 +820,146 @@ body.hero-gone .appbar{
 .mp-row-card:hover{background:var(--panel-2);}
 .mp-row-card-stats{display:flex;gap:18px;flex-shrink:0;}
 
-/* ── Consultant "My Patients" page only — Jira List-view inspired dressing.
-   Every color here still resolves through the app's existing st/ink/panel
-   tokens; only the layout/density is borrowed. All class names are new
-   (mp-meta-row/mp-toolbar/mp-panel/…) so nothing shared by other pages
-   (.card, .tbl, .ward-card, .field, .btn…) is touched. */
-.mp-meta-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px;color:var(--ink-2);}
-.mp-meta-item{display:inline-flex;align-items:center;gap:5px;}
-.mp-meta-item b{color:var(--ink);font-size:14px;font-weight:800;}
-.mp-meta-dot{width:3px;height:3px;border-radius:50%;background:var(--ink-3);flex-shrink:0;}
+/* ── Consultant "My Patients" page — redesign v2 ─────────────────────
+   Clinical, dense, professional. All mp2-* classes are scoped to this
+   page only; no shared class (.card, .tbl, .field, .btn…) is touched. */
 
-.mp-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
-.mp-search{position:relative;flex:1 1 220px;display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:0 11px;height:34px;}
-.mp-search svg{color:var(--ink-3);flex-shrink:0;}
-.mp-search input{border:none;background:none;outline:none;color:var(--ink);font-size:13px;width:100%;height:100%;}
-@media (max-width:767px){.mp-search input{font-size:16px;}}
-.mp-facepile{display:flex;align-items:center;flex-shrink:0;}
-.mp-facepile-av{
-  width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;
-  color:#fff;font-size:10px;font-weight:800;border:2px solid var(--panel);margin-left:-8px;flex-shrink:0;
+/* KPI strip — 3 metrics, colored left accent, no wrapping card */
+.mp2-kpis{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:0;
+  border:1px solid var(--line);border-radius:8px;overflow:hidden;
+  margin-bottom:14px;background:var(--panel);
 }
-.mp-facepile-av:first-child{margin-left:0;}
-.mp-facepile-more{background:var(--panel-2);color:var(--ink-2);border-color:var(--panel);}
-.mp-toolbar-actions{display:flex;gap:6px;flex-wrap:wrap;}
-.mp-filter-pill{display:flex;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:0 9px;height:32px;color:var(--ink-2);}
-.mp-filter-pill select{border:none;background:none;outline:none;color:var(--ink);font-size:11.5px;font-weight:600;height:100%;}
-.mp-seg{display:flex;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:2px;gap:2px;}
-.mp-seg button{display:flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:4px;font-size:11.5px;font-weight:600;color:var(--ink-2);transition:.12s;}
-.mp-seg button.on{background:var(--panel);color:var(--st-v);box-shadow:0 1px 2px rgba(0,0,0,.08);}
+.mp2-kpi{
+  padding:14px 16px;border-left:3px solid var(--kpi-accent,var(--ink-3));
+  position:relative;
+}
+.mp2-kpi+.mp2-kpi{border-left-width:0;}
+.mp2-kpi+.mp2-kpi::before{
+  content:"";position:absolute;left:0;top:20%;bottom:20%;width:1px;background:var(--line);
+}
+.mp2-kpi:first-child{border-left-width:3px;}
+.mp2-kpi-val{font-size:22px;font-weight:800;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums;}
+.mp2-kpi-lbl{font-size:11px;font-weight:500;color:var(--ink-3);margin-top:4px;white-space:nowrap;}
+@media (max-width:520px){
+  .mp2-kpis{grid-template-columns:1fr;}
+  .mp2-kpi{border-left-width:3px !important;padding:10px 14px;}
+  .mp2-kpi+.mp2-kpi{border-top:1px solid var(--line);}
+  .mp2-kpi+.mp2-kpi::before{display:none;}
+}
 
-.mp-panel{border-radius:8px;box-shadow:none;}
-.mp-panel-head{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--panel-2);}
-.mp-refresh{width:24px;height:24px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--ink-3);border:1px solid var(--line);background:var(--panel);flex-shrink:0;}
-.mp-refresh:hover{background:var(--panel);color:var(--ink);}
-.mp-count-pill{display:inline-flex;min-width:24px;justify-content:center;padding:2px 9px;border-radius:99px;background:var(--st-v);color:#fff;font-weight:800;font-size:11.5px;}
-.mp-jira-tbl thead th{text-transform:uppercase;font-size:10px;letter-spacing:.05em;padding-top:8px;padding-bottom:8px;}
-.mp-pagination{background:var(--panel-2);}
+/* Toolbar — search + sort + view toggle on one row */
+.mp2-bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+.mp2-search{
+  flex:1 1 220px;display:flex;align-items:center;gap:8px;
+  height:36px;padding:0 10px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;
+}
+.mp2-search svg{color:var(--ink-3);flex-shrink:0;}
+.mp2-search input{border:none;background:none;outline:none;color:var(--ink);font-size:13px;width:100%;height:100%;}
+@media (max-width:767px){.mp2-search input{font-size:16px;}}
+.mp2-search-x{
+  width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  color:var(--ink-3);flex-shrink:0;transition:background .1s;
+}
+.mp2-search-x:hover{background:var(--panel-2);color:var(--ink);}
+.mp2-bar-r{display:flex;gap:6px;align-items:center;}
+.mp2-sort{
+  height:32px;padding:0 8px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;outline:none;
+}
+.mp2-vtog{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;}
+.mp2-vtog button{
+  display:flex;align-items:center;justify-content:center;
+  width:32px;height:30px;color:var(--ink-3);transition:background .1s,color .1s;
+}
+.mp2-vtog button+button{border-left:1px solid var(--line);}
+.mp2-vtog button:hover{background:var(--panel-2);}
+.mp2-vtog button.on{background:var(--panel-2);color:var(--primary);}
+
+/* Table — clean, no wrapping card, compact header */
+.mp2-tbl-wrap{
+  border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel);
+}
+.mp2-tbl{width:100%;border-collapse:collapse;}
+.mp2-tbl thead th{
+  text-align:left;padding:8px 16px;font-size:10.5px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);
+  border-bottom:1px solid var(--line);background:var(--panel-2);
+}
+.mp2-th-count{text-align:right;width:90px;}
+.mp2-th-arr{width:36px;}
+.mp2-tbl tbody tr{cursor:pointer;transition:background .08s;}
+.mp2-tbl tbody tr:hover{background:var(--panel-2);}
+.mp2-tbl tbody td{padding:0 16px;height:48px;border-bottom:1px solid var(--line);font-size:13.5px;}
+.mp2-tbl tbody tr:last-child td{border-bottom:none;}
+.mp2-td-count{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:14px;}
+.mp2-td-arr{text-align:center;color:var(--ink-3);}
+
+.mp2-ward-cell{display:flex;align-items:center;gap:10px;font-weight:600;}
+.mp2-ward-sq{
+  width:28px;height:28px;border-radius:6px;flex-shrink:0;
+  display:inline-flex;align-items:center;justify-content:center;
+  color:#fff;font-size:10px;font-weight:800;letter-spacing:.02em;
+}
+
+/* Mobile rows — stacked when <680px, hidden otherwise (via existing mp-tbl-* rules) */
+.mp2-mrow{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 14px;background:var(--panel);cursor:pointer;
+  border:1px solid var(--line);border-top:none;transition:background .08s;
+}
+.mp2-mrow:first-child{border-top:1px solid var(--line);border-radius:8px 8px 0 0;}
+.mp2-mrow:last-child{border-radius:0 0 8px 8px;}
+.mp2-mrow:hover{background:var(--panel-2);}
+.mp2-mrow-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mp2-mrow-r{display:flex;align-items:center;gap:10px;color:var(--ink-3);flex-shrink:0;}
+.mp2-mrow-ct{font-weight:700;font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums;}
+
+/* Card view grid — compact ward tiles with colored left accent */
+.mp2-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;}
+.mp2-wcard{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);border-radius:8px;
+  transition:background .1s,border-color .15s;
+}
+.mp2-wcard:hover{background:var(--panel-2);border-color:color-mix(in srgb,var(--ink-3) 50%,var(--line));}
+.mp2-wcard-bar{width:4px;align-self:stretch;border-radius:2px;flex-shrink:0;}
+.mp2-wcard-body{flex:1;min-width:0;}
+.mp2-wcard-name{font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mp2-wcard-ct{font-size:11.5px;color:var(--ink-3);margin-top:2px;}
+
+/* No-match / empty / center states */
+.mp2-no-match{padding:40px 16px;text-align:center;color:var(--ink-3);font-size:13px;}
+.mp2-center{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 20px;text-align:center;}
+.mp2-notice{
+  display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;
+  font-size:13px;font-weight:600;margin-bottom:14px;
+}
+.mp2-notice-err{background:var(--st-or-bg);color:var(--st-or);border:1px solid color-mix(in srgb,var(--st-or) 20%,transparent);}
+.mp2-notice button{font-weight:700;text-decoration:underline;background:none;border:none;color:inherit;padding:0;cursor:pointer;margin-left:auto;}
+
+/* Pagination — clean, minimal */
+.mp2-pag{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 2px;margin-top:6px;flex-wrap:wrap;gap:8px;
+}
+.mp2-pag-info{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.mp2-pag-r{display:flex;align-items:center;gap:2px;}
+.mp2-pag-r button{
+  display:flex;align-items:center;justify-content:center;
+  min-width:28px;height:28px;padding:0 6px;border-radius:6px;
+  font-size:12px;font-weight:600;color:var(--ink-2);transition:background .1s;
+}
+.mp2-pag-r button:hover:not(:disabled){background:var(--panel-2);}
+.mp2-pag-r button:disabled{opacity:.3;cursor:default;}
+.mp2-pag-r button.on{background:var(--primary);color:#fff;}
+.mp2-pag-r select{
+  height:28px;padding:0 6px;border:1px solid var(--line);border-radius:6px;
+  background:var(--panel);color:var(--ink);font-size:11px;font-weight:600;
+  margin-left:6px;outline:none;
+}
+
 
 /* Auto-flow grid: 1→2→4 columns as space grows */
 .auto-grid-4{display:grid;gap:8px;grid-template-columns:repeat(2,1fr);}
