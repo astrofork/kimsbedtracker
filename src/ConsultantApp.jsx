@@ -384,7 +384,9 @@ function MyPatientsPage() {
                   <tbody>
                     {pagedWardGroups.map((g) => {
                       const depts = [...new Set(g.patients.map(p => p.department_name).filter(Boolean))];
-                      const payers = [...new Set(g.patients.map(p => p.payer_type).filter(Boolean))];
+                      const payerMap = {};
+                      g.patients.forEach(p => { if (p.payer_type) payerMap[p.payer_type] = (payerMap[p.payer_type] || 0) + 1; });
+                      const payerEntries = Object.entries(payerMap).sort((a, b) => b[1] - a[1]);
                       const dToday = g.patients.filter(p => { const dt = p.discharge_tracking; return dt && dt.planned_date === todayStr && dt.status !== "COMPLETED" && dt.status !== "CANCELLED"; }).length;
                       return (
                       <tr key={g.key} onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
@@ -398,7 +400,7 @@ function MyPatientsPage() {
                         </td>
                         <td className="mp2-td-dept">{depts.length === 1 ? depts[0] : depts.length > 1 ? `${depts.length} depts` : "—"}</td>
                         <td><span className="mp2-badge mp2-badge-blue">{g.patients.length}</span></td>
-                        <td className="mp2-td-payer">{payers.join(", ") || "—"}</td>
+                        <td className="mp2-td-payer">{payerEntries.length ? <div className="mp2-chips">{payerEntries.map(([name, ct]) => <span key={name} className="mp2-chip">{name} <b>{ct}</b></span>)}</div> : "—"}</td>
                         <td>{dToday > 0 ? <span className="mp2-badge mp2-badge-orange">{dToday}</span> : <span className="dim">0</span>}</td>
                         <td className="mp2-td-arr"><Ic d={icons.chevron} s={14} /></td>
                       </tr>);

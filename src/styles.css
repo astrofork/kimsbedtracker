@@ -945,7 +945,14 @@ body.hero-gone .appbar{
 .mp2-tbl tbody td{padding:8px 14px;height:44px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink);}
 .mp2-tbl tbody tr:last-child td{border-bottom:none;}
 .mp2-td-dept{color:var(--ink-2);font-size:12px;}
-.mp2-td-payer{color:var(--ink-2);font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mp2-td-payer{font-size:12px;}
+.mp2-chips{display:flex;flex-wrap:wrap;gap:4px;}
+.mp2-chip{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:2px 7px;border-radius:4px;font-size:11px;font-weight:500;
+  background:var(--panel-2);color:var(--ink-2);white-space:nowrap;
+}
+.mp2-chip b{font-weight:700;color:var(--ink);}
 .mp2-td-arr{text-align:center;color:var(--ink-3);transition:color .15s;}
 .mp2-badge{
   display:inline-flex;align-items:center;justify-content:center;
