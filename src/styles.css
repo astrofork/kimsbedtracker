@@ -1938,9 +1938,10 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
    doesn't get handed out from under whoever's holding it. Double-ringed and
    tilted to read as an inked stamp, not just another status pill. */
 .pbed-stamp{
+  position:relative;z-index:0;
   display:inline-flex;align-items:center;flex-shrink:0;
-  padding:3px 9px;border-radius:5px;margin:0 5px;
-  border:1.5px solid var(--st-vr);outline:1.5px solid var(--st-vr);outline-offset:2px;
+  padding:3px 9px;border-radius:5px;
+  border:1.5px solid color-mix(in srgb,var(--st-vr) 55%,transparent);
   color:var(--st-vr);background:var(--st-vr-bg);
   font-size:10px;font-weight:900;letter-spacing:.08em;
   transform:rotate(-8deg);
