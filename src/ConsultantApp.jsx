@@ -182,32 +182,38 @@ function MyPatientsPage() {
           <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-.01em" }}>{openWard.wardName}</div>
           <div className="dim" style={{ fontSize: 12 }}>{groupPatients.length} patient{groupPatients.length !== 1 ? "s" : ""}</div>
         </div>
-        <div className="pbed-grid">
-          {groupPatients.map((p) => (
-            <BedGridCard
-              key={p.bed_id}
-              bed={{
-                id: p.bed_id,
-                bed_name: p.bed_name,
-                physical_status: p.physical_status,
-                reservation_status: p.reservation_status,
-                operational_status: p.operational_status,
-                destination: p.destination,
-                reservation_note: p.reservation_note,
-                updated_at: p.updated_at,
-                ip_last6: p.ip_last6,
-                consultant_name: p.consultant_name,
-                department_name: p.department_name,
-                payer_type: p.payer_type,
-                admission_type: p.admission_type,
-                discharge_tracking: p.discharge_tracking,
-              }}
-              hideDoctorDept
-              onClick={() => openBed(p)}
-            />
-          ))}
+        <div style={{ position: "relative" }}>
+          <div className="pbed-grid">
+            {groupPatients.map((p) => (
+              <BedGridCard
+                key={p.bed_id}
+                bed={{
+                  id: p.bed_id,
+                  bed_name: p.bed_name,
+                  physical_status: p.physical_status,
+                  reservation_status: p.reservation_status,
+                  operational_status: p.operational_status,
+                  destination: p.destination,
+                  reservation_note: p.reservation_note,
+                  updated_at: p.updated_at,
+                  ip_last6: p.ip_last6,
+                  consultant_name: p.consultant_name,
+                  department_name: p.department_name,
+                  payer_type: p.payer_type,
+                  admission_type: p.admission_type,
+                  discharge_tracking: p.discharge_tracking,
+                }}
+                hideDoctorDept
+                onClick={() => openBed(p)}
+              />
+            ))}
+          </div>
+          {loadingBed && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "color-mix(in srgb, var(--bg) 75%, transparent)", borderRadius: 8, zIndex: 2 }}>
+              <span className="spin"><Ic d={icons.refresh} s={22} /></span>
+            </div>
+          )}
         </div>
-        {loadingBed && <BedLoadingInline />}
         {toast && <div className="toast show">{toast}</div>}
       </div>
     );
