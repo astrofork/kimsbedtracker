@@ -59,12 +59,14 @@ function MyPatientsPage() {
   const saveWardScroll = useScrollRestore(!!openWard);
   const [viewMode, setViewMode] = useState("table");
   const [sortBy, setSortBy] = useState("ward-asc");
+  const [filterDept, setFilterDept] = useState("");
+  const [filterPayer, setFilterPayer] = useState("");
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(5);
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2000); }, []);
 
-  useEffect(() => { setPage(1); }, [search, sortBy, rowsPerPage]);
+  useEffect(() => { setPage(1); }, [search, sortBy, rowsPerPage, filterDept, filterPayer]);
 
   const load = useCallback(async () => {
     setError("");
@@ -144,14 +146,23 @@ function MyPatientsPage() {
     );
   }
 
+  const deptOptions = patients ? [...new Set(patients.map(p => p.department_name).filter(Boolean))].sort() : [];
+  const payerOptions = patients ? [...new Set(patients.map(p => p.payer_type).filter(Boolean))].sort() : [];
+
   const filtered = patients
     ? patients.filter(p => {
+        if (filterDept && p.department_name !== filterDept) return false;
+        if (filterPayer && p.payer_type !== filterPayer) return false;
         if (!search) return true;
         const q = search.toLowerCase();
         return (p.bed_name || "").toLowerCase().includes(q)
           || (p.ward_name || "").toLowerCase().includes(q)
           || (p.ip_last6 || "").toLowerCase().includes(q)
-          || (p.payer_type || "").toLowerCase().includes(q);
+          || (p.payer_type || "").toLowerCase().includes(q)
+          || (p.consultant_name || "").toLowerCase().includes(q)
+          || (p.department_name || "").toLowerCase().includes(q)
+          || (p.admission_type || "").toLowerCase().includes(q)
+          || (p.destination || "").toLowerCase().includes(q);
       })
     : null;
 
@@ -296,9 +307,9 @@ function MyPatientsPage() {
           {/* ── Toolbar ── */}
           <div className="mp2-bar">
             <div className="mp2-search">
-              <Ic d={icons.search} s={15} />
+              <Ic d={icons.search} s={14} />
               <input
-                placeholder="Search by ward, bed or IP number…"
+                placeholder="Search ward, bed, IP, doctor…"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -308,6 +319,14 @@ function MyPatientsPage() {
                 </button>
               )}
             </div>
+            <select className="mp2-filter" value={filterDept} onChange={(e) => setFilterDept(e.target.value)} aria-label="Filter by department">
+              <option value="">All Depts</option>
+              {deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <select className="mp2-filter" value={filterPayer} onChange={(e) => setFilterPayer(e.target.value)} aria-label="Filter by payer">
+              <option value="">All Payers</option>
+              {payerOptions.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
             <div className="mp2-bar-r">
               <select className="mp2-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort wards">
                 <option value="ward-asc">Ward A–Z</option>
