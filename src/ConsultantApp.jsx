@@ -118,6 +118,12 @@ function MyPatientsPage({ visible, onSubTitle }) {
     else onSubTitle(null);
   }, [openWard, selectedBed, onSubTitle]);
 
+  useEffect(() => {
+    if (openWard || selectedBed) document.body.classList.add("ward-focus");
+    else document.body.classList.remove("ward-focus");
+    return () => document.body.classList.remove("ward-focus");
+  }, [openWard, selectedBed]);
+
   const openBed = async (p) => {
     saveBedScroll();
     const cached = getWardBeds(p.ward_id);

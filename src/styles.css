@@ -2178,7 +2178,8 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 /* — Ward focus mode (phones) — inside a ward page the back chip is the only nav
      needed, so the app top bar is hidden to give its space to the bed grid. — */
 @media (max-width:767px){
-  body.ward-focus .preui .appbar{display:none;}
+  body.ward-focus .preui .appbar,
+  body.ward-focus .shell .appbar{display:none;}
 }
 
 
