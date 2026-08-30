@@ -240,7 +240,7 @@ function MyPatientsPage() {
     );
   }
 
-  return (<>
+  return (
     <div className="slide-up mp2">
 
       {error && (
@@ -397,38 +397,37 @@ function MyPatientsPage() {
             </div>
           )}
 
+          {/* ── Pagination ── */}
+          {sortedWardGroups.length > 0 && (
+            <div className="mp2-pag">
+              <span className="mp2-pag-info">
+                {pageStart + 1}–{Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
+              </span>
+              <div className="mp2-pag-r">
+                <button disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)} aria-label="Previous page">
+                  <Ic d={icons.chevron} s={13} style={{ transform: "rotate(180deg)" }} />
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                  <button key={n} className={n === pageClamped ? "on" : undefined} onClick={() => setPage(n)}>{n}</button>
+                ))}
+                <button disabled={pageClamped >= totalPages} onClick={() => setPage(pageClamped + 1)} aria-label="Next page">
+                  <Ic d={icons.chevron} s={13} />
+                </button>
+                <select value={rowsPerPage} onChange={(e) => setRowsPerPage(Number(e.target.value))} aria-label="Rows per page">
+                  <option value={5}>5 / page</option>
+                  <option value={10}>10 / page</option>
+                  <option value={25}>25 / page</option>
+                </select>
+              </div>
+            </div>
+          )}
         </>
       )}
 
       {loadingBed && <BedLoadingInline />}
       {toast && <div className="toast show">{toast}</div>}
     </div>
-
-    {!error && patients !== null && patients.length > 0 && sortedWardGroups.length > 0 && createPortal(
-      <div className="mp2-pag">
-        <span className="mp2-pag-info">
-          {pageStart + 1}–{Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
-        </span>
-        <div className="mp2-pag-r">
-          <button disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)} aria-label="Previous page">
-            <Ic d={icons.chevron} s={13} style={{ transform: "rotate(180deg)" }} />
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-            <button key={n} className={n === pageClamped ? "on" : undefined} onClick={() => setPage(n)}>{n}</button>
-          ))}
-          <button disabled={pageClamped >= totalPages} onClick={() => setPage(pageClamped + 1)} aria-label="Next page">
-            <Ic d={icons.chevron} s={13} />
-          </button>
-          <select value={rowsPerPage} onChange={(e) => setRowsPerPage(Number(e.target.value))} aria-label="Rows per page">
-            <option value={5}>5 / page</option>
-            <option value={10}>10 / page</option>
-            <option value={25}>25 / page</option>
-          </select>
-        </div>
-      </div>,
-      document.body
-    )}
-  </>);
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
