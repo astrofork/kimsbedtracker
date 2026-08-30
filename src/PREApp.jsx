@@ -845,7 +845,7 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
         <div className="pbed-head">
           <span className="pbed-name">{bed.bed_name}</span>
           <span className="pbadge clean">
-            {cleaningInProgress ? "IN PROGRESS" : "PENDING"}
+            {cleaningInProgress ? "CLEANING" : "PENDING"}
           </span>
         </div>
 

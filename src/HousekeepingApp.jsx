@@ -70,7 +70,7 @@ function BedCard({ bed, tat, busy, onStart, onComplete }) {
   const doing = bed.task_status === "IN_PROGRESS";
 
   const badgeCls = over ? "o" : doing ? "clean" : bed.task_id ? "o" : "v";
-  const badgeLabel = over ? "Overdue" : doing ? "In Progress" : bed.task_id ? "Pending" : "Upcoming";
+  const badgeLabel = over ? "Overdue" : doing ? "Cleaning" : bed.task_id ? "Pending" : "Upcoming";
 
   return (
     <div className={`hkc st-${badgeCls}`}>
@@ -128,7 +128,7 @@ function BedCard({ bed, tat, busy, onStart, onComplete }) {
 const BED_FILTERS = [
   { key: "all",      label: "All" },
   { key: "pending",  label: "Pending" },
-  { key: "cleaning", label: "In Progress" },
+  { key: "cleaning", label: "Cleaning" },
   { key: "overdue",  label: "Overdue" },
 ];
 
