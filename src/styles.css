@@ -982,7 +982,7 @@ body.hero-gone .appbar{
 .mp2-pag{
   display:flex;align-items:center;justify-content:space-between;
   padding:10px 24px;flex-wrap:wrap;gap:8px;
-  position:fixed;bottom:16px;left:256px;right:16px;z-index:600;
+  position:fixed;bottom:28px;left:256px;right:16px;z-index:600;
   height:48px;box-sizing:border-box;
   background:var(--panel);
   border:1px solid var(--line);border-radius:12px;
