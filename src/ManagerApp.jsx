@@ -7542,6 +7542,31 @@ export function HousekeepingZoneManager({ showToast }) {
         </button>
       </div>
 
+      {/* A bed awaiting cleaning in a ward no zone covers cannot be seen or
+          cleared by anyone — it is simply unusable until someone spots it.
+          Surfaced here because the fix is to put its ward in a zone. */}
+      {(data.orphans || []).length > 0 && (
+        <div className="card" style={{ marginTop: 14, padding: 16, borderLeft: "4px solid var(--red)" }}>
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <Ic d={icons.alert} s={17} style={{ color: "var(--red)" }} />
+            <div style={{ fontWeight: 800, fontSize: 14 }}>
+              {data.orphans.length} bed{data.orphans.length === 1 ? "" : "s"} awaiting cleaning in no zone
+            </div>
+          </div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            No housekeeping user can see or clear {data.orphans.length === 1 ? "this bed" : "these beds"}, so
+            {data.orphans.length === 1 ? " it stays" : " they stay"} unusable. Add the ward to a zone below.
+          </div>
+          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {data.orphans.map((o) => (
+              <span key={o.id} className="chip" style={{ borderColor: "var(--red)", color: "var(--red)" }}>
+                {o.bed_name} — {o.ward_name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {data.zones.length === 0 && (
         <div className="card empty" style={{ padding: 28, marginTop: 14 }}>
           <Ic d={icons.grid} s={26} />
