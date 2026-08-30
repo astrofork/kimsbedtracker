@@ -245,9 +245,6 @@ function MyPatientsPage({ visible, onSubTitle }) {
         || (p.destination || "").toLowerCase().includes(bq);
     });
     const allPatientNames = [...new Set(groupPatients.map((p) => p.patient_name).filter(Boolean))].sort();
-    const nameSuggestions = bq
-      ? allPatientNames.filter((n) => n.toLowerCase().includes(bq))
-      : [];
     const fc = {
       ALL: groupPatients.length,
       DISCHARGE: groupPatients.filter((p) => p.discharge_tracking).length,
@@ -283,16 +280,6 @@ function MyPatientsPage({ visible, onSubTitle }) {
                 >
                   <Ic d={icons.x} s={14} />
                 </button>
-              )}
-              {nameSuggestions.length > 0 && (
-                <div className="mp2-suggest">
-                  {nameSuggestions.slice(0, 5).map((name) => (
-                    <button key={name} className="mp2-suggest-item" onClick={() => setBedSearch(name)}>
-                      <Ic d={icons.users} s={13} />
-                      {name}
-                    </button>
-                  ))}
-                </div>
               )}
             </div>
             {allPatientNames.length > 0 && (
