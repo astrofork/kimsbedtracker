@@ -922,13 +922,14 @@ body.hero-gone .appbar{
 .mp2-suggest-item:hover{background:color-mix(in srgb,var(--primary) 8%,var(--panel));}
 .mp2-suggest-item+.mp2-suggest-item{border-top:1px solid var(--line);}
 .mp2-bed-toolbar{
-  display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;
 }
-.mp2-bed-search{display:flex;gap:8px;flex:1 1 260px;min-width:0;margin-bottom:0 !important;}
-.mp2-bed-chips{margin-bottom:0;flex-shrink:0;}
+.mp2-bed-search{display:flex;gap:8px;flex:1 1 260px;min-width:0;margin-bottom:0 !important;align-items:center;}
+.mp2-bed-chips{margin-bottom:0 !important;padding-bottom:0 !important;flex-shrink:0;overflow:visible;}
 @media (max-width:767px){
-  .mp2-bed-toolbar{flex-direction:column;align-items:stretch;}
+  .mp2-bed-toolbar{flex-direction:column;align-items:stretch;gap:8px;}
   .mp2-bed-search{flex:1 1 auto;}
+  .mp2-bed-chips{overflow-x:auto;}
 }
 .mp2-vtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .mp2-vtog button{
