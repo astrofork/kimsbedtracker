@@ -820,6 +820,36 @@ body.hero-gone .appbar{
 .mp-row-card:hover{background:var(--panel-2);}
 .mp-row-card-stats{display:flex;gap:18px;flex-shrink:0;}
 
+/* ── Consultant "My Patients" page only — Jira List-view inspired dressing.
+   Every color here still resolves through the app's existing st/ink/panel
+   tokens; only the layout/density is borrowed. All class names are new
+   (mp-stats/mp-toolbar/mp-panel/…) so nothing shared by other pages
+   (.card, .tbl, .ward-card, .field, .btn…) is touched. */
+.mp-stats{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;}
+.mp-stat{display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 13px;flex:1 1 140px;box-shadow:var(--shadow);}
+.mp-stat-ico{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.mp-stat-num{font-weight:800;font-size:16px;line-height:1.1;}
+.mp-stat-lbl{font-size:11px;color:var(--ink-3);font-weight:600;margin-top:1px;}
+
+.mp-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.mp-search{position:relative;flex:1 1 220px;display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:0 11px;height:36px;box-shadow:var(--shadow);}
+.mp-search svg{color:var(--ink-3);flex-shrink:0;}
+.mp-search input{border:none;background:none;outline:none;color:var(--ink);font-size:13px;width:100%;height:100%;}
+@media (max-width:767px){.mp-search input{font-size:16px;}}
+.mp-toolbar-actions{display:flex;gap:6px;flex-wrap:wrap;}
+.mp-filter-pill{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:0 10px;height:32px;color:var(--ink-2);box-shadow:var(--shadow);}
+.mp-filter-pill select{border:none;background:none;outline:none;color:var(--ink);font-size:11.5px;font-weight:600;height:100%;}
+.mp-seg{display:flex;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:2px;gap:2px;}
+.mp-seg button{display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;border-radius:6px;font-size:11.5px;font-weight:600;color:var(--ink-2);transition:.12s;}
+.mp-seg button.on{background:var(--panel);color:var(--st-v);box-shadow:var(--shadow);}
+
+.mp-panel-head{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);}
+.mp-refresh{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--ink-3);border:1px solid var(--line);background:var(--panel);flex-shrink:0;}
+.mp-refresh:hover{background:var(--panel);color:var(--ink);}
+.mp-count-pill{display:inline-flex;min-width:26px;justify-content:center;padding:3px 9px;border-radius:99px;background:var(--st-v-bg);color:var(--st-v);font-weight:800;font-size:12px;}
+.mp-jira-tbl thead th{text-transform:uppercase;font-size:10px;letter-spacing:.05em;}
+.mp-pagination{background:var(--panel-2);}
+
 /* Auto-flow grid: 1→2→4 columns as space grows */
 .auto-grid-4{display:grid;gap:8px;grid-template-columns:repeat(2,1fr);}
 @media (min-width:640px){.auto-grid-4{grid-template-columns:repeat(4,1fr);}}

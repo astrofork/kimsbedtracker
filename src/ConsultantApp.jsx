@@ -315,70 +315,77 @@ function MyPatientsPage() {
 
       {!error && patients !== null && patients.length > 0 && (
         <>
-          {/* Top stat cards — real counts only. No "vs yesterday" trend badges:
-              there's no history of your own patient counts to compare against,
-              and fabricating a percentage would be actively misleading here.
-              Always 3-across (not card-grid's responsive collapse to 1 column)
-              — small compact tiles, not full-width cards, even on a phone. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginBottom: 16 }}>
-            <div className="card" style={{ padding: "10px 8px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 4, minWidth: 0 }}>
-              <div style={{ width: 26, height: 26, borderRadius: 8, background: "var(--st-v-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Ic d={icons.users} s={13} style={{ color: "var(--st-v)" }} />
+          {/* Jira List-view inspired dressing (100% layout inspiration, zero
+              palette change — every color below is still an existing st/ink/
+              panel token from styles.css). Real counts only, no "vs yesterday"
+              trend badges: there's no history of your own patient counts to
+              compare against, and fabricating a percentage would be actively
+              misleading here. */}
+          <div className="mp-stats">
+            <div className="mp-stat">
+              <span className="mp-stat-ico" style={{ background: "var(--st-v-bg)", color: "var(--st-v)" }}>
+                <Ic d={icons.users} s={14} />
+              </span>
+              <div>
+                <div className="mp-stat-num">{totalPatientsCount}</div>
+                <div className="mp-stat-lbl">Total Patients</div>
               </div>
-              <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>{totalPatientsCount}</div>
-              <div className="dim" style={{ fontSize: 9.5, lineHeight: 1.2 }}>Total Patients</div>
             </div>
-            <div className="card" style={{ padding: "10px 8px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 4, minWidth: 0 }}>
-              <div style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(139,92,246,.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Ic d={icons.exchange} s={13} style={{ color: "#8b5cf6" }} />
+            <div className="mp-stat">
+              <span className="mp-stat-ico" style={{ background: "rgba(139,92,246,.12)", color: "#8b5cf6" }}>
+                <Ic d={icons.exchange} s={14} />
+              </span>
+              <div>
+                <div className="mp-stat-num">{dischargeLoungeCount}</div>
+                <div className="mp-stat-lbl">Discharge Lounge</div>
               </div>
-              <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>{dischargeLoungeCount}</div>
-              <div className="dim" style={{ fontSize: 9.5, lineHeight: 1.2 }}>Discharge Lounge</div>
             </div>
-            <div className="card" style={{ padding: "10px 8px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 4, minWidth: 0 }}>
-              <div style={{ width: 26, height: 26, borderRadius: 8, background: "var(--st-o-bg)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Ic d={icons.clock} s={13} style={{ color: "var(--st-o)" }} />
+            <div className="mp-stat">
+              <span className="mp-stat-ico" style={{ background: "var(--st-o-bg)", color: "var(--st-o)" }}>
+                <Ic d={icons.clock} s={14} />
+              </span>
+              <div>
+                <div className="mp-stat-num">{dischargeTodayCount}</div>
+                <div className="mp-stat-lbl">Discharge Today</div>
               </div>
-              <div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.1 }}>{dischargeTodayCount}</div>
-              <div className="dim" style={{ fontSize: 9.5, lineHeight: 1.2 }}>Discharge Today</div>
             </div>
           </div>
 
-          {/* Search (own row, full width) + sort/view-toggle (wrap together as
-              one group below it) — keeps every control's baseline aligned
-              instead of each wrapping independently at a different width. */}
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ position: "relative", marginBottom: 8 }}>
-              <Ic d={icons.search} s={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", pointerEvents: "none" }} />
-              <input className="field" placeholder="Search by ward name, bed no. or IP number…" value={search} onChange={(e) => setSearch(e.target.value)}
-                style={{ paddingLeft: 32, fontSize: 13, height: 36, borderRadius: 10, width: "100%" }} />
+          {/* Toolbar row — Jira's search + Filter pill + view-toggle group,
+              just laid out with this app's own field/pill styling. */}
+          <div className="mp-toolbar">
+            <div className="mp-search">
+              <Ic d={icons.search} s={14} />
+              <input placeholder="Search by ward name, bed no. or IP number…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
-            {/* Shorter labels + tighter padding than a first pass would use —
-                "Sort: Ward Name (A-Z)" + "Table View"/"Card View" don't fit
-                one row on a phone; "Ward Name (A-Z)" + "Table"/"Card" do. */}
-            <div className="row" style={{ gap: 6 }}>
-              <select className="field" aria-label="Sort wards" value={sortBy} onChange={(e) => setSortBy(e.target.value)}
-                style={{ width: "auto", minWidth: 0, flex: "1 1 auto", height: 32, fontSize: 11.5, fontWeight: 600, borderRadius: 10, paddingTop: 0, paddingBottom: 0, paddingLeft: 8, paddingRight: 8 }}>
-                <option value="ward-asc">Ward Name (A-Z)</option>
-                <option value="count-desc">Most Patients</option>
-              </select>
-              <button className="btn btn-ghost" onClick={() => setViewMode("table")}
-                style={{ height: 32, fontSize: 11.5, padding: "0 8px", flexShrink: 0, background: viewMode === "table" ? "var(--st-v-bg)" : undefined, color: viewMode === "table" ? "var(--st-v)" : undefined }}>
-                <Ic d={icons.list} s={13} /> Table
-              </button>
-              <button className="btn btn-ghost" onClick={() => setViewMode("card")}
-                style={{ height: 32, fontSize: 11.5, padding: "0 8px", flexShrink: 0, background: viewMode === "card" ? "var(--st-v-bg)" : undefined, color: viewMode === "card" ? "var(--st-v)" : undefined }}>
-                <Ic d={icons.grid} s={13} /> Card
-              </button>
+            <div className="mp-toolbar-actions">
+              <label className="mp-filter-pill">
+                <Ic d={icons.sort} s={13} />
+                <select aria-label="Sort wards" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                  <option value="ward-asc">Ward Name (A-Z)</option>
+                  <option value="count-desc">Most Patients</option>
+                </select>
+              </label>
+              <div className="mp-seg">
+                <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")}>
+                  <Ic d={icons.list} s={13} /> Table
+                </button>
+                <button className={viewMode === "card" ? "on" : undefined} onClick={() => setViewMode("card")}>
+                  <Ic d={icons.grid} s={13} /> Card
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-            <div className="row between" style={{ padding: "13px 16px", borderBottom: "1px solid var(--line)" }}>
+          <div className="card mp-panel" style={{ padding: 0, overflow: "hidden" }}>
+            <div className="mp-panel-head">
               <div className="row" style={{ gap: 8 }}>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>Wards Overview</span>
                 <span className="chip">{sortedWardGroups.length}</span>
               </div>
+              <button className="mp-refresh" onClick={load} aria-label="Refresh" title="Refresh">
+                <Ic d={icons.refresh} s={14} />
+              </button>
             </div>
 
             {sortedWardGroups.length === 0 ? (
@@ -389,7 +396,7 @@ function MyPatientsPage() {
               <>
                 {/* ≥680px: real table. No Action column — the whole row is
                     the click target now, same as Card View's cards already are. */}
-                <div className="tbl-wrap mp-tbl-desktop" style={{ border: "none", borderRadius: 0 }}>
+                <div className="tbl-wrap mp-tbl-desktop mp-jira-tbl" style={{ border: "none", borderRadius: 0 }}>
                   <table className="tbl">
                     <thead>
                       <tr>
@@ -414,7 +421,9 @@ function MyPatientsPage() {
                               <span style={{ fontWeight: 700 }}>{g.wardName}</span>
                             </div>
                           </td>
-                          <td style={{ textAlign: "center", fontWeight: 700 }}>{g.patients.length}</td>
+                          <td style={{ textAlign: "center" }}>
+                            <span className="mp-count-pill">{g.patients.length}</span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -439,10 +448,7 @@ function MyPatientsPage() {
                         <span style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.wardName}</span>
                       </div>
                       <div className="mp-row-card-stats">
-                        <div style={{ textAlign: "center" }}>
-                          <div style={{ fontWeight: 800, fontSize: 15 }}>{g.patients.length}</div>
-                          <div className="dim" style={{ fontSize: 10 }}>Patients</div>
-                        </div>
+                        <span className="mp-count-pill">{g.patients.length}</span>
                         <Ic d={icons.chevron} s={15} style={{ color: "var(--ink-3)" }} />
                       </div>
                     </div>
@@ -474,7 +480,7 @@ function MyPatientsPage() {
             )}
 
             {sortedWardGroups.length > 0 && (
-              <div className="row between" style={{ padding: "12px 16px", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
+              <div className="row between mp-pagination" style={{ padding: "12px 16px", borderTop: "1px solid var(--line)", flexWrap: "wrap", gap: 10 }}>
                 <span className="dim" style={{ fontSize: 12 }}>
                   Showing {pageStart + 1} to {Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
                 </span>
