@@ -402,9 +402,9 @@ function MyPatientsPage() {
 
       {loadingBed && <BedLoadingInline />}
       {toast && <div className="toast show">{toast}</div>}
-    </div>,
+    </div>
 
-    !error && patients !== null && patients.length > 0 && sortedWardGroups.length > 0 && createPortal(
+    {!error && patients !== null && patients.length > 0 && sortedWardGroups.length > 0 && createPortal(
       <div className="mp2-pag">
         <span className="mp2-pag-info">
           {pageStart + 1}–{Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
@@ -427,7 +427,7 @@ function MyPatientsPage() {
         </div>
       </div>,
       document.body
-    )
+    )}
   </>);
 }
 
