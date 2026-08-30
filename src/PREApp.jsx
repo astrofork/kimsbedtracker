@@ -839,6 +839,11 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
         tabIndex={onClick ? 0 : undefined}
         onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
       >
+        {/* Absolutely positioned, dead center of the card, behind everything
+            else in it — a watermark, not another row fighting for space. */}
+        {bed.reservation_status === "RESERVED" && (
+          <span className="pbed-stamp">RESERVED</span>
+        )}
         {wardLabel && (
           <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", letterSpacing: ".02em", marginBottom: -2, paddingTop: 2 }}>{wardLabel}</div>
         )}
@@ -861,11 +866,6 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
 
         <div className="pbed-foot">
           <span>Updated <RelativeTime ts={bed.updated_at} /></span>
-          {/* Absolutely positioned — a watermark behind the row, not another
-              flex item, so it never pushes "Updated…" or the chevron apart. */}
-          {bed.reservation_status === "RESERVED" && (
-            <span className="pbed-stamp">RESERVED</span>
-          )}
           {onClick && <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)" }} />}
         </div>
       </div>
