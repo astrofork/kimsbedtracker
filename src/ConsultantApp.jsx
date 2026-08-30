@@ -330,7 +330,8 @@ function MyPatientsPage() {
             <span className="mp2-list-count">{sortedWardGroups.length} ward{sortedWardGroups.length !== 1 ? "s" : ""}</span>
           </div>
 
-          {/* ── Ward list ── */}
+          {/* ── Ward list (scrollable container) ── */}
+          <div className="mp2-list-scroll">
           {sortedWardGroups.length === 0 ? (
             <div className="mp2-no-match">No wards match your search.</div>
           ) : viewMode === "table" ? (
@@ -396,6 +397,7 @@ function MyPatientsPage() {
               ))}
             </div>
           )}
+          </div>
 
           {/* ── Pagination ── */}
           {sortedWardGroups.length > 0 && (
