@@ -7212,6 +7212,15 @@ const SIMPLE_LOGIN_TABS = [
 // given their own entry in Admin → Users.
 export const PWO_LOGIN_TABS = [{ role: "PWO", label: "Welfare Officer" }];
 
+// Housekeeping is contracted out and has its own zone structure, so its logins
+// sit on their own screen rather than under Finance & Pharmacy. Staff and
+// managers are the same kind of account — the role is what differs — so both
+// tabs live here and the zone screen is where they get their wards.
+export const HOUSEKEEPING_LOGIN_TABS = [
+  { role: "HOUSEKEEPING", label: "Housekeeping" },
+  { role: "HOUSEKEEPING_MANAGER", label: "Manager" },
+];
+
 function SimpleLoginEditor({ user, roleLabel, onClose, onSaved, showToast, activeRole }) {
   useModal(onClose);
   const isNew = !user;
