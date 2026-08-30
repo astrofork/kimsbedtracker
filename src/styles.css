@@ -886,8 +886,9 @@ body.hero-gone .appbar{
 }
 @media (max-width:767px){
   .mp2-bar{gap:4px;}
-  .mp2-filter,.mp2-sort{height:30px;font-size:11px;padding:0 6px;}
-  .mp2-vtog button{width:30px;height:28px;}
+  .mp2-filter,.mp2-sort{height:30px;font-size:11px;padding:0 5px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
+  .mp2-vtog{flex-shrink:0;}
+  .mp2-vtog button{width:28px;height:28px;}
 }
 .mp2-search-x{
   width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
