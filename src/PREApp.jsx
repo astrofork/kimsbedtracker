@@ -9,9 +9,17 @@ import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTot
 import DischargeTab, { TransferSection } from "./DischargeTab.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
-// Bucket icon for the cleaning card — a stroked SVG (like PWO's I_BUCKET) rather
-// than a flat-color raster, so it inherits currentColor and tracks --st-clean.
-const CLEAN_ICON = <><path d="M5 8h14l-1.5 12h-11L5 8Z" /><path d="M9 8V5a3 3 0 0 1 6 0v3" /></>;
+// Spray-bottle icon for the cleaning card — a stroked SVG so it inherits
+// currentColor and tracks --st-clean.
+const CLEAN_ICON = <>
+  <rect x="8" y="11" width="7" height="10" rx="1.5" />
+  <rect x="10" y="8" width="3" height="3" />
+  <rect x="8" y="5" width="8" height="3" rx="1" />
+  <path d="M8 10 6 12" />
+  <path d="M18 5 20 4" />
+  <path d="M19 8 21 8" />
+  <path d="M18 11 20 12" />
+</>;
 
 // "dashboard" is no longer a tab of its own — the full dashboard now renders
 // underneath Home on the same page (see the home branch below).
