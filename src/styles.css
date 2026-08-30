@@ -1931,20 +1931,23 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .pbar{height:5px;border-radius:99px;background:color-mix(in srgb,var(--st-vr) 15%,transparent);margin-top:7px;overflow:hidden;}
 .pbar > span{display:block;height:100%;border-radius:99px;background:var(--st-vr);transition:width .3s ease;}
 .pbed-foot{
+  position:relative;
   display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:auto;
   font-size:10.5px;color:var(--ink-3);font-weight:500;
 }
 /* Rubber-stamp badge — flags a reservation on a bed that's mid-clean, so it
-   doesn't get handed out from under whoever's holding it. Double-ringed and
-   tilted to read as an inked stamp, not just another status pill. */
+   doesn't get handed out from under whoever's holding it. Absolutely
+   positioned + negative z-index: a faint watermark sitting behind "Updated…"
+   and the chevron, never a flex item pushing them apart. */
 .pbed-stamp{
-  position:relative;z-index:0;
-  display:inline-flex;align-items:center;flex-shrink:0;
+  position:absolute;top:50%;right:-2px;z-index:-1;
+  transform:translateY(-50%) rotate(-10deg);
+  display:inline-flex;align-items:center;
   padding:3px 9px;border-radius:5px;
-  border:1.5px solid color-mix(in srgb,var(--st-vr) 55%,transparent);
+  border:1.5px solid color-mix(in srgb,var(--st-vr) 45%,transparent);
   color:var(--st-vr);background:var(--st-vr-bg);
   font-size:10px;font-weight:900;letter-spacing:.08em;
-  transform:rotate(-8deg);
+  opacity:.6;pointer-events:none;
 }
 .pbed-note{font-size:10.5px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
