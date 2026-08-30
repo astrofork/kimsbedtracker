@@ -332,11 +332,9 @@ function MyPatientsPage() {
                 <option value="ward-asc">Ward A–Z</option>
                 <option value="count-desc">Most Patients</option>
               </select>
-              {(search || filterDept || filterPayer) && (
-                <button className="mp2-clear" onClick={() => { setSearch(""); setFilterDept(""); setFilterPayer(""); }}>
-                  <Ic d={icons.x} s={11} /> Clear
-                </button>
-              )}
+              <button className="mp2-clear" onClick={() => { setSearch(""); setFilterDept(""); setFilterPayer(""); }} disabled={!search && !filterDept && !filterPayer}>
+                <Ic d={icons.x} s={11} /> Clear
+              </button>
             </div>
             <div className="mp2-vtog">
               <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")} aria-label="Table view">
