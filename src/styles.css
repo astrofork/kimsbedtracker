@@ -2536,112 +2536,120 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 }
 
 /* ── Housekeeping ─────────────────────────────────────────────────────────────
-     One page. Zone box → ward boxes → bed boxes, nested, the way the PRE Entry
-     page nests a block over its ward cards.
+     One page: zone → wards → beds, nested.
 
-     Three levels of box only work if they are not three identical outlines, so
-     the surfaces alternate — the zone is raised, the ward is recessed inside
-     it, the bed is raised again. Depth, not repetition.
+     Three levels of box only work if they stop looking like the same box, so
+     each level gets a different job:
+       zone  raised, and headed by a solid mark carrying its initial
+       ward  no card at all — a ruled band, so it reads as a divider not a box
+       bed   the only thing that looks tappable, and the only thing that is
 
-     Read one-handed in a corridor, so bed targets are large. — */
-.hk-summary{
-  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
-  margin-bottom:12px;flex-wrap:wrap;
+     Read one-handed in a corridor. Overdue tints the whole bed rather than an
+     edge, because an edge is missable at arm's length. — */
+
+/* Figures, in the order a cleaner cares: what is waiting, what is late, how
+   long they have. */
+.hk-strip{
+  display:flex;align-items:stretch;gap:0;margin-bottom:14px;
+  background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  box-shadow:var(--shadow);overflow:hidden;
 }
-.hk-count{display:flex;align-items:baseline;gap:7px;}
-.hk-count b{font-size:26px;font-weight:800;letter-spacing:-.02em;}
-.hk-count span{font-size:13px;font-weight:600;color:var(--ink-2);}
-.hk-tat{
-  display:inline-flex;align-items:center;gap:5px;flex-shrink:0;
-  font-size:11.5px;font-weight:700;color:var(--ink-2);
-  background:var(--panel-2);border-radius:99px;padding:5px 11px;
-}
+.hk-fig{flex:1;padding:12px 14px;display:flex;flex-direction:column;gap:1px;}
+.hk-fig + .hk-fig{border-left:1px solid var(--line);}
+.hk-fig b{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums;}
+.hk-fig b em{font-style:normal;font-size:13px;font-weight:700;color:var(--ink-3);margin-left:1px;}
+.hk-fig i{font-style:normal;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);}
+.hk-fig.is-bad b{color:var(--red);}
 
-/* Level 1 — the zone box. Raised. */
-.hk-zonebox{
+/* Sticky, because the list runs long and the filters must stay in thumb reach. */
+.hk-filters{
+  position:sticky;top:0;z-index:3;display:flex;gap:7px;
+  padding:8px 0 10px;margin-bottom:2px;background:var(--bg);
+  overflow-x:auto;scrollbar-width:none;
+}
+.hk-filters::-webkit-scrollbar{display:none;}
+.hk-chip{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;cursor:pointer;
+  padding:8px 13px;border-radius:99px;font-size:12.5px;font-weight:700;font-family:inherit;
+  background:var(--panel);border:1px solid var(--line);color:var(--ink-2);transition:.15s;
+}
+.hk-chip span{
+  font-size:11px;font-weight:800;color:var(--ink-3);
+  background:var(--panel-2);border-radius:99px;padding:1px 7px;min-width:20px;text-align:center;
+}
+.hk-chip:hover{color:var(--ink);}
+.hk-chip.is-on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.hk-chip.is-on span{background:rgba(255,255,255,.22);color:#fff;}
+.hk-chip.is-bad{color:var(--red);border-color:var(--red);}
+.hk-chip.is-bad.is-on{background:var(--red);border-color:var(--red);color:#fff;}
+
+/* Level 1 — the zone. */
+.hk-zone{
   background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden;
+  box-shadow:var(--shadow);margin-bottom:14px;padding:6px 14px 14px;
 }
-.hk-zonebox-head{
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:13px 15px;border-bottom:1px solid var(--line);
-}
-.hk-zonebox-ic{
-  width:30px;height:30px;border-radius:9px;flex-shrink:0;
+.hk-zone-top{display:flex;align-items:center;gap:10px;padding:12px 0 4px;}
+.hk-zone-mark{
+  width:32px;height:32px;border-radius:10px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  background:var(--primary);color:#fff;
+  background:var(--primary);color:#fff;font-size:15px;font-weight:800;
 }
-.hk-zonebox-name{font-size:15px;font-weight:800;letter-spacing:-.01em;}
-.hk-zonebox-sum{font-size:12px;font-weight:600;color:var(--ink-3);margin-left:auto;}
-.hk-zonebox-sum em{font-style:normal;font-weight:800;color:var(--red);}
-/* Recessed well: this is what makes the ward boxes read as INSIDE the zone. */
-.hk-zonebox-body{background:var(--panel-2);padding:12px;}
-.hk-allclear{
-  display:flex;align-items:center;gap:7px;padding:6px 2px;
-  font-size:12.5px;font-weight:600;color:var(--st-v);
+.hk-zone-name{font-size:16px;font-weight:800;letter-spacing:-.02em;margin:0;flex:1;min-width:0;}
+.hk-tag{
+  flex-shrink:0;font-size:10.5px;font-weight:800;letter-spacing:.02em;
+  padding:3px 9px;border-radius:99px;background:var(--panel-2);color:var(--ink-2);
+}
+.hk-tag.is-bad{background:var(--red);color:#fff;}
+.hk-zone-clear{margin:6px 0 4px;font-size:12.5px;font-weight:600;color:var(--st-v);}
+
+/* Level 2 — the ward. Deliberately NOT a card: a ruled band, so the eye reads
+   it as a divider between groups rather than a third box. */
+.hk-ward{padding-top:12px;margin-top:10px;border-top:1px solid var(--line);}
+.hk-ward-top{display:flex;align-items:center;gap:8px;margin-bottom:9px;}
+.hk-ward-name{
+  font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-3);margin:0;
 }
 
-/* Level 2 — the ward box, sitting in the well. */
-.hk-wardbox{
-  background:var(--panel);border:1px solid var(--line);border-radius:13px;
-  overflow:hidden;
+/* Level 3 — the bed. The only thing that looks pressable. */
+.hk-beds{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:9px;}
+.hk-bed{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
+  padding:11px 12px;display:flex;flex-direction:column;gap:5px;
+  border-left:4px solid var(--st-o);
 }
-.hk-wardbox + .hk-wardbox{margin-top:10px;}
-.hk-wardbox-head{
-  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  padding:10px 13px;border-bottom:1px solid var(--line);
+.hk-bed.is-doing{border-left-color:var(--primary);}
+.hk-bed.is-over{border-left-color:var(--red);background:var(--red-bg);border-color:var(--red);}
+.hk-bed.is-idle{border-left-color:var(--line);opacity:.72;}
+.hk-bed-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.hk-bed-id{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:0;}
+.hk-bed-age{
+  font-size:11px;font-weight:800;color:var(--ink-3);font-variant-numeric:tabular-nums;flex-shrink:0;
 }
-.hk-wardbox-name{font-size:13.5px;font-weight:800;letter-spacing:-.01em;}
-.hk-wardbox-pill{
-  display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;
-  padding:0 7px;border-radius:99px;background:var(--panel-2);border:1px solid var(--line);
-  font-size:11px;font-weight:800;color:var(--ink-2);
-}
-.hk-ward-oos{font-size:11px;font-weight:700;color:var(--red);}
+.hk-bed.is-over .hk-bed-age{color:var(--red);}
+.hk-bed.is-doing .hk-bed-age{color:var(--primary);}
+.hk-bed-line{margin:0;font-size:11.5px;color:var(--ink-2);line-height:1.35;}
+.hk-bed-line b{color:var(--primary);}
+.hk-bed-flag{margin:0;font-size:11px;font-weight:700;color:var(--red);}
+.hk-bed-act{display:flex;gap:7px;margin-top:4px;}
 
-/* Level 3 — the bed boxes. */
-.hk-bedgrid{
-  display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:9px;padding:11px;
-}
-.hk-bedbox{
-  background:var(--panel);border:1px solid var(--line);border-radius:11px;
-  border-left:4px solid var(--st-o);padding:11px 12px;
-  display:flex;flex-direction:column;gap:5px;
-}
-.hk-bedbox--doing{border-left-color:var(--primary);}
-.hk-bedbox--over{border-left-color:var(--red);}
-.hk-bedbox--soon{border-left-color:var(--line);background:var(--panel-2);}
-.hk-bedbox-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.hk-bedbox-name{font-size:15.5px;font-weight:800;letter-spacing:-.01em;}
-.hk-bedbox-tag{
-  font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
-  padding:3px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;
-  background:var(--st-o-bg);color:var(--st-o);
-}
-.hk-bedbox-tag--doing{background:var(--blue-bg);color:var(--blue);}
-.hk-bedbox-tag--over{background:var(--red);color:#fff;}
-.hk-bedbox-tag--soon{background:var(--panel);color:var(--ink-3);border:1px solid var(--line);}
-.hk-bedbox-sub{font-size:11.5px;color:var(--ink-2);line-height:1.35;}
-.hk-claim{color:var(--primary);font-weight:700;}
-.hk-bedbox-warn{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--red);}
-.hk-bedbox-act{display:flex;gap:7px;margin-top:4px;}
-
-/* 44px minimum: tapped with a thumb, often gloved. */
+/* 44px minimum — tapped with a thumb, often gloved. */
 .hk-b{
   flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;
   min-height:44px;padding:0 12px;border-radius:10px;border:1px solid transparent;
   font-size:13.5px;font-weight:700;font-family:inherit;cursor:pointer;transition:.15s;
 }
 .hk-b:disabled{opacity:.5;cursor:default;}
-.hk-b--go{background:var(--primary);color:#fff;}
-.hk-b--go:hover:not(:disabled){background:var(--primary-deep);}
-.hk-b--ghost{background:var(--panel);color:var(--ink);border-color:var(--line);flex:0 0 84px;}
-.hk-b--ghost:hover:not(:disabled){background:var(--panel-2);}
+.hk-b-main{background:var(--primary);color:#fff;}
+.hk-b-main:hover:not(:disabled){background:var(--primary-deep);}
+.hk-b-alt{background:var(--panel);color:var(--ink);border-color:var(--line);flex:0 0 80px;}
+.hk-b-alt:hover:not(:disabled){background:var(--panel-2);}
 .hk-b:active:not(:disabled){transform:scale(.97);}
 
 @media (max-width:520px){
-  .hk-zonebox-body{padding:9px;}
-  .hk-bedgrid{grid-template-columns:1fr;padding:9px;}
+  .hk-zone{padding:4px 11px 12px;}
+  .hk-beds{grid-template-columns:1fr;}
+  .hk-fig b{font-size:20px;}
 }
 
 /* Badge on ordinary bed cards elsewhere, so a nurse can see why a vacant bed

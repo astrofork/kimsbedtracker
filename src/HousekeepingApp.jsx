@@ -9,44 +9,44 @@ function minutesSince(ts) {
   return Math.max(0, Math.floor((Date.now() - Number(ts || 0)) / 60000));
 }
 
-/** One bed, as its own small card inside its ward's card. Three nested levels,
- *  told apart by SURFACE rather than by three identical borders: the zone is
- *  raised, the ward is recessed inside it, and the bed is raised again. */
+/** One bed. Overdue tints the whole card rather than just its edge — an edge
+ *  colour is easy to miss at arm's length, a tinted card is not. */
 function BedBox({ bed, tat, busy, onStart, onComplete }) {
-  const waiting = bed.task_id ? minutesSince(bed.created_at) : 0;
-  const over = !!bed.task_id && waiting > Number(bed.expected_minutes || tat);
+  const mins = bed.task_id ? minutesSince(bed.created_at) : 0;
+  const limit = Number(bed.expected_minutes || tat);
+  const over = !!bed.task_id && mins > limit;
   const doing = bed.task_status === "IN_PROGRESS";
-  const state = !bed.task_id ? "soon" : over ? "over" : doing ? "doing" : "wait";
+  const state = !bed.task_id ? "idle" : over ? "over" : doing ? "doing" : "wait";
 
   return (
-    <div className={"hk-bedbox hk-bedbox--" + state}>
-      <div className="hk-bedbox-head">
-        <span className="hk-bedbox-name">{bed.bed_name}</span>
-        <span className={"hk-bedbox-tag hk-bedbox-tag--" + state}>
-          {!bed.task_id ? "Soon" : over ? `${waiting}m over` : doing ? "Cleaning" : "To clean"}
-        </span>
-      </div>
+    <article className={"hk-bed is-" + state}>
+      <header className="hk-bed-top">
+        <h4 className="hk-bed-id">{bed.bed_name}</h4>
+        {bed.task_id && (
+          <span className="hk-bed-age">{over ? `${mins}m` : doing ? "cleaning" : `${mins}m`}</span>
+        )}
+      </header>
 
-      <div className="hk-bedbox-sub">
-        {!bed.task_id ? "Discharge running, not free yet"
-          : doing ? <span className="hk-claim">{bed.claimed_name ? `${bed.claimed_name} started` : "Started"} <RelativeTime ts={bed.claimed_at} /></span>
-          : <>Free <RelativeTime ts={bed.created_at} />, after a {bed.source === "TRANSFER" ? "transfer" : "discharge"}</>}
-      </div>
+      <p className="hk-bed-line">
+        {!bed.task_id ? "Discharge running"
+          : doing ? <><b>{bed.claimed_name || "Someone"}</b> started <RelativeTime ts={bed.claimed_at} /></>
+          : <>Free after a {bed.source === "TRANSFER" ? "transfer" : "discharge"}</>}
+      </p>
       {!bed.operational_status && bed.task_id && (
-        <div className="hk-bedbox-warn"><Ic d={icons.alert} s={12} /> Out of service, contact the admin</div>
+        <p className="hk-bed-flag">Bed out of service</p>
       )}
 
       {bed.task_id && (
-        <div className="hk-bedbox-act">
+        <footer className="hk-bed-act">
           {!doing && (
-            <button className="hk-b hk-b--ghost" disabled={busy} onClick={() => onStart(bed.id)}>Start</button>
+            <button className="hk-b hk-b-alt" disabled={busy} onClick={() => onStart(bed.id)}>Start</button>
           )}
-          <button className="hk-b hk-b--go" disabled={busy} onClick={() => onComplete(bed.id)}>
-            <Ic d={icons.check} s={15} /> Clean
+          <button className="hk-b hk-b-main" disabled={busy} onClick={() => onComplete(bed.id)}>
+            <Ic d={icons.check} s={16} /> Clean
           </button>
-        </div>
+        </footer>
       )}
-    </div>
+    </article>
   );
 }
 
@@ -174,61 +174,60 @@ export default function HousekeepingApp({ user, onLogout }) {
 
       {zones.length > 0 && (
         <>
-          <div className="hk-summary">
-            <div className="hk-count">
+          {/* A strip of figures rather than one big number: it tells the
+              cleaner what is waiting, what is running late, and how long they
+              have, in the order they care about. */}
+          <div className="hk-strip">
+            <div className="hk-fig">
               <b>{counts.ALL}</b>
-              <span>{counts.ALL === 1 ? "bed to clean" : "beds to clean"}</span>
+              <i>waiting</i>
             </div>
-            <div className="hk-tat"><Ic d={icons.clock} s={13} /> {tat} min turnaround</div>
+            <div className={"hk-fig" + (counts.OVER ? " is-bad" : "")}>
+              <b>{counts.OVER}</b>
+              <i>overdue</i>
+            </div>
+            <div className="hk-fig">
+              <b>{tat}<em>m</em></b>
+              <i>turnaround</i>
+            </div>
           </div>
 
-          <div className="chip-row" role="group" aria-label="Filter beds">
+          {/* Sticky: the list is long and the filters must stay in thumb reach. */}
+          <div className="hk-filters">
             {CHIPS.map(([key, label, n]) => (
               <button key={key}
-                className={"fchip" + (key === "OVER" ? " warn" : "") + (filter === key ? " on" : "")}
+                className={"hk-chip" + (key === "OVER" && n ? " is-bad" : "") + (filter === key ? " is-on" : "")}
                 aria-pressed={filter === key} onClick={() => setFilter(key)}>
-                {key === "OVER" && <Ic d={icons.alert} s={13} />}
-                {label} <span className="n">({n})</span>
+                {label}<span>{n}</span>
               </button>
             ))}
           </div>
 
-          {/* Zone box → ward boxes → bed boxes, exactly as asked, all on one
-              page. The three levels are told apart by surface — raised,
-              recessed, raised — so the nesting reads as depth instead of three
-              identical outlines. */}
           {view.map((z) => (
-            <section key={z.id} className="hk-zonebox">
-              <div className="hk-zonebox-head">
-                <span className="hk-zonebox-ic"><Ic d={icons.grid} s={16} /></span>
-                <span className="hk-zonebox-name">{z.name}</span>
-                <span className="hk-zonebox-sum">
-                  {z.total === 0 ? "all clear" : `${z.total} to clean`}
-                  {z.over > 0 && <em>, {z.over} overdue</em>}
-                </span>
-              </div>
+            <section key={z.id} className="hk-zone">
+              <header className="hk-zone-top">
+                <span className="hk-zone-mark">{z.name.charAt(0).toUpperCase()}</span>
+                <h2 className="hk-zone-name">{z.name}</h2>
+                {z.over > 0 && <span className="hk-tag is-bad">{z.over} overdue</span>}
+                <span className="hk-tag">{z.total || "0"}</span>
+              </header>
 
-              <div className="hk-zonebox-body">
-                {z.wards.length === 0 ? (
-                  <div className="hk-allclear">
-                    <Ic d={icons.check} s={14} /> Nothing to clean in this zone
+              {z.wards.length === 0 ? (
+                <p className="hk-zone-clear">All clear</p>
+              ) : z.wards.map((w) => (
+                <div key={w.id} className="hk-ward">
+                  <div className="hk-ward-top">
+                    <h3 className="hk-ward-name">{w.name}</h3>
+                    {!w.operational && <span className="hk-tag is-bad">out of service</span>}
                   </div>
-                ) : z.wards.map((w) => (
-                  <div key={w.id} className="hk-wardbox">
-                    <div className="hk-wardbox-head">
-                      <span className="hk-wardbox-name">{w.name}</span>
-                      <span className="hk-wardbox-pill">{w.beds.length}</span>
-                      {!w.operational && <span className="hk-ward-oos">ward out of service</span>}
-                    </div>
-                    <div className="hk-bedgrid">
-                      {w.beds.map((bd) => (
-                        <BedBox key={bd.id} bed={bd} tat={tat} busy={busyBed === bd.id}
-                          onStart={start} onComplete={complete} />
-                      ))}
-                    </div>
+                  <div className="hk-beds">
+                    {w.beds.map((bd) => (
+                      <BedBox key={bd.id} bed={bd} tat={tat} busy={busyBed === bd.id}
+                        onStart={start} onComplete={complete} />
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </section>
           ))}
         </>
