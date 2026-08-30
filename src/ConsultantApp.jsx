@@ -305,41 +305,41 @@ function MyPatientsPage() {
           </div>
 
           {/* ── Toolbar ── */}
+          <div className="mp2-search">
+            <Ic d={icons.search} s={14} />
+            <input
+              placeholder="Search by ward name, bed, IP number, doctor, department…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button className="mp2-search-x" onClick={() => setSearch("")} aria-label="Clear search">
+                <Ic d={icons.x} s={12} />
+              </button>
+            )}
+          </div>
           <div className="mp2-bar">
-            <div className="mp2-search">
-              <Ic d={icons.search} s={14} />
-              <input
-                placeholder="Search ward, bed, IP, doctor…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button className="mp2-search-x" onClick={() => setSearch("")} aria-label="Clear search">
-                  <Ic d={icons.x} s={12} />
-                </button>
-              )}
-            </div>
-            <select className="mp2-filter" value={filterDept} onChange={(e) => setFilterDept(e.target.value)} aria-label="Filter by department">
-              <option value="">All Depts</option>
-              {deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-            <select className="mp2-filter" value={filterPayer} onChange={(e) => setFilterPayer(e.target.value)} aria-label="Filter by payer">
-              <option value="">All Payers</option>
-              {payerOptions.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <div className="mp2-bar-r">
-              <select className="mp2-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort wards">
+            <div className="mp2-filters">
+              <select className="mp2-filter" value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
+                <option value="">All Departments</option>
+                {deptOptions.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select className="mp2-filter" value={filterPayer} onChange={(e) => setFilterPayer(e.target.value)}>
+                <option value="">All Payers</option>
+                {payerOptions.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <select className="mp2-sort" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
                 <option value="ward-asc">Ward A–Z</option>
                 <option value="count-desc">Most Patients</option>
               </select>
-              <div className="mp2-vtog">
-                <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")} aria-label="Table view">
-                  <Ic d={icons.list} s={14} />
-                </button>
-                <button className={viewMode === "card" ? "on" : undefined} onClick={() => setViewMode("card")} aria-label="Card view">
-                  <Ic d={icons.grid} s={14} />
-                </button>
-              </div>
+            </div>
+            <div className="mp2-vtog">
+              <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")} aria-label="Table view">
+                <Ic d={icons.list} s={14} />
+              </button>
+              <button className={viewMode === "card" ? "on" : undefined} onClick={() => setViewMode("card")} aria-label="Card view">
+                <Ic d={icons.grid} s={14} />
+              </button>
             </div>
           </div>
 
