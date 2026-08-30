@@ -97,8 +97,10 @@ function BedCard({ bed, tat, busy, onStart, onComplete }) {
           )}
           {mins > 0 && (
             <div className="hkc-row">
-              <span className="hkc-label">{over ? "Overdue by" : "Waiting"}</span>
-              <span className={"hkc-val" + (over ? " hkc-urgent" : "")}>{mins}m</span>
+              <span className="hkc-label">{over ? "Overdue by" : "Time Left"}</span>
+              <span className={"hkc-val" + (over ? " hkc-urgent" : "")}>
+                {over ? mins - limit : limit - mins}m
+              </span>
             </div>
           )}
         </div>
