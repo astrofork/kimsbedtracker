@@ -57,6 +57,8 @@ function MyPatientsPage({ visible, onSubTitle }) {
   const [departments, setDepartments] = useState([]);
   const [openWard, setOpenWard] = useState(null);
   const saveWardScroll = useScrollRestore(!!openWard);
+  const [bedSearch, setBedSearch] = useState("");
+  const [bedFilter, setBedFilter] = useState("ALL");
   const [viewMode, setViewMode] = useState("table");
   const [sortBy, setSortBy] = useState("ward-asc");
   const [filterDept, setFilterDept] = useState("");
@@ -230,39 +232,113 @@ function MyPatientsPage({ visible, onSubTitle }) {
   if (openWard) {
     const group = wardGroups.find((g) => g.key === openWard.key);
     const groupPatients = group ? group.patients : [];
+    const bq = bedSearch.trim().toLowerCase();
+    const filteredBeds = groupPatients.filter((p) => {
+      if (bedFilter === "DISCHARGE" && !p.discharge_tracking) return false;
+      if (bedFilter === "CASH" && p.payer_type !== "Cash") return false;
+      if (bedFilter === "INSURANCE" && p.payer_type === "Cash") return false;
+      if (!bq) return true;
+      return (p.bed_name || "").toLowerCase().includes(bq)
+        || (p.ip_last6 || "").toLowerCase().includes(bq)
+        || (p.payer_type || "").toLowerCase().includes(bq)
+        || (p.admission_type || "").toLowerCase().includes(bq)
+        || (p.destination || "").toLowerCase().includes(bq);
+    });
+    const fc = {
+      ALL: groupPatients.length,
+      DISCHARGE: groupPatients.filter((p) => p.discharge_tracking).length,
+      CASH: groupPatients.filter((p) => p.payer_type === "Cash").length,
+      INSURANCE: groupPatients.filter((p) => p.payer_type && p.payer_type !== "Cash").length,
+    };
     return (
       <div className="slide-up">
-        <BackBtn label="Back to wards" onClick={() => setOpenWard(null)} style={{ marginBottom: 14 }} />
+        <BackBtn label="Back to wards" onClick={() => { setOpenWard(null); setBedSearch(""); setBedFilter("ALL"); }} style={{ marginBottom: 14 }} />
         <div style={{ marginBottom: 14 }}>
           <div style={{ fontWeight: 800, fontSize: 17, letterSpacing: "-.01em" }}>{openWard.wardName}</div>
           <div className="dim" style={{ fontSize: 12 }}>{groupPatients.length} patient{groupPatients.length !== 1 ? "s" : ""}</div>
         </div>
-        <div style={{ position: "relative" }}>
-          <div className="pbed-grid">
-            {groupPatients.map((p) => (
-              <BedGridCard
-                key={p.bed_id}
-                bed={{
-                  id: p.bed_id,
-                  bed_name: p.bed_name,
-                  physical_status: p.physical_status,
-                  reservation_status: p.reservation_status,
-                  operational_status: p.operational_status,
-                  destination: p.destination,
-                  reservation_note: p.reservation_note,
-                  updated_at: p.updated_at,
-                  ip_last6: p.ip_last6,
-                  consultant_name: p.consultant_name,
-                  department_name: p.department_name,
-                  payer_type: p.payer_type,
-                  admission_type: p.admission_type,
-                  discharge_tracking: p.discharge_tracking,
-                }}
-                hideDoctorDept
-                onClick={() => openBed(p)}
-              />
-            ))}
+
+        <div className="pill-search" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <div className="field-search" style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+              <Ic d={icons.search} s={15} />
+            </span>
+            <input
+              className="field"
+              value={bedSearch}
+              placeholder="Search bed, IP, payer…"
+              style={{ paddingLeft: 38, paddingRight: bedSearch ? 36 : 15 }}
+              onChange={(e) => setBedSearch(e.target.value)}
+            />
+            {bedSearch && (
+              <button
+                onClick={() => setBedSearch("")}
+                aria-label="Clear search"
+                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+              >
+                <Ic d={icons.x} s={14} />
+              </button>
+            )}
           </div>
+        </div>
+        <div className="chip-row" role="group" aria-label="Filter beds">
+          {[
+            { key: "ALL", label: "All" },
+            { key: "DISCHARGE", label: "Discharge" },
+            { key: "CASH", label: "Cash" },
+            { key: "INSURANCE", label: "Insurance" },
+          ].filter((o) => o.key === "ALL" || fc[o.key] > 0).map((o) => (
+            <button key={o.key}
+              className={"fchip" + (bedFilter === o.key ? " on" : "")}
+              aria-pressed={bedFilter === o.key}
+              onClick={() => setBedFilter(o.key)}>
+              {o.label} <span className="n">({fc[o.key]})</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ position: "relative", marginTop: 10 }}>
+          {filteredBeds.length === 0 ? (
+            <div className="card empty" style={{ padding: 24, textAlign: "center" }}>
+              <Ic d={icons.search} s={24} />
+              <div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>No beds match</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 3 }}>
+                {bq ? `No bed or IP matching "${bedSearch.trim()}" in this filter.` : "No beds in this filter."}
+              </div>
+              {(bq || bedFilter !== "ALL") && (
+                <button className="btn btn-ghost" style={{ marginTop: 12, fontSize: 12, padding: "8px 14px" }}
+                  onClick={() => { setBedSearch(""); setBedFilter("ALL"); }}>
+                  Clear search & filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="pbed-grid">
+              {filteredBeds.map((p) => (
+                <BedGridCard
+                  key={p.bed_id}
+                  bed={{
+                    id: p.bed_id,
+                    bed_name: p.bed_name,
+                    physical_status: p.physical_status,
+                    reservation_status: p.reservation_status,
+                    operational_status: p.operational_status,
+                    destination: p.destination,
+                    reservation_note: p.reservation_note,
+                    updated_at: p.updated_at,
+                    ip_last6: p.ip_last6,
+                    consultant_name: p.consultant_name,
+                    department_name: p.department_name,
+                    payer_type: p.payer_type,
+                    admission_type: p.admission_type,
+                    discharge_tracking: p.discharge_tracking,
+                  }}
+                  hideDoctorDept
+                  onClick={() => openBed(p)}
+                />
+              ))}
+            </div>
+          )}
           {loadingBed && (
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "color-mix(in srgb, var(--bg) 75%, transparent)", borderRadius: 8, zIndex: 2 }}>
               <span className="spin"><Ic d={icons.refresh} s={22} /></span>
