@@ -59,7 +59,6 @@ function MyPatientsPage({ visible, onSubTitle }) {
   const saveWardScroll = useScrollRestore(!!openWard);
   const [bedSearch, setBedSearch] = useState("");
   const [bedFilter, setBedFilter] = useState("ALL");
-  const [viewMode, setViewMode] = useState("table");
   const [sortBy, setSortBy] = useState("ward-asc");
   const [filterDept, setFilterDept] = useState("");
   const [filterPayer, setFilterPayer] = useState("");
@@ -457,14 +456,6 @@ function MyPatientsPage({ visible, onSubTitle }) {
                 <Ic d={icons.x} s={11} /> Clear
               </button>
             </div>
-            <div className="mp2-vtog">
-              <button className={viewMode === "table" ? "on" : undefined} onClick={() => setViewMode("table")} aria-label="Table view">
-                <Ic d={icons.list} s={14} />
-              </button>
-              <button className={viewMode === "card" ? "on" : undefined} onClick={() => setViewMode("card")} aria-label="Card view">
-                <Ic d={icons.grid} s={14} />
-              </button>
-            </div>
           </div>
 
           {/* ── Ward list header ── */}
@@ -477,7 +468,7 @@ function MyPatientsPage({ visible, onSubTitle }) {
           <div>
           {sortedWardGroups.length === 0 ? (
             <div className="mp2-no-match">No wards match your search.</div>
-          ) : viewMode === "table" ? (
+          ) : (
             <>
               {/* Desktop table — Jira-style */}
               <div className="mp2-tbl-wrap mp-tbl-desktop">
@@ -530,19 +521,6 @@ function MyPatientsPage({ visible, onSubTitle }) {
                 ))}
               </div>
             </>
-          ) : (
-            <div className="mp2-cards">
-              {pagedWardGroups.map((g) => (
-                <div className="mp2-wcard" key={g.key} onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
-                  <span className="mp2-wcard-bar" style={{ background: wardAvatarColor(g.key) }} />
-                  <div className="mp2-wcard-body">
-                    <div className="mp2-wcard-name">{g.wardName}</div>
-                    <div className="mp2-wcard-ct">{g.patients.length} patient{g.patients.length !== 1 ? "s" : ""}</div>
-                  </div>
-                  <Ic d={icons.chevron} s={14} style={{ color: "var(--ink-3)", flexShrink: 0 }} />
-                </div>
-              ))}
-            </div>
           )}
           </div>
 
