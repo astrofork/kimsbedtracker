@@ -176,6 +176,16 @@ function MyPatientsPage() {
   const sortedWardGroups = [...wardGroups].sort((a, b) =>
     sortBy === "count-desc" ? b.patients.length - a.patients.length : a.wardName.localeCompare(b.wardName)
   );
+
+  const sparkPath = (values) => {
+    if (!values.length) return "";
+    const max = Math.max(...values, 1);
+    const pts = values.map((v, i) => [i * (60 / Math.max(values.length - 1, 1)), 24 - (v / max) * 20]);
+    return "M" + pts.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join(" L");
+  };
+  const totalSpark = wardGroups.map(g => g.patients.length);
+  const dlSpark = wardGroups.map(g => g.patients.filter(p => p.ward_name === "Discharge Lounge").length);
+  const dtSpark = wardGroups.map(g => g.patients.filter(p => { const dt = p.discharge_tracking; return dt && dt.planned_date === todayStr && dt.status !== "COMPLETED" && dt.status !== "CANCELLED"; }).length);
   const totalPages = Math.max(1, Math.ceil(sortedWardGroups.length / rowsPerPage));
   const pageClamped = Math.min(page, totalPages);
   const pageStart = (pageClamped - 1) * rowsPerPage;
@@ -261,7 +271,7 @@ function MyPatientsPage() {
                 <div className="mp2-kpi-val">{totalPatientsCount}</div>
                 <div className="mp2-kpi-lbl">Total Patients</div>
               </div>
-              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d="M0 22c8-6 16 4 24-2s16-14 24-8 16 10 16 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d={sparkPath(totalSpark)} stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/></svg>
             </div>
             <div className="mp2-kpi mp2-kpi-purple">
               <div className="mp2-kpi-ico"><Ic d={icons.exchange} s={16} /></div>
@@ -269,7 +279,7 @@ function MyPatientsPage() {
                 <div className="mp2-kpi-val">{dischargeLoungeCount}</div>
                 <div className="mp2-kpi-lbl">Discharge Lounge</div>
               </div>
-              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d="M0 14c6 8 14-4 22 6s14-10 22-4 20 8 20 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d={sparkPath(dlSpark)} stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/></svg>
             </div>
             <div className="mp2-kpi mp2-kpi-orange">
               <div className="mp2-kpi-ico"><Ic d={icons.clock} s={16} /></div>
@@ -277,7 +287,7 @@ function MyPatientsPage() {
                 <div className="mp2-kpi-val">{dischargeTodayCount}</div>
                 <div className="mp2-kpi-lbl">Discharge Today</div>
               </div>
-              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d="M0 20c10-8 18 2 26-6s12 10 20 4 18-6 18-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d={sparkPath(dtSpark)} stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/></svg>
             </div>
           </div>
 
