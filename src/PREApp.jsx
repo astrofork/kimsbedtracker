@@ -823,12 +823,11 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
   if (cleaning) {
     return (
       <div
-        className={"pbed" + (onClick ? " tap" : "")}
+        className={"pbed st-clean" + (onClick ? " tap" : "")}
         onClick={onClick}
         role={onClick ? "button" : undefined}
         tabIndex={onClick ? 0 : undefined}
         onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
-        style={{ borderColor: "var(--st-clean)" }}
       >
         {wardLabel && (
           <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", letterSpacing: ".02em", marginBottom: -2, paddingTop: 2 }}>{wardLabel}</div>
