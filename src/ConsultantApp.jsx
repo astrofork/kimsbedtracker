@@ -368,18 +368,25 @@ function MyPatientsPage() {
             <div className="mp2-no-match">No wards match your search.</div>
           ) : viewMode === "table" ? (
             <>
-              {/* Desktop table */}
+              {/* Desktop table — Jira-style */}
               <div className="mp2-tbl-wrap mp-tbl-desktop">
                 <table className="mp2-tbl">
                   <thead>
                     <tr>
-                      <th className="mp2-th-ward">Ward</th>
-                      <th className="mp2-th-count">Patients</th>
+                      <th>Ward</th>
+                      <th>Department</th>
+                      <th>Patients</th>
+                      <th>Payer</th>
+                      <th>Discharge Today</th>
                       <th className="mp2-th-arr" />
                     </tr>
                   </thead>
                   <tbody>
-                    {pagedWardGroups.map((g) => (
+                    {pagedWardGroups.map((g) => {
+                      const depts = [...new Set(g.patients.map(p => p.department_name).filter(Boolean))];
+                      const payers = [...new Set(g.patients.map(p => p.payer_type).filter(Boolean))];
+                      const dToday = g.patients.filter(p => { const dt = p.discharge_tracking; return dt && dt.planned_date === todayStr && dt.status !== "COMPLETED" && dt.status !== "CANCELLED"; }).length;
+                      return (
                       <tr key={g.key} onClick={() => { saveWardScroll(); setOpenWard({ key: g.key, wardName: g.wardName }); }}>
                         <td>
                           <div className="mp2-ward-cell">
@@ -389,10 +396,13 @@ function MyPatientsPage() {
                             {g.wardName}
                           </div>
                         </td>
-                        <td className="mp2-td-count">{g.patients.length}</td>
+                        <td className="mp2-td-dept">{depts.length === 1 ? depts[0] : depts.length > 1 ? `${depts.length} depts` : "—"}</td>
+                        <td><span className="mp2-badge mp2-badge-blue">{g.patients.length}</span></td>
+                        <td className="mp2-td-payer">{payers.join(", ") || "—"}</td>
+                        <td>{dToday > 0 ? <span className="mp2-badge mp2-badge-orange">{dToday}</span> : <span className="dim">0</span>}</td>
                         <td className="mp2-td-arr"><Ic d={icons.chevron} s={14} /></td>
-                      </tr>
-                    ))}
+                      </tr>);
+                    })}
                   </tbody>
                 </table>
               </div>
