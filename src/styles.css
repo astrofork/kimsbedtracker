@@ -825,7 +825,14 @@ body.hero-gone .appbar{
 
 /* KPI cards — compact row: circle icon | number+label | sparkline */
 .mp2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
-@media (max-width:560px){.mp2-kpis{grid-template-columns:1fr;}}
+@media (max-width:560px){
+  .mp2-kpis{grid-template-columns:repeat(3,1fr);gap:6px;}
+  .mp2-kpi{flex-direction:column;gap:6px;padding:10px 8px;text-align:center;}
+  .mp2-kpi-ico{width:30px;height:30px;}
+  .mp2-kpi-val{font-size:16px;}
+  .mp2-kpi-lbl{font-size:9px;}
+  .mp2-kpi-spark{display:none;}
+}
 .mp2-kpi{
   display:flex;align-items:center;gap:12px;
   padding:14px 16px;border-radius:12px;overflow:hidden;
