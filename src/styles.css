@@ -2603,6 +2603,10 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .hkc-btn-pri:hover{filter:brightness(.9);box-shadow:0 2px 6px rgba(37,99,235,.3);}
 .hkc-btn-pri:active{transform:scale(.99);}
 .hkc-btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none;}
+/* A busy Start/Mark Done button is disabled but should still read as "working",
+   not "unavailable" — override the disabled dim so the spinner + verb stay
+   at full strength instead of fading out. See .dc-act for the same pattern. */
+.hkc-btn[aria-busy="true"]:disabled{opacity:.9;cursor:progress;}
 .hkc-foot{display:flex;align-items:center;justify-content:center;gap:4px;font-size:10.5px;font-weight:500;color:var(--ink-3);margin-top:auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;}
 .hkc-foot span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 

@@ -109,12 +109,14 @@ function BedCard({ bed, tat, busy, onStart, onComplete }) {
       {bed.task_id && (
         <div className="hkc-actions">
           {doing ? (
-            <button className="hkc-btn hkc-btn-pri" disabled={busy} onClick={() => onComplete(bed.id)}>
-              Mark Done
+            <button className="hkc-btn hkc-btn-pri" disabled={busy} aria-busy={busy || undefined}
+              onClick={() => onComplete(bed.id)}>
+              {busy ? <><span className="dc-spinner" aria-hidden="true" />Marking Done…</> : "Mark Done"}
             </button>
           ) : (
-            <button className="hkc-btn hkc-btn-pri" disabled={busy} onClick={() => onStart(bed.id)}>
-              Start
+            <button className="hkc-btn hkc-btn-pri" disabled={busy} aria-busy={busy || undefined}
+              onClick={() => onStart(bed.id)}>
+              {busy ? <><span className="dc-spinner" aria-hidden="true" />Starting…</> : "Start"}
             </button>
           )}
         </div>
