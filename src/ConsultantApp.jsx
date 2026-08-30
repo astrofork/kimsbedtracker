@@ -176,6 +176,16 @@ function MyPatientsPage() {
     return [...map.values()].sort((a, b) => a.wardName.localeCompare(b.wardName));
   })() : [];
 
+  const allWardGroups = patients ? (() => {
+    const map = new Map();
+    for (const p of patients) {
+      const key = p.ward_id ?? p.ward_name ?? "—";
+      if (!map.has(key)) map.set(key, { key, wardName: p.ward_name || "—", patients: [] });
+      map.get(key).patients.push(p);
+    }
+    return [...map.values()];
+  })() : [];
+
   const totalPatientsCount = patients ? patients.length : 0;
   const dischargeLoungeCount = patients ? patients.filter((p) => p.ward_name === "Discharge Lounge").length : 0;
   const todayStr = todayIST();
@@ -196,9 +206,9 @@ function MyPatientsPage() {
     const area = line + ` L${pts[pts.length - 1][0].toFixed(1)} 28 L0 28 Z`;
     return { line, area };
   };
-  const totalSpark = wardGroups.map(g => g.patients.length);
-  const dlSpark = wardGroups.map(g => g.patients.filter(p => p.ward_name === "Discharge Lounge").length);
-  const dtSpark = wardGroups.map(g => g.patients.filter(p => { const dt = p.discharge_tracking; return dt && dt.planned_date === todayStr && dt.status !== "COMPLETED" && dt.status !== "CANCELLED"; }).length);
+  const totalSpark = allWardGroups.map(g => g.patients.length);
+  const dlSpark = allWardGroups.map(g => g.patients.filter(p => p.ward_name === "Discharge Lounge").length);
+  const dtSpark = allWardGroups.map(g => g.patients.filter(p => { const dt = p.discharge_tracking; return dt && dt.planned_date === todayStr && dt.status !== "COMPLETED" && dt.status !== "CANCELLED"; }).length);
   const totalPages = Math.max(1, Math.ceil(sortedWardGroups.length / rowsPerPage));
   const pageClamped = Math.min(page, totalPages);
   const pageStart = (pageClamped - 1) * rowsPerPage;
