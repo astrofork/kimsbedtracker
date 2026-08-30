@@ -975,15 +975,21 @@ body.hero-gone .appbar{
 .mp2-notice-err{background:var(--st-or-bg);color:var(--st-or);border:1px solid color-mix(in srgb,var(--st-or) 20%,transparent);}
 .mp2-notice button{font-weight:700;text-decoration:underline;background:none;border:none;color:inherit;padding:0;cursor:pointer;margin-left:auto;}
 
-/* Ward list scroll container */
-.mp2-list-scroll{max-height:calc(100vh - 340px);overflow-y:auto;min-height:200px;}
+/* Page layout */
+.mp2{padding-bottom:70px;}
 
-/* Pagination */
+/* Pagination — fixed bar, portalled to body */
 .mp2-pag{
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 2px;margin-top:0;flex-wrap:wrap;gap:8px;
-  border-top:1px solid var(--line);
+  padding:10px 24px;flex-wrap:wrap;gap:8px;
+  position:fixed;bottom:16px;left:256px;right:16px;z-index:600;
+  height:48px;box-sizing:border-box;
+  background:var(--panel);
+  border:1px solid var(--line);border-radius:12px;
+  box-shadow:0 4px 16px rgba(0,0,0,.1);
 }
+.shell.sb-collapsed .mp2-pag{left:86px;}
+@media (max-width:767px){.mp2-pag{left:16px !important;padding:10px 14px;}}
 .mp2-pag-info{font-size:12.5px;color:var(--ink-3);font-weight:500;font-variant-numeric:tabular-nums;}
 .mp2-pag-r{display:flex;align-items:center;gap:4px;}
 .mp2-pag-r button{
