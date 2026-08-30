@@ -2536,11 +2536,14 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 }
 
 /* ── Housekeeping ─────────────────────────────────────────────────────────────
-     Read on a phone, one-handed, mid-corridor. Card anatomy follows Airtasker:
-     the identifier large, the facts as small icon rows beneath it, one clear
-     action. Grouped by ward with a count the way monday.com heads a group, and
-     a single summary line rather than a grid of stat cards that would push the
-     actual work below the fold. All colour comes from the existing tokens. — */
+     One page. Zone box → ward boxes → bed boxes, nested, the way the PRE Entry
+     page nests a block over its ward cards.
+
+     Three levels of box only work if they are not three identical outlines, so
+     the surfaces alternate — the zone is raised, the ward is recessed inside
+     it, the bed is raised again. Depth, not repetition.
+
+     Read one-handed in a corridor, so bed targets are large. — */
 .hk-summary{
   display:flex;align-items:baseline;justify-content:space-between;gap:12px;
   margin-bottom:12px;flex-wrap:wrap;
@@ -2554,59 +2557,92 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   background:var(--panel-2);border-radius:99px;padding:5px 11px;
 }
 
-.hk-ward{margin-bottom:18px;}
-.hk-ward-head{display:flex;align-items:center;gap:8px;margin-bottom:9px;flex-wrap:wrap;}
-.hk-ward-name{
-  font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--ink);
+/* Level 1 — the zone box. Raised. */
+.hk-zonebox{
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden;
 }
-.hk-ward-count{
-  display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;
-  padding:0 6px;border-radius:99px;background:var(--panel-2);
-  font-size:10.5px;font-weight:800;color:var(--ink-2);
+.hk-zonebox-head{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:13px 15px;border-bottom:1px solid var(--line);
+}
+.hk-zonebox-ic{
+  width:30px;height:30px;border-radius:9px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--primary);color:#fff;
+}
+.hk-zonebox-name{font-size:15px;font-weight:800;letter-spacing:-.01em;}
+.hk-zonebox-sum{font-size:12px;font-weight:600;color:var(--ink-3);margin-left:auto;}
+.hk-zonebox-sum em{font-style:normal;font-weight:800;color:var(--red);}
+/* Recessed well: this is what makes the ward boxes read as INSIDE the zone. */
+.hk-zonebox-body{background:var(--panel-2);padding:12px;}
+.hk-allclear{
+  display:flex;align-items:center;gap:7px;padding:6px 2px;
+  font-size:12.5px;font-weight:600;color:var(--st-v);
+}
+
+/* Level 2 — the ward box, sitting in the well. */
+.hk-wardbox{
+  background:var(--panel);border:1px solid var(--line);border-radius:13px;
+  overflow:hidden;
+}
+.hk-wardbox + .hk-wardbox{margin-top:10px;}
+.hk-wardbox-head{
+  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
+  padding:10px 13px;border-bottom:1px solid var(--line);
+}
+.hk-wardbox-name{font-size:13.5px;font-weight:800;letter-spacing:-.01em;}
+.hk-wardbox-pill{
+  display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;
+  padding:0 7px;border-radius:99px;background:var(--panel-2);border:1px solid var(--line);
+  font-size:11px;font-weight:800;color:var(--ink-2);
 }
 .hk-ward-oos{font-size:11px;font-weight:700;color:var(--red);}
 
-.hk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;}
-.hk-card{
-  background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  padding:14px 15px;box-shadow:var(--shadow);
-  display:flex;flex-direction:column;gap:6px;
-  /* The state rail, borrowed from monday.com's grouped cards: amber waiting,
-     blue being worked, red past the turnaround. Legible before any text is. */
-  border-left:4px solid var(--st-o);
+/* Level 3 — the bed boxes. */
+.hk-bedgrid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:9px;padding:11px;
 }
-.hk-card--doing{border-left-color:var(--primary);}
-.hk-card--over{border-left-color:var(--red);}
-.hk-card--soon{border-left-color:var(--line);background:var(--panel-2);}
-.hk-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;}
-.hk-bedname{font-size:17px;font-weight:800;letter-spacing:-.015em;}
-.hk-pill{
-  font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
-  padding:4px 9px;border-radius:99px;white-space:nowrap;flex-shrink:0;
+.hk-bedbox{
+  background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  border-left:4px solid var(--st-o);padding:11px 12px;
+  display:flex;flex-direction:column;gap:5px;
+}
+.hk-bedbox--doing{border-left-color:var(--primary);}
+.hk-bedbox--over{border-left-color:var(--red);}
+.hk-bedbox--soon{border-left-color:var(--line);background:var(--panel-2);}
+.hk-bedbox-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.hk-bedbox-name{font-size:15.5px;font-weight:800;letter-spacing:-.01em;}
+.hk-bedbox-tag{
+  font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
+  padding:3px 8px;border-radius:99px;white-space:nowrap;flex-shrink:0;
   background:var(--st-o-bg);color:var(--st-o);
 }
-.hk-pill--doing{background:var(--blue-bg);color:var(--blue);}
-.hk-pill--over{background:var(--red);color:#fff;}
-.hk-pill--soon{background:var(--panel);color:var(--ink-3);border:1px solid var(--line);}
+.hk-bedbox-tag--doing{background:var(--blue-bg);color:var(--blue);}
+.hk-bedbox-tag--over{background:var(--red);color:#fff;}
+.hk-bedbox-tag--soon{background:var(--panel);color:var(--ink-3);border:1px solid var(--line);}
+.hk-bedbox-sub{font-size:11.5px;color:var(--ink-2);line-height:1.35;}
+.hk-claim{color:var(--primary);font-weight:700;}
+.hk-bedbox-warn{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--red);}
+.hk-bedbox-act{display:flex;gap:7px;margin-top:4px;}
 
-.hk-meta{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);}
-.hk-meta svg{flex-shrink:0;color:var(--ink-3);}
-.hk-meta--strong{color:var(--primary);font-weight:700;}
-.hk-meta--strong svg{color:var(--primary);}
-.hk-warn{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;color:var(--red);}
-
-.hk-actions{display:flex;gap:8px;margin-top:8px;}
-.hk-btn{
-  flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  padding:11px 0;border-radius:11px;border:1px solid transparent;cursor:pointer;
-  font-size:13.5px;font-weight:700;font-family:inherit;transition:.15s;
+/* 44px minimum: tapped with a thumb, often gloved. */
+.hk-b{
+  flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  min-height:44px;padding:0 12px;border-radius:10px;border:1px solid transparent;
+  font-size:13.5px;font-weight:700;font-family:inherit;cursor:pointer;transition:.15s;
 }
-.hk-btn:disabled{opacity:.5;cursor:default;}
-.hk-btn--go{background:var(--primary);color:#fff;}
-.hk-btn--go:hover:not(:disabled){background:var(--primary-deep);}
-.hk-btn--ghost{background:var(--panel);color:var(--ink);border-color:var(--line);flex:0 0 90px;}
-.hk-btn--ghost:hover:not(:disabled){background:var(--panel-2);}
-.hk-btn:active:not(:disabled){transform:scale(.98);}
+.hk-b:disabled{opacity:.5;cursor:default;}
+.hk-b--go{background:var(--primary);color:#fff;}
+.hk-b--go:hover:not(:disabled){background:var(--primary-deep);}
+.hk-b--ghost{background:var(--panel);color:var(--ink);border-color:var(--line);flex:0 0 84px;}
+.hk-b--ghost:hover:not(:disabled){background:var(--panel-2);}
+.hk-b:active:not(:disabled){transform:scale(.97);}
+
+@media (max-width:520px){
+  .hk-zonebox-body{padding:9px;}
+  .hk-bedgrid{grid-template-columns:1fr;padding:9px;}
+}
 
 /* Badge on ordinary bed cards elsewhere, so a nurse can see why a vacant bed
    will not take a patient. The counts still read it as vacant. */
