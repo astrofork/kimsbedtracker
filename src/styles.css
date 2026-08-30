@@ -1938,8 +1938,8 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
    doesn't get handed out from under whoever's holding it. */
 .pbed-stamp{
   display:inline-flex;align-items:center;gap:4px;flex-shrink:0;
-  padding:3px 9px;border-radius:7px;
-  border:1.5px solid var(--st-vr);color:var(--st-vr);
+  padding:3px 10px;border-radius:999px;
+  border:1.5px solid var(--st-vr);color:var(--st-vr);background:var(--st-vr-bg);
   font-size:10px;font-weight:800;letter-spacing:.05em;
 }
 .pbed-note{font-size:10.5px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
