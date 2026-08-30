@@ -45,7 +45,7 @@ function wardInitials(name) {
 }
 
 // ── My Patients page ────────────────────────────────────────────────────────
-function MyPatientsPage({ visible }) {
+function MyPatientsPage({ visible, onSubTitle }) {
   const [patients, setPatients] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -110,6 +110,13 @@ function MyPatientsPage({ visible }) {
     if (getWardBeds(openWard.key)) return;
     api.consultantBeds(openWard.key).then(r => setWardBeds(openWard.key, r.beds || [])).catch(() => {});
   }, [openWard]);
+
+  useEffect(() => {
+    if (!onSubTitle) return;
+    if (selectedBed) onSubTitle(selectedBed.bed_name || "Bed");
+    else if (openWard) onSubTitle(openWard.wardName);
+    else onSubTitle(null);
+  }, [openWard, selectedBed, onSubTitle]);
 
   const openBed = async (p) => {
     saveBedScroll();
@@ -473,6 +480,7 @@ function MyPatientsPage({ visible }) {
 export default function ConsultantApp({ user, meta, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [toast, setToast] = useState("");
+  const [mpSubTitle, setMpSubTitle] = useState(null);
   const dashboardData = useLiveBedDashboardData("consultant", tab === "dashboard");
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2600); }, []);
 
@@ -482,7 +490,8 @@ export default function ConsultantApp({ user, meta, onLogout }) {
     { key: "discharges",  icon: icons.clipboard,   label: "My Discharges" },
   ];
 
-  const title = menu.find((m) => m.key === tab)?.label || "Consultant";
+  const baseTitle = menu.find((m) => m.key === tab)?.label || "Consultant";
+  const title = tab === "mypatients" && mpSubTitle ? mpSubTitle : baseTitle;
 
   return (
     <div className="preui">
@@ -504,7 +513,7 @@ export default function ConsultantApp({ user, meta, onLogout }) {
           />
         )}
         <div style={{ display: tab === "mypatients" ? "block" : "none" }}>
-          <MyPatientsPage showToast={showToast} visible={tab === "mypatients"} />
+          <MyPatientsPage showToast={showToast} visible={tab === "mypatients"} onSubTitle={setMpSubTitle} />
         </div>
         {tab === "discharges" && <DischargesPage role="CONSULTANT" />}
 
