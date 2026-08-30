@@ -2669,8 +2669,8 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 }
 /* Sidebar and scrim must always sit above the toolbar on mobile */
 @media(max-width:768px){
-  .sidebar{z-index:600!important;}
-  .sb-scrim{z-index:550!important;}
+  .sidebar{z-index:700!important;}
+  .sb-scrim{z-index:650!important;}
 }
 
 /* Reduced motion: keep fades only, skip top transition */
