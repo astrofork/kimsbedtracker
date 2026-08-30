@@ -245,8 +245,9 @@ function MyPatientsPage({ visible, onSubTitle }) {
         || (p.admission_type || "").toLowerCase().includes(bq)
         || (p.destination || "").toLowerCase().includes(bq);
     });
-    const nameSuggestions = bq && bq.length >= 2
-      ? [...new Set(groupPatients.map((p) => p.patient_name).filter((n) => n && n.toLowerCase().includes(bq)))]
+    const allPatientNames = [...new Set(groupPatients.map((p) => p.patient_name).filter(Boolean))].sort();
+    const nameSuggestions = bq
+      ? allPatientNames.filter((n) => n.toLowerCase().includes(bq))
       : [];
     const fc = {
       ALL: groupPatients.length,
@@ -294,6 +295,13 @@ function MyPatientsPage({ visible, onSubTitle }) {
               </div>
             )}
           </div>
+          {allPatientNames.length > 0 && (
+            <select className="field mp2-filter" value="" onChange={(e) => { if (e.target.value) setBedSearch(e.target.value); }}
+              style={{ flex: "0 0 auto", width: "auto", maxWidth: 160, borderRadius: 99, fontSize: 13 }}>
+              <option value="">Patient</option>
+              {allPatientNames.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
         </div>
         <div className="chip-row" role="group" aria-label="Filter beds">
           {[
