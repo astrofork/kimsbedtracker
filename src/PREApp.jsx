@@ -9,6 +9,7 @@ import { naturalSort, bedStateColor, bedStateBg, bedStateShort, calculateWardTot
 import DischargeTab, { TransferSection } from "./DischargeTab.jsx";
 import DischargesPage from "./DischargesPage.jsx";
 import { LiveBedDashboard, useLiveBedDashboardData } from "./COOApp.jsx";
+const CLEAN_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAMAAADVRocKAAACfFBMVEUlY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+slY+sTDYjsAAAA03RSTlMABxkCSa/aX+4l3GPMOs1+hYB/Fjxre2xPKwwTO22k0/L66cEtATPG5Y968e+/hJa44PzXV8puOAgiXrf3dAQLWtT2aSi65silBUbwLg1giP4y20L79QMUfYdBSxweG+GCaqo3YaOtJoGiPhG8Enn95x3ouRA9KoPJ9MJ3IN9W+eSTaPiNIyRO3dI/QA7FqXEX0XA1fM7iRHXDdgq7qB9yRRrzoCm2rMRN7HNRmcvtGEexNGSc1ZS0mExnn89KkgahldhZMDnrhtDHYi94kDa+IQ9Y3DmiQgAABbRJREFUaN7tmPtfU2UYwM+YchnC3BExFWJQEjexYYKgQU0YxIKGOG7BCMGiBgxRA9ISi6tDLl7QLlBCSRpqpWVl2f1+0Xr+od73XHbOds7GtvesT5/y+eGFve/O891zeZ/3eQ9F/e9FFRamCqF69YqV4eErV6hDBoiIBCSREaHSH6VB2hFDExUiQDTAqpiYWIDoEAG0AKspajWANkQAHQBNUTSALnQAHT/eBdwF/LMA9Zq4tTo3oePX3bN+gzKAjQmJ9ybpQSLJKffF37+JHJD6gIxyXtLSo4gBGVhRZhbAZq3IQ7rsLQ8actDK1ofUhAD07W25eenS+rU9v2DHTgD9w4XEAJopkzLPFD3yKIBxlxIAb88UlwCY8kJmAZL8UoCyx0ISA07KzZDyOAlAnEUZqW5LFZUon54wgaWABFAl3ge7q8VLlXu46QwSAN7JZUlWTpVGTNBxk3siiABIamq3IBfV1WvcCTS3+yIqSAFMFqEgN2DCk41NrNikkQ8ewCYrQzAbmlkxmCWKiCx4iuIIYpECgmxbWgD2MjWnXjBB3oJ0G3ZdwIDWSMhswwQaqxBiIAWYDTLg5UW1D+22p6sZFa7AauUAsq7zQ55BNQfaJRbQSlmACM9GYoAuRDHAXmpd+xxl73DPoo5OTwBh89vlAGOzS4zg6PIEkPVFCd3goPdzO7lpP+2AngQlAfYDAAfsHp/FTiJ1UZcFeuI8LLKInUQUZKk6DilyEkmayjhEOkew0aS/VrDKdaCRWSDjIB7rigtJDOQcJJknyaIuUc4fXH8ooZg/J8WWEewDkZrne/tSrP2mFw4fEdBxpIBO1xZTtbzIp0rSS2oPJwUPaHOAiXGQqvcoUt0/kIYbmcwW5gKSYAJHGyEAPXOM+eflVwC6BxuGhqsHewCyRpjJY7xGtvnQBvGugj/IikcBxo6zc84kgNI1nF4d7iS1m3GnxI6VFYECmN+IMrD7OD/p7OFcw67m5ohPipzcYADjJwAGhdlBgIlCftU25n4WjdmCABSboL9BmK22wlgtxe2vSQtosmnuDpetActkEIBWPQwMCbPDadB8hIvQ1DRYTgpLJy0wHYgJHOCU2RNgaKKYIJ9OtMCZKWFp6owbz19A/oyni7bZzp7DafNqOEAfTbvuuXQfcB57rbzIf8DrJZ5BfmPWCsuIdXZueQBfIBM90hT0y6nHMuvDhoMjXW++1bhJyzVx51eh/HNy+tFGm7eAfkHwjFRoekEP1nKv+t9+B5Ue4+4Li3yX+O5FgJ7B6mG2VITvBVgopHxK4QLAOW+L9h2CnbGXnGE1FBWRgt2aNoBdP1qulbSn3t0rJ+8lQ+TS0uUrLKJ/68Tkoavvd+xkPxo/+BA/LAtwtrc7+dEXoA5gCdmReu16bBardf6jfe0f37g8qin95NMN3itzO9OKs6Ov6n0Y4ALbyXWe+uzm52YWktX3RZhtnJkmBTj1kHzi1rWY81/iTxtbd301nYkRpdxp6fVhsYt8AVRfMz9Z/82N+m+/q8UHZO3368p+QEV03DdALD6/0/mjIZmr7xd/mjg9wvQSlfPgyK5RBkCph0biJ6avcGdJcvfPN38pUvc6oL9AIQCWmtpfy9AJn8mZ8hs1PgswE6ccgGLy9fc/om/dNhgBN0F3UK3su0O5Xzq9idYfANosdejP9rmztwFKOqm4GRToPxmA+G2knOBi7gVg5+9KzI2Vub02Xv3LzLTTBXrmwNeBXyIPSF103fZwR87dXmdQ9evOo2qu8z1W8IAM7w9c4j2rExohX6M8QHTndpeZxVRRl6h1b+hkR68A/q2Bu8zZKfc21J9RHuAjBWlFAPIWiN7lkALkYyB6E0IKWDb5yC1gd4D8qEgM2D0sPyoAYO+k3kYFAAGp+FcCfLvI/zHIIPs/Bpmm/o8Bl+tAJUMWULXYrJAsVskCREcmodip/5L8DXeLIvORdZvBAAAAAElFTkSuQmCC";
 
 // "dashboard" is no longer a tab of its own — the full dashboard now renders
 // underneath Home on the same page (see the home branch below).
@@ -816,6 +817,47 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
     (occupied && bed.bed_type === "Lounge" && (bed.origin_ward_name || bed.origin_bed_name))
   );
 
+  const cleaning = bed.housekeeping_status;
+  const cleaningInProgress = cleaning === "IN_PROGRESS";
+
+  if (cleaning) {
+    return (
+      <div
+        className={"pbed" + (onClick ? " tap" : "")}
+        onClick={onClick}
+        role={onClick ? "button" : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? (e) => (e.key === "Enter" || e.key === " ") && onClick() : undefined}
+        style={{ borderColor: "var(--st-clean)" }}
+      >
+        {wardLabel && (
+          <div style={{ fontSize: 10, fontWeight: 600, color: "var(--ink-3)", letterSpacing: ".02em", marginBottom: -2, paddingTop: 2 }}>{wardLabel}</div>
+        )}
+        <div className="pbed-head">
+          <span className="pbed-name">{bed.bed_name}</span>
+          <span className="pbadge clean">
+            {cleaningInProgress ? "CLEANING" : "PENDING"}
+          </span>
+        </div>
+
+        <div className="pbed-idle">
+          <span className="ring" style={{ background: "color-mix(in srgb,var(--st-clean) 10%,transparent)", color: "var(--st-clean)" }}>
+            <img src={CLEAN_ICON} alt="" width={20} height={20} style={{ pointerEvents: "none" }} />
+          </span>
+        </div>
+
+        <div style={{ textAlign: "center", fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>
+          {cleaningInProgress ? "Cleaning in progress" : "Awaiting cleaning"}
+        </div>
+
+        <div className="pbed-foot">
+          <span>Updated <RelativeTime ts={bed.updated_at} /></span>
+          {onClick && <Ic d={icons.chevron} s={13} style={{ color: "var(--ink-3)" }} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`pbed st-${sk}` + (overstay ? " overstay" : "") + (onClick ? " tap" : "")}
@@ -838,26 +880,10 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
         <span className={`pbadge ${sk}`}>{STATE_LABEL(bed.physical_status, bed.reservation_status)}</span>
       </div>
       {dimmed && <div className="pbed-type">Non-operational</div>}
-      {/* A vacant bed that will not take a patient looks like a bug unless the
-          card says why. The count still reads this bed as vacant — the badge is
-          how a nurse learns it is a few minutes away rather than available. */}
-      {bed.housekeeping_status && (
-        <div style={{ marginTop: 4 }}>
-          <span className="hk-badge">
-            <Ic d={icons.refresh} s={10} />
-            {bed.housekeeping_status === "IN_PROGRESS" ? "Cleaning now" : "Awaiting cleaning"}
-          </span>
-        </div>
-      )}
 
-      {/* Labeled rows — every value says what it is. Sequence: IP, Doctor, Dept,
-          Payer, Type, then Discharge only once it's actually started (not just
-          planned — see dischargeStarted below). */}
       {occupied && bed.ip_last6 && (
         <div className="pbed-kv"><span className="pk">IP</span><span className="pv" title={bed.ip_last6}>{bed.ip_last6}</span></div>
       )}
-      {/* Discharge Lounge only — where the patient physically came from, since
-          this card's own ward is always just "Discharge Lounge". */}
       {occupied && bed.bed_type === "Lounge" && bed.origin_ward_name && (
         <div className="pbed-kv"><span className="pk">From Ward</span><span className="pv" title={bed.origin_ward_name}>{bed.origin_ward_name}</span></div>
       )}
@@ -886,8 +912,6 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
         <div className="pbed-kv"><span className="pk">Held for</span><span className="pv" style={{ color: "var(--st-vr)" }} title={bed.reservation_note}>{bed.reservation_note}</span></div>
       )}
 
-      {/* Nothing else to report — fill the middle with the status icon so all cards
-          keep the same height instead of collapsing into short empty boxes. */}
       {!hasRows && (
         <div className="pbed-idle">
           <span className="ring" style={{ background: bg, color }}><Ic d={icons.bed} s={20} /></span>
@@ -1807,7 +1831,7 @@ export function BedDetailSheet({ bed, onSave, onClose, onChanged, cfg = PRE_CFG,
           ) : (
             <div style={{ display: "flex", gap: 10 }}>
               {[["VACANT", "var(--st-v)", "Vacant"], ["OCCUPIED", "var(--st-o)", "Occupied"]].map(([val, c, lbl]) => {
-                const vacantDisabled = val === "VACANT" && bed.physical_status === "OCCUPIED";
+                const vacantDisabled = (val === "VACANT" && bed.physical_status === "OCCUPIED") || (val === "OCCUPIED" && !!bed.housekeeping_status);
                 return (
                   <button key={val} disabled={vacantDisabled} onClick={() => !vacantDisabled && handleSetPhysical(val)} style={{
                     flex: 1, padding: "13px 0", borderRadius: 12, fontSize: 14.5, fontWeight: 700,

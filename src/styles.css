@@ -57,9 +57,9 @@
   --radius:12px; --radius-sm:8px;
 
   /* Bed status colors — Vacant / Vacant+Reserved / Occupied / Occupied+Reserved */
-  --st-v:#22C55E; --st-vr:#3B82F6; --st-o:#F97316; --st-or:#EF4444;
+  --st-v:#22C55E; --st-vr:#3B82F6; --st-o:#F97316; --st-or:#EF4444; --st-clean:#6366F1;
   --st-v-bg:rgba(34,197,94,.12); --st-vr-bg:rgba(59,130,246,.12);
-  --st-o-bg:rgba(249,115,22,.12); --st-or-bg:rgba(239,68,68,.12);
+  --st-o-bg:rgba(249,115,22,.12); --st-or-bg:rgba(239,68,68,.12); --st-clean-bg:rgba(99,102,241,.12);
 
   /* App shell */
   --sb-bg:#0F2744; --sb-ink:#ffffff; --sb-muted:#8FA3BD;
@@ -97,8 +97,8 @@
   --shadow:0 1px 2px rgba(15,23,42,.04);
   --shadow-md:0 4px 12px rgba(15,23,42,.08),0 2px 4px rgba(15,23,42,.05);
 
-  --st-v:#16A34A; --st-vr:#2563EB; --st-o:#EA580C; --st-or:#DC2626;
-  --st-v-bg:#F0FDF4; --st-vr-bg:#EFF6FF; --st-o-bg:#FFF7ED; --st-or-bg:#FEF2F2;
+  --st-v:#16A34A; --st-vr:#2563EB; --st-o:#EA580C; --st-or:#DC2626; --st-clean:#4F46E5;
+  --st-v-bg:#F0FDF4; --st-vr-bg:#EFF6FF; --st-o-bg:#FFF7ED; --st-or-bg:#FEF2F2; --st-clean-bg:#EEF2FF;
 
   --primary:#2563EB; --primary-deep:#1D4ED8;
 }
@@ -122,8 +122,8 @@
   --shadow:0 1px 2px rgba(30,27,75,.05);
   --shadow-md:0 4px 12px rgba(30,27,75,.10),0 2px 4px rgba(30,27,75,.06);
 
-  --st-v:#16A34A; --st-vr:#2563EB; --st-o:#EA580C; --st-or:#DC2626;
-  --st-v-bg:#F0FDF4; --st-vr-bg:#EFF6FF; --st-o-bg:#FFF7ED; --st-or-bg:#FEF2F2;
+  --st-v:#16A34A; --st-vr:#2563EB; --st-o:#EA580C; --st-or:#DC2626; --st-clean:#4F46E5;
+  --st-v-bg:#F0FDF4; --st-vr-bg:#EFF6FF; --st-o-bg:#FFF7ED; --st-or-bg:#FEF2F2; --st-clean-bg:#EEF2FF;
 
   --sb-bg:#2E1065; --sb-active:#7C3AED;
   --primary:#7C3AED; --primary-deep:#5B21B6;
@@ -148,8 +148,8 @@
   --shadow:0 1px 2px rgba(15,42,42,.05);
   --shadow-md:0 4px 12px rgba(15,42,42,.10),0 2px 4px rgba(15,42,42,.06);
 
-  --st-v:#16A34A; --st-vr:#2563EB; --st-o:#EA580C; --st-or:#DC2626;
-  --st-v-bg:#F0FDF4; --st-vr-bg:#EFF6FF; --st-o-bg:#FFF7ED; --st-or-bg:#FEF2F2;
+  --st-v:#16A34A; --st-vr:#2563EB; --st-o:#EA580C; --st-or:#DC2626; --st-clean:#4F46E5;
+  --st-v-bg:#F0FDF4; --st-vr-bg:#EFF6FF; --st-o-bg:#FFF7ED; --st-or-bg:#FEF2F2; --st-clean-bg:#EEF2FF;
 
   --sb-bg:#042F2E; --sb-active:#14B8A6;
   --primary:#14B8A6; --primary-deep:#0D9488;
@@ -517,9 +517,7 @@ body.hero-gone .appbar{
 .ward-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:11px;box-shadow:var(--shadow);}
 
 /* Responsive ward/card grid — single column mobile, multi-column up */
-.card-grid{display:grid;grid-template-columns:1fr;gap:12px;}
-@media (min-width:768px){.card-grid{grid-template-columns:repeat(2,1fr);}}
-@media (min-width:1280px){.card-grid{grid-template-columns:repeat(3,1fr);}}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,400px));gap:14px;}
 .card-grid > .ward-card{margin-bottom:0;}
 
 /* ── Bed tiles ────────────────────────────────────────────────────────────── */
@@ -1825,11 +1823,11 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 .preui .stat .l{font-size:11px;letter-spacing:.06em;}
 
 /* — Ward cards — lift on hover, primary accent, smooth everything — */
-.preui .ward-card{
+.ward-card{
   border-radius:14px;padding:16px;
   transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
 }
-.preui .ward-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+.ward-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
 .preui .card-grid{gap:14px;}
 @media (min-width:760px){.preui .card-grid{grid-template-columns:repeat(2,1fr);}}
 @media (min-width:1240px){.preui .card-grid{grid-template-columns:repeat(3,1fr);}}
@@ -1875,68 +1873,67 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 
 /* — PRE bed cards v2 — richer tiles per the approved mock: status badge, payer chip,
      inline discharge progress. Replaces the compact .bed-tile grid for PRE only. — */
-.preui .pbed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
-@media (max-width:420px){.preui .pbed-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));}}
-.preui .pbed{
+.pbed-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+@media (max-width:420px){.pbed-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));}}
+.pbed{
   display:flex;flex-direction:column;gap:6px;min-height:126px;
   background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 12px;
   box-shadow:var(--shadow);text-align:left;
   transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease;
 }
-.preui .pbed.tap{cursor:pointer;}
-.preui .pbed.tap:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
-.preui .pbed.tap:active{transform:scale(.98);}
-.preui .pbed.tap:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
-.preui .pbed.st-v{border-color:color-mix(in srgb,var(--st-v) 45%,var(--line));}
-.preui .pbed.st-vr{border-color:color-mix(in srgb,var(--st-vr) 45%,var(--line));}
-.preui .pbed.st-o{border-color:color-mix(in srgb,var(--st-o) 45%,var(--line));}
-.preui .pbed.st-or{border-color:color-mix(in srgb,var(--st-or) 45%,var(--line));}
-/* Overstay — System Checkout done, patient hasn't physically left. Wins over the
-   plain st-o border since it needs to read as distinctly different at a glance. */
-.preui .pbed.overstay{border-color:var(--amber);border-width:2px;background:var(--amber-bg);}
-.preui .pbed-overstay-tag{
+.pbed.tap{cursor:pointer;}
+.pbed.tap:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+.pbed.tap:active{transform:scale(.98);}
+.pbed.tap:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.pbed.st-v{border-color:color-mix(in srgb,var(--st-v) 45%,var(--line));}
+.pbed.st-vr{border-color:color-mix(in srgb,var(--st-vr) 45%,var(--line));}
+.pbed.st-o{border-color:color-mix(in srgb,var(--st-o) 45%,var(--line));}
+.pbed.st-or{border-color:color-mix(in srgb,var(--st-or) 45%,var(--line));}
+.pbed.overstay{border-color:var(--amber);border-width:2px;background:var(--amber-bg);}
+.pbed-overstay-tag{
   display:flex;align-items:center;gap:4px;
   font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
   color:#1a1206;background:var(--amber);
   padding:4px 8px;border-radius:8px 8px 0 0;
   margin:-11px -12px 6px -12px;
 }
-.preui .pbed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
-.preui .pbed-name{font-size:15px;font-weight:800;letter-spacing:-.01em;line-height:1.2;word-break:break-word;}
-.preui .pbed-type{font-size:11px;color:var(--ink-2);font-weight:500;margin-top:-4px;}
-.preui .pbadge{
+.pbed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+.pbed-name{font-size:15px;font-weight:800;letter-spacing:-.01em;line-height:1.2;word-break:break-word;}
+.pbed-type{font-size:11px;color:var(--ink-2);font-weight:500;margin-top:-4px;}
+.pbadge{
   display:inline-flex;align-items:center;font-size:9.5px;font-weight:800;letter-spacing:.05em;
   padding:3px 8px;border-radius:999px;white-space:nowrap;flex-shrink:0;
 }
-.preui .pbadge.v{background:var(--st-v-bg);color:var(--st-v);border:1px solid color-mix(in srgb,var(--st-v) 35%,transparent);}
-.preui .pbadge.vr{background:var(--st-vr-bg);color:var(--st-vr);border:1px solid color-mix(in srgb,var(--st-vr) 35%,transparent);}
-.preui .pbadge.o{background:var(--st-o-bg);color:var(--st-o);border:1px solid color-mix(in srgb,var(--st-o) 35%,transparent);}
-.preui .pbadge.or{background:var(--st-or-bg);color:var(--st-or);border:1px solid color-mix(in srgb,var(--st-or) 35%,transparent);}
-.preui .pbed-chip{
+.pbadge.v{background:var(--st-v-bg);color:var(--st-v);border:1px solid color-mix(in srgb,var(--st-v) 35%,transparent);}
+.pbadge.vr{background:var(--st-vr-bg);color:var(--st-vr);border:1px solid color-mix(in srgb,var(--st-vr) 35%,transparent);}
+.pbadge.clean{background:var(--st-clean-bg);color:var(--st-clean);border:1px solid color-mix(in srgb,var(--st-clean) 35%,transparent);}
+.pbadge.o{background:var(--st-o-bg);color:var(--st-o);border:1px solid color-mix(in srgb,var(--st-o) 35%,transparent);}
+.pbadge.or{background:var(--st-or-bg);color:var(--st-or);border:1px solid color-mix(in srgb,var(--st-or) 35%,transparent);}
+.pbed-chip{
   display:inline-flex;align-items:center;gap:5px;align-self:flex-start;max-width:100%;
   font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:7px;
   background:var(--st-o-bg);color:var(--st-o);border:1px solid color-mix(in srgb,var(--st-o) 30%,transparent);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.preui .pbed-idle{
+.pbed-idle{
   flex:1;display:flex;align-items:center;justify-content:center;padding:6px 0;
 }
-.preui .pbed-idle .ring{
+.pbed-idle .ring{
   width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;
 }
-.preui .pbed-disch{
+.pbed-disch{
   background:var(--st-vr-bg);border:1px solid color-mix(in srgb,var(--st-vr) 25%,transparent);
   border-radius:10px;padding:9px 11px;
 }
-.preui .pbed-disch .t{font-size:10px;font-weight:800;letter-spacing:.05em;color:var(--st-vr);}
-.preui .pbed-disch .s{font-size:11px;color:var(--ink-2);font-weight:600;margin-top:2px;}
-.preui .pbar{height:5px;border-radius:99px;background:color-mix(in srgb,var(--st-vr) 15%,transparent);margin-top:7px;overflow:hidden;}
-.preui .pbar > span{display:block;height:100%;border-radius:99px;background:var(--st-vr);transition:width .3s ease;}
-.preui .pbed-foot{
+.pbed-disch .t{font-size:10px;font-weight:800;letter-spacing:.05em;color:var(--st-vr);}
+.pbed-disch .s{font-size:11px;color:var(--ink-2);font-weight:600;margin-top:2px;}
+.pbar{height:5px;border-radius:99px;background:color-mix(in srgb,var(--st-vr) 15%,transparent);margin-top:7px;overflow:hidden;}
+.pbar > span{display:block;height:100%;border-radius:99px;background:var(--st-vr);transition:width .3s ease;}
+.pbed-foot{
   display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:auto;
   font-size:10.5px;color:var(--ink-3);font-weight:500;
 }
-.preui .pbed-note{font-size:10.5px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pbed-note{font-size:10.5px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* — PRE bed detail dialog v2 — two-column ≥760px, stacked on mobile — */
 .preui .pdlg-sect{font-size:10.5px;font-weight:800;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px;}
@@ -1972,23 +1969,22 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
   .preui .wsum-item:nth-child(4){border-top:1px solid var(--line);}
 }
 
-/* — Back button — rounded card square + label, one design for every PRE screen — */
-.preui .pback{
+/* — Back button — rounded card square + label, reused across apps — */
+.pback{
   display:inline-flex;align-items:center;gap:11px;
-  font-weight:700;font-size:14.5px;color:var(--ink);
+  font-weight:700;font-size:15.5px;color:var(--ink);font-family:inherit;
   background:none;border:none;padding:0;cursor:pointer;
 }
-.preui .pback{font-size:15.5px;}
-.preui .pback .bx{
+.pback .bx{
   width:46px;height:46px;border-radius:13px;flex-shrink:0;
   background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);
   display:flex;align-items:center;justify-content:center;color:var(--ink);
   transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease,color .15s ease;
 }
-.preui .pback:hover .bx{transform:translateX(-2px);box-shadow:var(--shadow-md);border-color:var(--primary);color:var(--primary);}
-.preui .pback:active .bx{transform:scale(.94);}
-.preui .pback:focus-visible{outline:none;}
-.preui .pback:focus-visible .bx{outline:2px solid var(--primary);outline-offset:2px;}
+.pback:hover .bx{transform:translateX(-2px);box-shadow:var(--shadow-md);border-color:var(--primary);color:var(--primary);}
+.pback:active .bx{transform:scale(.94);}
+.pback:focus-visible{outline:none;}
+.pback:focus-visible .bx{outline:2px solid var(--primary);outline-offset:2px;}
 
 /* — Mobile top bar (PRE) — the standalone theme toggle moves into the profile
      dropdown (portal from PREApp), and the time pill drops its date line so the
@@ -2007,12 +2003,12 @@ html:not([data-theme]) .kc-sub{color:#96a3ba;}
 
 /* — Labeled key→value rows inside bed cards — every datum says what it is,
      so staff don't have to guess what a bare chip like "Cash" means. — */
-.preui .pbed-kv{
+.pbed-kv{
   display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
   font-size:11px;line-height:1.4;
 }
-.preui .pbed-kv .pk{color:var(--ink-3);font-weight:600;flex-shrink:0;}
-.preui .pbed-kv .pv{
+.pbed-kv .pk{color:var(--ink-3);font-weight:600;flex-shrink:0;}
+.pbed-kv .pv{
   font-weight:700;color:var(--ink);text-align:right;min-width:0;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
@@ -2547,110 +2543,88 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
      Read one-handed in a corridor. Overdue tints the whole bed rather than an
      edge, because an edge is missable at arm's length. — */
 
-/* Figures, in the order a cleaner cares: what is waiting, what is late, how
-   long they have. */
-.hk-strip{
-  display:flex;align-items:stretch;gap:0;margin-bottom:14px;
-  background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  box-shadow:var(--shadow);overflow:hidden;
-}
-.hk-fig{flex:1;padding:12px 14px;display:flex;flex-direction:column;gap:1px;}
-.hk-fig + .hk-fig{border-left:1px solid var(--line);}
-.hk-fig b{font-size:23px;font-weight:800;letter-spacing:-.02em;line-height:1.1;font-variant-numeric:tabular-nums;}
-.hk-fig b em{font-style:normal;font-size:13px;font-weight:700;color:var(--ink-3);margin-left:1px;}
-.hk-fig i{font-style:normal;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);}
-.hk-fig.is-bad b{color:var(--red);}
+/* Housekeeping bed-card action buttons — reuses .btn sizing but flex-fills. */
+.hk-bed-act{display:flex;gap:8px;margin-top:auto;flex-wrap:wrap;}
+.hk-bed-act .btn{flex:1 1 88px;padding:9px 0;font-size:13px;}
 
-/* Sticky, because the list runs long and the filters must stay in thumb reach. */
-.hk-filters{
-  position:sticky;top:0;z-index:3;display:flex;gap:7px;
-  padding:8px 0 10px;margin-bottom:2px;background:var(--bg);
-  overflow-x:auto;scrollbar-width:none;
+.hkc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+@media(max-width:359px){.hkc-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}}
+@media(max-width:599px){
+  .appbar-hidden-mobile{display:none;}
+  .hkc{padding:11px 12px;border-radius:12px;}
+  .hkc-head{gap:6px;margin-bottom:10px;}
+  .hkc-title{font-size:.9rem;}
+  .hkc-head .pbadge{font-size:9px;padding:2px 6px;}
+  .hkc-details{gap:5px;margin-bottom:10px;}
+  .hkc-row{font-size:.75rem;}
+  .hkc-actions{gap:6px;margin-bottom:10px;}
+  .hkc-btn{height:32px;font-size:.78rem;border-radius:8px;}
+  .hkc-foot{font-size:.65rem;}
 }
-.hk-filters::-webkit-scrollbar{display:none;}
-.hk-chip{
-  flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;white-space:nowrap;cursor:pointer;
-  padding:8px 13px;border-radius:99px;font-size:12.5px;font-weight:700;font-family:inherit;
-  background:var(--panel);border:1px solid var(--line);color:var(--ink-2);transition:.15s;
+.hkc-filters{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;padding:2px 0;margin-bottom:14px;-webkit-overflow-scrolling:touch;}
+.hkc-filters::-webkit-scrollbar{display:none;}
+.hkc-filters-inline{flex:0 0 auto;margin-bottom:0;}
+@media (max-width:560px){.hkc-filters-inline{flex:1 1 100%;width:100%;}}
+.hkc-pill{flex-shrink:0;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink-3);cursor:pointer;white-space:nowrap;transition:all .15s;}
+.hkc-pill.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.hkc-pill .pill-n{margin-left:4px;opacity:.7;}
+.hkc{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 12px;
+  box-shadow:var(--shadow);text-align:left;
+  transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease;
+  display:flex;flex-direction:column;min-width:0;
 }
-.hk-chip span{
-  font-size:11px;font-weight:800;color:var(--ink-3);
-  background:var(--panel-2);border-radius:99px;padding:1px 7px;min-width:20px;text-align:center;
+.hkc:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
+.hkc:active{transform:scale(.98);}
+.hkc.st-v{border-color:color-mix(in srgb,var(--st-v) 45%,var(--line));}
+.hkc.st-vr{border-color:color-mix(in srgb,var(--st-vr) 45%,var(--line));}
+.hkc.st-clean{border-color:color-mix(in srgb,var(--st-clean) 45%,var(--line));}
+.hkc.st-o{border-color:color-mix(in srgb,var(--st-o) 45%,var(--line));}
+.hkc.st-or{border-color:color-mix(in srgb,var(--st-or) 45%,var(--line));}
+.hkc-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px;}
+.hkc-title{font-size:1rem;font-weight:700;color:var(--ink);line-height:1.2;letter-spacing:-.02em;word-break:break-word;min-width:0;}
+.hkc-head .pbadge{flex-shrink:0;}
+.hkc-details{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;}
+.hkc-row{display:flex;justify-content:space-between;align-items:center;font-size:.75rem;min-width:0;}
+.hkc-label{color:var(--ink-3);font-weight:500;flex-shrink:0;}
+.hkc-val{color:var(--ink);font-weight:600;font-feature-settings:'tnum' on,'lnum' on;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:55%;text-align:right;}
+.hkc-val.hkc-urgent{color:var(--red);font-weight:700;}
+.hkc-actions{display:flex;flex-direction:column;gap:6px;margin-top:auto;padding-top:10px;}
+.hkc-btn{
+  width:100%;height:34px;border-radius:9px;font-size:.8rem;font-weight:600;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  transition:all .15s ease-in-out;outline:none;border:none;
 }
-.hk-chip:hover{color:var(--ink);}
-.hk-chip.is-on{background:var(--primary);border-color:var(--primary);color:#fff;}
-.hk-chip.is-on span{background:rgba(255,255,255,.22);color:#fff;}
-.hk-chip.is-bad{color:var(--red);border-color:var(--red);}
-.hk-chip.is-bad.is-on{background:var(--red);border-color:var(--red);color:#fff;}
+.hkc-btn-sec{background:var(--panel);border:1px solid var(--line);color:var(--ink);box-shadow:0 1px 2px 0 rgba(0,0,0,.04);}
+.hkc-btn-sec:hover{background:var(--bg);border-color:var(--ink-3);}
+.hkc-btn-sec:active{transform:scale(.99);}
+.hkc-btn-pri{background:var(--primary);border:1px solid transparent;color:#fff;box-shadow:0 1px 2px rgba(37,99,235,.2),0 2px 4px rgba(37,99,235,.15);}
+.hkc-btn-pri:hover{filter:brightness(.9);box-shadow:0 2px 6px rgba(37,99,235,.3);}
+.hkc-btn-pri:active{transform:scale(.99);}
+.hkc-btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none;}
+.hkc-foot{display:flex;align-items:center;justify-content:center;gap:4px;font-size:10.5px;font-weight:500;color:var(--ink-3);margin-top:auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;}
+.hkc-foot span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
-/* Level 1 — the zone. */
-.hk-zone{
-  background:var(--panel);border:1px solid var(--line);border-radius:16px;
-  box-shadow:var(--shadow);margin-bottom:14px;padding:6px 14px 14px;
-}
-.hk-zone-top{display:flex;align-items:center;gap:10px;padding:12px 0 4px;}
-.hk-zone-mark{
-  width:32px;height:32px;border-radius:10px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;
-  background:var(--primary);color:#fff;font-size:15px;font-weight:800;
-}
-.hk-zone-name{font-size:16px;font-weight:800;letter-spacing:-.02em;margin:0;flex:1;min-width:0;}
-.hk-tag{
-  flex-shrink:0;font-size:10.5px;font-weight:800;letter-spacing:.02em;
-  padding:3px 9px;border-radius:99px;background:var(--panel-2);color:var(--ink-2);
-}
-.hk-tag.is-bad{background:var(--red);color:#fff;}
-.hk-zone-clear{margin:6px 0 4px;font-size:12.5px;font-weight:600;color:var(--st-v);}
-
-/* Level 2 — the ward. Deliberately NOT a card: a ruled band, so the eye reads
-   it as a divider between groups rather than a third box. */
-.hk-ward{padding-top:12px;margin-top:10px;border-top:1px solid var(--line);}
-.hk-ward-top{display:flex;align-items:center;gap:8px;margin-bottom:9px;}
-.hk-ward-name{
-  font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;
-  color:var(--ink-3);margin:0;
-}
-
-/* Level 3 — the bed. The only thing that looks pressable. */
-.hk-beds{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:9px;}
-.hk-bed{
-  background:var(--panel-2);border:1px solid var(--line);border-radius:12px;
-  padding:11px 12px;display:flex;flex-direction:column;gap:5px;
-  border-left:4px solid var(--st-o);
-}
-.hk-bed.is-doing{border-left-color:var(--primary);}
-.hk-bed.is-over{border-left-color:var(--red);background:var(--red-bg);border-color:var(--red);}
-.hk-bed.is-idle{border-left-color:var(--line);opacity:.72;}
-.hk-bed-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
-.hk-bed-id{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:0;}
-.hk-bed-age{
-  font-size:11px;font-weight:800;color:var(--ink-3);font-variant-numeric:tabular-nums;flex-shrink:0;
-}
-.hk-bed.is-over .hk-bed-age{color:var(--red);}
-.hk-bed.is-doing .hk-bed-age{color:var(--primary);}
-.hk-bed-line{margin:0;font-size:11.5px;color:var(--ink-2);line-height:1.35;}
-.hk-bed-line b{color:var(--primary);}
-.hk-bed-flag{margin:0;font-size:11px;font-weight:700;color:var(--red);}
-.hk-bed-act{display:flex;gap:7px;margin-top:4px;}
-
-/* 44px minimum — tapped with a thumb, often gloved. */
-.hk-b{
-  flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;
-  min-height:44px;padding:0 12px;border-radius:10px;border:1px solid transparent;
-  font-size:13.5px;font-weight:700;font-family:inherit;cursor:pointer;transition:.15s;
-}
-.hk-b:disabled{opacity:.5;cursor:default;}
-.hk-b-main{background:var(--primary);color:#fff;}
-.hk-b-main:hover:not(:disabled){background:var(--primary-deep);}
-.hk-b-alt{background:var(--panel);color:var(--ink);border-color:var(--line);flex:0 0 80px;}
-.hk-b-alt:hover:not(:disabled){background:var(--panel-2);}
-.hk-b:active:not(:disabled){transform:scale(.97);}
-
-@media (max-width:520px){
-  .hk-zone{padding:4px 11px 12px;}
-  .hk-beds{grid-template-columns:1fr;}
-  .hk-fig b{font-size:20px;}
-}
+.hk-illo-in{opacity:0;transform:scale(.94);transform-box:view-box;transform-origin:220px 230px;animation:hk-pop .9s cubic-bezier(.22,1,.36,1) .05s forwards;}
+@keyframes hk-pop{to{opacity:1;transform:scale(1)}}
+.hk-float{transform-box:view-box;transform-origin:220px 230px;animation:hk-float 5.5s ease-in-out infinite;}
+@keyframes hk-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.hk-clipboard{transform-box:view-box;transform-origin:220px 210px;animation:hk-bob 5.5s ease-in-out infinite;}
+@keyframes hk-bob{0%,100%{transform:translateY(0) rotate(0deg)}50%{transform:translateY(-4px) rotate(-.6deg)}}
+.hk-bucket{transform-box:view-box;transform-origin:300px 250px;animation:hk-bbob 5.5s ease-in-out infinite;}
+@keyframes hk-bbob{0%,100%{transform:translateY(0)}50%{transform:translateY(4px)}}
+.hk-eyes{transform-box:fill-box;transform-origin:center;animation:hk-blink 5.2s infinite;}
+@keyframes hk-blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.12)}97%{transform:scaleY(1)}}
+.hk-spark{transform-box:fill-box;transform-origin:center;}
+.hk-spark-a{animation:hk-twinkle 3.2s ease-in-out infinite;}
+.hk-spark-b{animation:hk-twinkle 2.6s ease-in-out 1.4s infinite;}
+.hk-spark-c{animation:hk-twinkle 3.2s ease-in-out .9s infinite;}
+@keyframes hk-twinkle{0%,100%{transform:scale(.7);opacity:.55}50%{transform:scale(1.1);opacity:1}}
+.hk-leaves{transform-box:view-box;transform-origin:168px 290px;animation:hk-sway 6s ease-in-out infinite;}
+@keyframes hk-sway{0%,100%{transform:rotate(-2.5deg)}50%{transform:rotate(2.5deg)}}
+.hk-orbit{stroke-dasharray:5 9;animation:hk-dashmove 14s linear infinite;}
+@keyframes hk-dashmove{to{stroke-dashoffset:-140}}
+@media(prefers-reduced-motion:reduce){.hk-illo-in,.hk-float,.hk-clipboard,.hk-bucket,.hk-eyes,.hk-spark-a,.hk-spark-b,.hk-spark-c,.hk-leaves,.hk-orbit{animation:none;opacity:1;transform:none;}}
 
 /* Badge on ordinary bed cards elsewhere, so a nurse can see why a vacant bed
    will not take a patient. The counts still read it as vacant. */
@@ -2826,7 +2800,7 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 
 /* ── Bed tile grid — minimum 3 per row on narrow phones ─────────────────── */
 @media(max-width:359px){
-  .preui .pbed-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
+  .pbed-grid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));}
 }
 
 /* ── Stat grid — ensure 2-col fits on 320px ─────────────────────────────── */

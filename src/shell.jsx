@@ -41,7 +41,7 @@ export function useSidebarState() { return useContext(SidebarStateContext); }
  *    down the tree can inject content into it via useProfileMenuSlot() +
  *    createPortal — used by the admin dashboard for its layout controls.
  */
-export function AppShell({ menu, active, onSelect, title, user, onLogout, topExtra, children }) {
+export function AppShell({ menu, active, onSelect, title, user, onLogout, topExtra, hideAppbar, children }) {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem("sb_collapsed") === "1"
   );
@@ -177,7 +177,7 @@ export function AppShell({ menu, active, onSelect, title, user, onLogout, topExt
 
       {/* Main column */}
       <div className="shell-main">
-        <header className="appbar">
+        <header className={"appbar" + (hideAppbar ? " appbar-hidden-mobile" : "")}>
           <button className="appbar-btn" onClick={toggle} aria-label="Toggle navigation">
             <Ic d={icons.menu} s={20} />
           </button>
