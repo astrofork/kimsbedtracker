@@ -950,6 +950,8 @@ body.hero-gone .appbar{
   color:var(--ink-3);background:var(--panel-2);
   border-bottom:1px solid var(--line);white-space:nowrap;
 }
+.mp2-tbl th:nth-child(2),.mp2-tbl th:nth-child(3),
+.mp2-tbl td:nth-child(2),.mp2-tbl td:nth-child(3){text-align:center;}
 .mp2-th-arr{width:36px;padding:0 8px !important;}
 .mp2-tbl tbody tr{cursor:pointer;transition:background .08s;}
 .mp2-tbl tbody tr:hover{background:color-mix(in srgb,var(--primary) 5%,var(--panel));}
