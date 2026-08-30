@@ -823,36 +823,34 @@ body.hero-gone .appbar{
 /* ── Consultant "My Patients" page — redesign v2 ─────────────────────
    All mp2-* classes are scoped to this page only; no shared class is touched. */
 
-/* KPI cards — three distinct-colored cards with a faint icon watermark */
+/* KPI cards — compact row: circle icon | number+label | sparkline */
 .mp2-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;}
 @media (max-width:560px){.mp2-kpis{grid-template-columns:1fr;}}
 .mp2-kpi{
-  position:relative;overflow:hidden;
-  padding:16px 18px;border-radius:10px;
+  display:flex;align-items:center;gap:12px;
+  padding:14px 16px;border-radius:12px;overflow:hidden;
   border:1px solid var(--line);background:var(--panel);
 }
-.mp2-kpi-icon{
-  position:absolute;right:12px;top:50%;transform:translateY(-50%);
-  opacity:.08;pointer-events:none;
+.mp2-kpi-ico{
+  width:38px;height:38px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
 }
-.mp2-kpi-icon svg{width:40px;height:40px;}
-.mp2-kpi-val{font-size:26px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
-.mp2-kpi-lbl{font-size:11.5px;font-weight:600;margin-top:6px;letter-spacing:.01em;}
+.mp2-kpi-body{flex:1;min-width:0;}
+.mp2-kpi-val{font-size:22px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;}
+.mp2-kpi-lbl{font-size:11px;font-weight:600;margin-top:3px;color:var(--ink-3);}
+.mp2-kpi-spark{width:56px;height:24px;flex-shrink:0;opacity:.35;}
 
-.mp2-kpi-green{border-left:3px solid var(--st-v);}
-.mp2-kpi-green .mp2-kpi-val{color:var(--st-v);}
-.mp2-kpi-green .mp2-kpi-lbl{color:var(--ink-2);}
-.mp2-kpi-green .mp2-kpi-icon{color:var(--st-v);}
+.mp2-kpi-green .mp2-kpi-ico{background:color-mix(in srgb,var(--st-v) 14%,transparent);color:var(--st-v);}
+.mp2-kpi-green .mp2-kpi-val{color:var(--ink);}
+.mp2-kpi-green .mp2-kpi-spark{color:var(--st-v);}
 
-.mp2-kpi-purple{border-left:3px solid #8b5cf6;}
-.mp2-kpi-purple .mp2-kpi-val{color:#8b5cf6;}
-.mp2-kpi-purple .mp2-kpi-lbl{color:var(--ink-2);}
-.mp2-kpi-purple .mp2-kpi-icon{color:#8b5cf6;}
+.mp2-kpi-purple .mp2-kpi-ico{background:color-mix(in srgb,#8b5cf6 14%,transparent);color:#8b5cf6;}
+.mp2-kpi-purple .mp2-kpi-val{color:var(--ink);}
+.mp2-kpi-purple .mp2-kpi-spark{color:#8b5cf6;}
 
-.mp2-kpi-orange{border-left:3px solid var(--st-o);}
-.mp2-kpi-orange .mp2-kpi-val{color:var(--st-o);}
-.mp2-kpi-orange .mp2-kpi-lbl{color:var(--ink-2);}
-.mp2-kpi-orange .mp2-kpi-icon{color:var(--st-o);}
+.mp2-kpi-orange .mp2-kpi-ico{background:color-mix(in srgb,var(--st-o) 14%,transparent);color:var(--st-o);}
+.mp2-kpi-orange .mp2-kpi-val{color:var(--ink);}
+.mp2-kpi-orange .mp2-kpi-spark{color:var(--st-o);}
 
 /* Toolbar — search + sort + view toggle */
 .mp2-bar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;}

@@ -256,19 +256,28 @@ function MyPatientsPage() {
           {/* ── KPI cards ── */}
           <div className="mp2-kpis">
             <div className="mp2-kpi mp2-kpi-green">
-              <div className="mp2-kpi-icon"><Ic d={icons.users} s={18} /></div>
-              <div className="mp2-kpi-val">{totalPatientsCount}</div>
-              <div className="mp2-kpi-lbl">Total Patients</div>
+              <div className="mp2-kpi-ico"><Ic d={icons.users} s={16} /></div>
+              <div className="mp2-kpi-body">
+                <div className="mp2-kpi-val">{totalPatientsCount}</div>
+                <div className="mp2-kpi-lbl">Total Patients</div>
+              </div>
+              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d="M0 22c8-6 16 4 24-2s16-14 24-8 16 10 16 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </div>
             <div className="mp2-kpi mp2-kpi-purple">
-              <div className="mp2-kpi-icon"><Ic d={icons.exchange} s={18} /></div>
-              <div className="mp2-kpi-val">{dischargeLoungeCount}</div>
-              <div className="mp2-kpi-lbl">Discharge Lounge</div>
+              <div className="mp2-kpi-ico"><Ic d={icons.exchange} s={16} /></div>
+              <div className="mp2-kpi-body">
+                <div className="mp2-kpi-val">{dischargeLoungeCount}</div>
+                <div className="mp2-kpi-lbl">Discharge Lounge</div>
+              </div>
+              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d="M0 14c6 8 14-4 22 6s14-10 22-4 20 8 20 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </div>
             <div className="mp2-kpi mp2-kpi-orange">
-              <div className="mp2-kpi-icon"><Ic d={icons.clock} s={18} /></div>
-              <div className="mp2-kpi-val">{dischargeTodayCount}</div>
-              <div className="mp2-kpi-lbl">Discharge Today</div>
+              <div className="mp2-kpi-ico"><Ic d={icons.clock} s={16} /></div>
+              <div className="mp2-kpi-body">
+                <div className="mp2-kpi-val">{dischargeTodayCount}</div>
+                <div className="mp2-kpi-lbl">Discharge Today</div>
+              </div>
+              <svg className="mp2-kpi-spark" viewBox="0 0 64 28" fill="none"><path d="M0 20c10-8 18 2 26-6s12 10 20 4 18-6 18-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </div>
           </div>
 
