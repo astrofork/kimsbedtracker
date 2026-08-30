@@ -13,7 +13,7 @@ import {
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
   DoctorBlockManager, DoctorManager, ConsultantManager,
   DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager, PayerTATManager,
-  SimpleLoginManager, PWO_LOGIN_TABS,
+  SimpleLoginManager, PWO_LOGIN_TABS, HousekeepingZoneManager,
 } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
@@ -269,6 +269,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "doctors", icon: icons.stethoscope, label: "DMO Users" },
         { key: "consultants", icon: icons.stethoscope, label: "Consultant Users" },
         { key: "fcpharmacy", icon: icons.list, label: "Finance & Pharmacy" },
+        { key: "hkzones", icon: icons.grid, label: "Housekeeping Zones" },
         { key: "welfare", icon: icons.shield, label: "Welfare Officers" },
       ]
     },
@@ -374,6 +375,7 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "doctors" && <DoctorManager showToast={showToast} />}
       {tab === "consultants" && <ConsultantManager showToast={showToast} />}
       {tab === "fcpharmacy" && <SimpleLoginManager showToast={showToast} />}
+      {tab === "hkzones" && <HousekeepingZoneManager showToast={showToast} />}
       {tab === "welfare" && (
         <SimpleLoginManager
           showToast={showToast}

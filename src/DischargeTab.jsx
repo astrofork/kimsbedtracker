@@ -403,12 +403,14 @@ export function TransferSection({ bed, onClose, onSaved, onConflict, submit, sub
   // blocking banner, not just a post-click error).
   const readmitBlocked = isReadmit && dischargeInProgress;
 
+  const [needsHk, setNeedsHk] = useState(true);
+
   async function doSubmit() {
     setSaving(true); setError("");
     try {
       const r = submit
         ? await submit(Number(toWardId), Number(toBedId), reason.trim())
-        : await api.transferBed(bed.id, Number(toWardId), Number(toBedId), reason.trim());
+        : await api.transferBed(bed.id, Number(toWardId), Number(toBedId), reason.trim(), needsHk);
       onSaved(r);
     } catch (e) {
       // 409 = someone else already changed this patient's bed/discharge state
@@ -479,6 +481,16 @@ export function TransferSection({ bed, onClose, onSaved, onConflict, submit, sub
         onChange={(e) => setReason(e.target.value)}
         style={{ resize: "vertical", fontSize: 13, fontFamily: "inherit", marginBottom: 2 }} />
       <div style={{ fontSize: 11, color: "var(--ink-3)", textAlign: "right", marginBottom: 8 }}>{reason.length}/50</div>
+      {/* Ticked by default — the safe answer is "clean it". Unticking is the one
+          way to skip a clean, so it is a deliberate action, not a default.
+          Readmitting from the lounge frees a lounge bed, which is virtual and
+          never cleaned, so the tick is pointless there. */}
+      {!isReadmit && (
+        <label className="hk-tick">
+          <input type="checkbox" checked={needsHk} onChange={(e) => setNeedsHk(e.target.checked)} />
+          <span>Bed needs housekeeping after this transfer</span>
+        </label>
+      )}
       {error && <div style={{ fontSize: 12, color: "var(--red)", marginBottom: 8 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
         <button className="btn btn-ghost" style={{ fontSize: 12, padding: "8px 14px" }} onClick={onClose}>Back</button>

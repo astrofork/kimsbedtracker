@@ -7473,3 +7473,169 @@ export function SimpleLoginManager({
     </div>
   );
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  HOUSEKEEPING ZONES
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** A zone is wards plus people, the same shape as a PRE Block. Managers and
+ *  staff share one roster — the role beside each name says which they are —
+ *  because both act on the same beds; a manager simply tends to cover more
+ *  zones and marks beds done on behalf of contracted staff who never sign in.
+ *  The Discharge Lounge is not offered: its beds are virtual. */
+export function HousekeepingZoneManager({ showToast }) {
+  const [data, setData] = React.useState(null);
+  const [editing, setEditing] = React.useState(null); // zone | {} for new | null
+  const [busy, setBusy] = React.useState(false);
+
+  const load = React.useCallback(() => {
+    api.hkAdminZones().then(setData).catch((e) => showToast(toastErr(e)));
+  }, [showToast]);
+  React.useEffect(() => { load(); }, [load]);
+
+  const save = async (draft) => {
+    if (!draft.name.trim()) { showToast("Zone name is required"); return; }
+    setBusy(true);
+    try {
+      await api.hkSaveZone(draft.id || null, {
+        name: draft.name.trim(),
+        wardIds: draft.wardIds,
+        userIds: draft.userIds,
+      });
+      showToast(draft.id ? "Zone updated" : "Zone created");
+      setEditing(null); load();
+    } catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (z) => {
+    setBusy(true);
+    try { await api.hkDeleteZone(z.id); showToast("Zone deleted"); load(); }
+    catch (e) { showToast(toastErr(e)); }
+    finally { setBusy(false); }
+  };
+
+  if (!data) return <div className="dim" style={{ padding: 20 }}>Loading…</div>;
+
+  return (
+    <div className="slide-up">
+      <div className="row between" style={{ marginBottom: 4, gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Housekeeping Zones</div>
+          <div className="dim" style={{ fontSize: 13 }}>
+            Group wards into zones, then put housekeeping staff and managers in them.
+            The Discharge Lounge is excluded — its beds are virtual.
+          </div>
+        </div>
+        <button className="btn btn-primary" style={{ fontSize: 13 }}
+          onClick={() => setEditing({ name: "", wardIds: [], userIds: [] })}>
+          <Ic d={icons.plus} s={15} /> New Zone
+        </button>
+      </div>
+
+      {data.zones.length === 0 && (
+        <div className="card empty" style={{ padding: 28, marginTop: 14 }}>
+          <Ic d={icons.grid} s={26} />
+          <div style={{ marginTop: 8, fontWeight: 700 }}>No zones yet</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            Housekeeping users see nothing until they are in a zone.
+          </div>
+        </div>
+      )}
+
+      <div className="card-grid" style={{ marginTop: 14 }}>
+        {data.zones.map((z) => (
+          <div key={z.id} className="card" style={{ padding: 16 }}>
+            <div className="row between" style={{ gap: 8 }}>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>{z.name}</div>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px" }}
+                  onClick={() => setEditing({ id: z.id, name: z.name,
+                    wardIds: z.wards.map((w) => w.id), userIds: z.users.map((u) => u.id) })}>Edit</button>
+                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px", color: "var(--red)" }}
+                  disabled={busy} onClick={() => remove(z)}>Delete</button>
+              </div>
+            </div>
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              {z.wards.length} ward{z.wards.length === 1 ? "" : "s"}, {z.users.length} {z.users.length === 1 ? "person" : "people"}
+            </div>
+            {z.wards.length > 0 && (
+              <div style={{ fontSize: 12, marginTop: 8, color: "var(--ink-2)" }}>
+                {z.wards.map((w) => w.name).join(", ")}
+              </div>
+            )}
+            {z.users.length > 0 && (
+              <div style={{ fontSize: 12, marginTop: 8 }}>
+                {z.users.map((u) => (
+                  <span key={u.id} className="chip" style={{ marginRight: 6, marginBottom: 4 }}>
+                    {u.name}{u.role === "HOUSEKEEPING_MANAGER" ? " (Manager)" : ""}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {editing && (
+        <ZoneEditor draft={editing} wards={data.wards} users={data.users} busy={busy}
+          onChange={setEditing} onSave={save} onClose={() => setEditing(null)} />
+      )}
+    </div>
+  );
+}
+
+function ZoneEditor({ draft, wards, users, busy, onChange, onSave, onClose }) {
+  useModal(onClose);
+  const toggle = (key, id) => onChange({
+    ...draft,
+    [key]: draft[key].includes(id) ? draft[key].filter((x) => x !== id) : [...draft[key], id],
+  });
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12 }}>
+          {draft.id ? "Edit Zone" : "New Zone"}
+        </div>
+        <label className="label">Zone name</label>
+        <input className="field" value={draft.name} maxLength={120} placeholder="e.g. Building A — Floors 1-3"
+          onChange={(e) => onChange({ ...draft, name: e.target.value })} style={{ marginBottom: 14 }} />
+
+        <label className="label">Wards ({draft.wardIds.length})</label>
+        <div className="hk-picker">
+          {wards.map((w) => (
+            <label key={w.id} className={"hk-pick" + (draft.wardIds.includes(w.id) ? " on" : "")}>
+              <input type="checkbox" checked={draft.wardIds.includes(w.id)}
+                onChange={() => toggle("wardIds", w.id)} />
+              <span>{w.name}</span>
+            </label>
+          ))}
+        </div>
+
+        <label className="label" style={{ marginTop: 14 }}>People ({draft.userIds.length})</label>
+        {users.length === 0 ? (
+          <div className="dim" style={{ fontSize: 12 }}>
+            No housekeeping logins yet — create them under Users first.
+          </div>
+        ) : (
+          <div className="hk-picker">
+            {users.map((u) => (
+              <label key={u.id} className={"hk-pick" + (draft.userIds.includes(u.id) ? " on" : "")}>
+                <input type="checkbox" checked={draft.userIds.includes(u.id)}
+                  onChange={() => toggle("userIds", u.id)} />
+                <span>{u.name} {u.role === "HOUSEKEEPING_MANAGER" && <b>(Manager)</b>}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="row" style={{ gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => onSave(draft)}>
+            {busy ? "Saving…" : "Save Zone"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

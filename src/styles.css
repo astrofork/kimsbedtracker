@@ -2535,6 +2535,72 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
   .btn-fly:active{transform:none;}
 }
 
+/* ── Housekeeping ─────────────────────────────────────────────────────────────
+     A cleaner reads this on a phone, mid-corridor, one-handed. Big targets,
+     one bed per card, and the state legible without reading any label. — */
+.hk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;}
+.hk-bed{
+  background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--st-o);
+  border-radius:14px;padding:13px 14px;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;gap:7px;
+}
+/* Started, so someone is on it. */
+.hk-bed--doing{border-left-color:var(--primary);}
+/* Past the turnaround. The only red on this screen, so it cannot be missed. */
+.hk-bed--over{border-left-color:var(--red);}
+/* A heads-up, not a job: muted, and it carries no buttons. */
+.hk-bed--soon{border-left-color:var(--line);background:var(--panel-2);opacity:.85;}
+.hk-bed-top{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.hk-bed-top b{font-size:16px;font-weight:800;letter-spacing:-.01em;}
+.hk-tag{
+  font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
+  padding:3px 8px;border-radius:99px;white-space:nowrap;
+  /* Amber waiting, blue being worked, red past the turnaround — three states
+     that must never look alike on a corridor phone. */
+  background:var(--st-o-bg);color:var(--st-o);
+}
+.hk-tag--doing{background:var(--blue-bg);color:var(--blue);}
+.hk-tag--over{background:var(--red-bg);color:var(--red);}
+.hk-tag--soon{background:var(--panel);color:var(--ink-3);border:1px solid var(--line);}
+.hk-bed-meta{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-2);}
+.hk-src{font-weight:700;}
+.hk-bed-claim{font-size:11.5px;font-weight:700;color:var(--primary);}
+.hk-bed-note{font-size:11.5px;color:var(--ink-3);}
+.hk-bed-warn{font-size:11.5px;font-weight:700;color:var(--red);}
+.hk-ward-warn{font-weight:600;color:var(--red);text-transform:none;letter-spacing:0;}
+.hk-bed-actions{display:flex;gap:8px;margin-top:2px;}
+.hk-bed-actions .btn{flex:1;padding:10px 0;font-size:13px;}
+
+.hk-tick{
+  display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;
+  font-size:12.5px;font-weight:600;color:var(--ink-2);
+}
+.hk-tick input{width:16px;height:16px;accent-color:var(--primary);cursor:pointer;}
+
+/* Zone editor pickers — a long checkbox list that has to stay usable on a
+   laptop without becoming the whole page. */
+.hk-picker{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px;
+  max-height:230px;overflow-y:auto;padding:8px;
+  border:1px solid var(--line);border-radius:12px;background:var(--panel-2);
+}
+.hk-pick{
+  display:flex;align-items:center;gap:8px;cursor:pointer;
+  padding:7px 9px;border-radius:9px;font-size:12.5px;font-weight:600;
+  background:var(--panel);border:1px solid transparent;transition:border-color .12s;
+}
+.hk-pick:hover{border-color:var(--line);}
+.hk-pick.on{border-color:var(--primary);color:var(--primary);}
+.hk-pick input{width:15px;height:15px;accent-color:var(--primary);cursor:pointer;flex-shrink:0;}
+
+/* Badge shown on ordinary bed cards elsewhere in the app, so a nurse or PRE can
+   see why a vacant bed will not take a patient. */
+.hk-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
+  padding:2px 7px;border-radius:99px;background:var(--st-o-bg);color:var(--st-o);
+}
+
 /* ── Ward page chrome ─────────────────────────────────────────────────────────
      Bigger title, a segmented tab bar that marks the live tab with a nub, a
      pill search, and the bed filter as a scrollable strip of counted chips

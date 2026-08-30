@@ -487,8 +487,8 @@ export const api = {
   dischargesPatientLeft: (hospitalWide, unit) => req("/discharge/patient-left" + hwQuery(hospitalWide, unit)),
   transferWards: () => req("/discharge/transfer/wards"),
   transferCandidates: (wardId) => req(`/discharge/transfer/candidates?wardId=${wardId}`),
-  transferBed: (fromBedId, toWardId, toBedId, reason) =>
-    req("/discharge/transfer", { method: "POST", body: JSON.stringify({ fromBedId, toWardId, toBedId, reason }) }),
+  transferBed: (fromBedId, toWardId, toBedId, reason, needsHousekeeping = true) =>
+    req("/discharge/transfer", { method: "POST", body: JSON.stringify({ fromBedId, toWardId, toBedId, reason, needsHousekeeping }) }),
   dischargeMoveToLounge: (admissionId, reason) => req(`/discharge/${admissionId}/move-to-lounge`, { method: "POST", body: JSON.stringify({ reason }) }),
   readmitFromLounge: (admissionId, toWardId, toBedId, reason) =>
     req(`/discharge/${admissionId}/readmit`, { method: "POST", body: JSON.stringify({ toWardId, toBedId, reason }) }),
@@ -511,6 +511,17 @@ export const api = {
   consultantOverstay: () => req("/consultant/overstay"),
   // ── Discharge phase SLAs ────────────────────────────────────────────────────
   dischargePhaseConfig: () => req("/discharge/phase-config"),
+
+  // ── Housekeeping ──────────────────────────────────────────────────────────
+  hkBoard:    () => req("/housekeeping/board"),
+  hkZones:    () => req("/housekeeping/zones"),
+  hkStart:    (bedId) => req(`/housekeeping/beds/${bedId}/start`, { method: "POST" }),
+  hkComplete: (bedId) => req(`/housekeeping/beds/${bedId}/complete`, { method: "POST" }),
+  // Admin
+  hkAdminZones:  () => req("/manager/housekeeping/zones"),
+  hkSaveZone:    (id, body) => req(id ? `/manager/housekeeping/zones/${id}` : "/manager/housekeeping/zones",
+                                   { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
+  hkDeleteZone:  (id) => req(`/manager/housekeeping/zones/${id}`, { method: "DELETE" }),
   mgrDischargePhases: () => req("/manager/discharge-phases"),
   mgrUpdateDischargePhase: (id, data) =>
     req(`/manager/discharge-phases/${id}`, { method: "PUT", body: JSON.stringify(data) }),

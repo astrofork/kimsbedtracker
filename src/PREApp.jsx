@@ -838,6 +838,17 @@ export const BedGridCard = React.memo(function BedGridCard({ bed, onClick, wardL
         <span className={`pbadge ${sk}`}>{STATE_LABEL(bed.physical_status, bed.reservation_status)}</span>
       </div>
       {dimmed && <div className="pbed-type">Non-operational</div>}
+      {/* A vacant bed that will not take a patient looks like a bug unless the
+          card says why. The count still reads this bed as vacant — the badge is
+          how a nurse learns it is a few minutes away rather than available. */}
+      {bed.housekeeping_status && (
+        <div style={{ marginTop: 4 }}>
+          <span className="hk-badge">
+            <Ic d={icons.refresh} s={10} />
+            {bed.housekeeping_status === "IN_PROGRESS" ? "Cleaning now" : "Awaiting cleaning"}
+          </span>
+        </div>
+      )}
 
       {/* Labeled rows — every value says what it is. Sequence: IP, Doctor, Dept,
           Payer, Type, then Discharge only once it's actually started (not just

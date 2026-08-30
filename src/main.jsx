@@ -13,6 +13,7 @@ import NurseApp from "./NurseApp.jsx";
 import DoctorApp from "./DoctorApp.jsx";
 import ConsultantApp from "./ConsultantApp.jsx";
 import FCApp from "./FCApp.jsx";
+import HousekeepingApp from "./HousekeepingApp.jsx";
 import PharmacyApp from "./PharmacyApp.jsx";
 import PWOApp from "./PWOApp.jsx";
 
@@ -91,6 +92,8 @@ function App() {
   if (user.role === "NURSE")      return <><NurseApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "DOCTOR")     return <><DoctorApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "PWO")        return <><PWOApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
+  if (user.role === "HOUSEKEEPING" || user.role === "HOUSEKEEPING_MANAGER")
+    return <><HousekeepingApp user={user} onLogout={logout} /><PwaManager /></>;
   if (user.role === "CONSULTANT") return <><ConsultantApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   if (user.role === "PHARMACY" || user.role === "MASTER_PHARMACY") return <><PharmacyApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
   return <><PREApp user={user} meta={meta} onLogout={logout} /><PwaManager /></>;
