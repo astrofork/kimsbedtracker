@@ -900,6 +900,14 @@ body.hero-gone .appbar{
   background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;outline:none;
   flex:1;min-width:0;
 }
+.mp2-clear{
+  display:flex;align-items:center;gap:4px;flex-shrink:0;
+  height:32px;padding:0 10px;border-radius:8px;
+  font-size:11px;font-weight:600;color:var(--ink-3);
+  background:none;border:1px solid var(--line);transition:color .1s,border-color .1s;
+}
+.mp2-clear:hover{color:var(--ink);border-color:var(--ink-3);}
+@media (max-width:767px){.mp2-clear{height:28px;padding:0 7px;font-size:10px;}}
 .mp2-vtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .mp2-vtog button{
   display:flex;align-items:center;justify-content:center;
