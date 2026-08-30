@@ -45,7 +45,7 @@ function wardInitials(name) {
 }
 
 // ── My Patients page ────────────────────────────────────────────────────────
-function MyPatientsPage() {
+function MyPatientsPage({ visible }) {
   const [patients, setPatients] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -441,7 +441,7 @@ function MyPatientsPage() {
       {loadingBed && <BedLoadingInline />}
       {toast && <div className="toast show">{toast}</div>}
     </div>
-    {!error && patients !== null && patients.length > 0 && sortedWardGroups.length > 0 && createPortal(
+    {visible && !error && patients !== null && patients.length > 0 && sortedWardGroups.length > 0 && !openWard && !selectedBed && createPortal(
       <div className="mp2-pag">
         <span className="mp2-pag-info">
           {pageStart + 1}–{Math.min(pageStart + rowsPerPage, sortedWardGroups.length)} of {sortedWardGroups.length} wards
@@ -504,7 +504,7 @@ export default function ConsultantApp({ user, meta, onLogout }) {
           />
         )}
         <div style={{ display: tab === "mypatients" ? "block" : "none" }}>
-          <MyPatientsPage showToast={showToast} />
+          <MyPatientsPage showToast={showToast} visible={tab === "mypatients"} />
         </div>
         {tab === "discharges" && <DischargesPage role="CONSULTANT" />}
 
