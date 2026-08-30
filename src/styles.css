@@ -877,11 +877,17 @@ body.hero-gone .appbar{
 .mp2-search svg{color:var(--ink-3);flex-shrink:0;}
 .mp2-search input{border:none;background:none;outline:none;color:var(--ink);font-size:13px;width:100%;height:100%;}
 @media (max-width:767px){.mp2-search input{font-size:16px;}}
-.mp2-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
-.mp2-filters{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.mp2-bar{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:12px;}
+.mp2-filters{display:flex;align-items:center;gap:6px;flex:1;min-width:0;}
 .mp2-filter{
-  height:32px;padding:0 10px;border:1px solid var(--line);border-radius:8px;
+  height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;
   background:var(--panel);color:var(--ink);font-size:12px;font-weight:500;outline:none;
+  flex:1;min-width:0;
+}
+@media (max-width:767px){
+  .mp2-bar{gap:4px;}
+  .mp2-filter,.mp2-sort{height:30px;font-size:11px;padding:0 6px;}
+  .mp2-vtog button{width:30px;height:28px;}
 }
 .mp2-search-x{
   width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
@@ -889,8 +895,9 @@ body.hero-gone .appbar{
 }
 .mp2-search-x:hover{background:var(--panel-2);color:var(--ink);}
 .mp2-sort{
-  height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;
+  height:32px;padding:0 8px;border:1px solid var(--line);border-radius:8px;
   background:var(--panel);color:var(--ink);font-size:12px;font-weight:600;outline:none;
+  flex:1;min-width:0;
 }
 .mp2-vtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .mp2-vtog button{
