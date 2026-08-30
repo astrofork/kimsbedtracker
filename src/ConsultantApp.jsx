@@ -262,60 +262,62 @@ function MyPatientsPage({ visible, onSubTitle }) {
           <div className="dim" style={{ fontSize: 12 }}>{groupPatients.length} patient{groupPatients.length !== 1 ? "s" : ""}</div>
         </div>
 
-        <div className="pill-search" style={{ display: "flex", gap: 8, marginBottom: 10 }}>
-          <div className="field-search" style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
-            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
-              <Ic d={icons.search} s={15} />
-            </span>
-            <input
-              className="field"
-              value={bedSearch}
-              placeholder="Search bed, patient, IP…"
-              style={{ paddingLeft: 38, paddingRight: bedSearch ? 36 : 15 }}
-              onChange={(e) => setBedSearch(e.target.value)}
-            />
-            {bedSearch && (
-              <button
-                onClick={() => setBedSearch("")}
-                aria-label="Clear search"
-                style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
-              >
-                <Ic d={icons.x} s={14} />
-              </button>
-            )}
-            {nameSuggestions.length > 0 && (
-              <div className="mp2-suggest">
-                {nameSuggestions.slice(0, 5).map((name) => (
-                  <button key={name} className="mp2-suggest-item" onClick={() => setBedSearch(name)}>
-                    <Ic d={icons.users} s={13} />
-                    {name}
-                  </button>
-                ))}
-              </div>
+        <div className="mp2-bed-toolbar">
+          <div className="pill-search mp2-bed-search">
+            <div className="field-search" style={{ position: "relative", flex: "1 1 200px", minWidth: 0 }}>
+              <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+                <Ic d={icons.search} s={15} />
+              </span>
+              <input
+                className="field"
+                value={bedSearch}
+                placeholder="Search bed, patient, IP…"
+                style={{ paddingLeft: 38, paddingRight: bedSearch ? 36 : 15 }}
+                onChange={(e) => setBedSearch(e.target.value)}
+              />
+              {bedSearch && (
+                <button
+                  onClick={() => setBedSearch("")}
+                  aria-label="Clear search"
+                  style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}
+                >
+                  <Ic d={icons.x} s={14} />
+                </button>
+              )}
+              {nameSuggestions.length > 0 && (
+                <div className="mp2-suggest">
+                  {nameSuggestions.slice(0, 5).map((name) => (
+                    <button key={name} className="mp2-suggest-item" onClick={() => setBedSearch(name)}>
+                      <Ic d={icons.users} s={13} />
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {allPatientNames.length > 0 && (
+              <select className="field mp2-filter" value="" onChange={(e) => { if (e.target.value) setBedSearch(e.target.value); }}
+                style={{ flex: "0 0 auto", width: "auto", maxWidth: 160, borderRadius: 99, fontSize: 13 }}>
+                <option value="">Patient</option>
+                {allPatientNames.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
             )}
           </div>
-          {allPatientNames.length > 0 && (
-            <select className="field mp2-filter" value="" onChange={(e) => { if (e.target.value) setBedSearch(e.target.value); }}
-              style={{ flex: "0 0 auto", width: "auto", maxWidth: 160, borderRadius: 99, fontSize: 13 }}>
-              <option value="">Patient</option>
-              {allPatientNames.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
-          )}
-        </div>
-        <div className="chip-row" role="group" aria-label="Filter beds">
-          {[
-            { key: "ALL", label: "All" },
-            { key: "DISCHARGE", label: "Discharge" },
-            { key: "CASH", label: "Cash" },
-            { key: "INSURANCE", label: "Insurance" },
-          ].filter((o) => o.key === "ALL" || fc[o.key] > 0).map((o) => (
-            <button key={o.key}
-              className={"fchip" + (bedFilter === o.key ? " on" : "")}
-              aria-pressed={bedFilter === o.key}
-              onClick={() => setBedFilter(o.key)}>
-              {o.label} <span className="n">({fc[o.key]})</span>
-            </button>
-          ))}
+          <div className="chip-row mp2-bed-chips" role="group" aria-label="Filter beds">
+            {[
+              { key: "ALL", label: "All" },
+              { key: "DISCHARGE", label: "Discharge" },
+              { key: "CASH", label: "Cash" },
+              { key: "INSURANCE", label: "Insurance" },
+            ].filter((o) => o.key === "ALL" || fc[o.key] > 0).map((o) => (
+              <button key={o.key}
+                className={"fchip" + (bedFilter === o.key ? " on" : "")}
+                aria-pressed={bedFilter === o.key}
+                onClick={() => setBedFilter(o.key)}>
+                {o.label} <span className="n">({fc[o.key]})</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         <div style={{ position: "relative", marginTop: 10 }}>

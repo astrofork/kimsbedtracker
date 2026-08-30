@@ -921,6 +921,15 @@ body.hero-gone .appbar{
 }
 .mp2-suggest-item:hover{background:color-mix(in srgb,var(--primary) 8%,var(--panel));}
 .mp2-suggest-item+.mp2-suggest-item{border-top:1px solid var(--line);}
+.mp2-bed-toolbar{
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;
+}
+.mp2-bed-search{display:flex;gap:8px;flex:1 1 260px;min-width:0;margin-bottom:0 !important;}
+.mp2-bed-chips{margin-bottom:0;flex-shrink:0;}
+@media (max-width:767px){
+  .mp2-bed-toolbar{flex-direction:column;align-items:stretch;}
+  .mp2-bed-search{flex:1 1 auto;}
+}
 .mp2-vtog{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;}
 .mp2-vtog button{
   display:flex;align-items:center;justify-content:center;
