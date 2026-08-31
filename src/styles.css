@@ -2872,88 +2872,82 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .hkc-foot span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* ── Housekeeping Manager Analytics ──────────────────────────────────────
-   Two live counts up top (unaffected by the range filter), one range-scoped
-   headline, then two sections whose visual language is deliberately
-   different: staff performance reads as people (avatar-led list, since the
-   question is "who"), ward backlog reads as data (a real table, since the
-   question is "how many, where" across parallel numeric columns). */
-.hka{max-width:920px;}
+   Composition follows the manager's real order of concern, not a KPI-row-
+   then-tables template — see the comment above ManagerAnalytics() in
+   HousekeepingApp.jsx for the reasoning behind each zone. */
+.hka{max-width:980px;}
 
-.hka-live{
-  display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;
-  margin-bottom:10px;
-}
-.hka-live-item{flex:1;min-width:0;padding:14px 16px;}
-.hka-live-item+.hka-live-item{border-left:1px solid var(--line);}
-.hka-live-val{font-size:26px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink);}
-.hka-live-val.urgent{color:var(--red);}
-.hka-live-label{font-size:11.5px;color:var(--ink-3);margin-top:5px;}
-@media (max-width:480px){
-  .hka-live-item{padding:10px 8px;}
-  .hka-live-val{font-size:20px;}
-  .hka-live-label{font-size:10px;line-height:1.25;}
-}
+/* 1 — status: changes character depending on the real answer */
+.hka-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.hka-status-headline{font-size:26px;font-weight:800;letter-spacing:-.01em;color:var(--ink);}
+.hka-status.urgent .hka-status-headline{color:var(--red);}
+.hka-status-sub{font-size:12.5px;color:var(--ink-3);margin-top:4px;}
+.hka-status.urgent .hka-status-sub{color:color-mix(in srgb,var(--red) 75%,var(--ink-3));}
 
-.hka-completed{
-  display:flex;align-items:flex-end;justify-content:space-between;gap:12px;
-  padding:14px 2px 18px;border-bottom:1px solid var(--line);margin-bottom:22px;
-}
-.hka-completed-val{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink);}
-.hka-completed-label{font-size:12.5px;color:var(--ink-3);margin-top:6px;}
-.hka-range{display:flex;gap:4px;padding-bottom:4px;}
+.hka-range{display:flex;gap:4px;margin-top:2px;}
 .hka-range button{padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid transparent;background:none;color:var(--ink-3);cursor:pointer;}
 .hka-range button:hover{color:var(--ink);}
 .hka-range button.on{background:var(--panel-2);border-color:var(--line);color:var(--ink);}
 
-.hka-section+.hka-section{margin-top:28px;}
-.hka-section-head{display:flex;align-items:baseline;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
-.hka-section-head h3{font-size:13.5px;font-weight:800;margin:0;color:var(--ink);}
-.hka-section-note{font-size:12px;color:var(--ink-3);}
-.hka-section-note.urgent{color:var(--red);font-weight:600;}
-.hka-empty{font-size:12.5px;color:var(--ink-3);padding:10px 2px;}
+/* 2 — completion: one segmented bar built from real counts, no invented % */
+.hka-progress{margin:18px 0 26px;}
+.hka-pbar{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--panel-2);}
+.hka-pbar.empty{background:var(--panel-2);}
+.hka-pbar .seg{display:block;}
+.hka-pbar .seg.done{background:var(--st-v);}
+.hka-pbar .seg.doing{background:var(--st-clean);}
+.hka-pbar .seg.wait{background:var(--st-o);}
+.hka-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:9px;font-size:12px;color:var(--ink-2);}
+.hka-legend b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:700;}
+.hka-legend i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;}
+.hka-legend i.done{background:var(--st-v);}
+.hka-legend i.doing{background:var(--st-clean);}
+.hka-legend i.wait{background:var(--st-o);}
 
-/* Staff — avatar-led rows, not a bare table: the point is scanning by person */
-.hka-list{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden;}
-.hka-srow{display:flex;align-items:center;gap:12px;padding:11px 14px;}
-.hka-srow+.hka-srow{border-top:1px solid var(--line);}
-.hka-avatar{
-  flex-shrink:0;width:30px;height:30px;border-radius:50%;color:#fff;
-  display:flex;align-items:center;justify-content:center;
-  font-size:11.5px;font-weight:700;letter-spacing:.02em;
+/* 3 + 4 — two zones, side by side, deliberately unequal width */
+.hka-cols{display:grid;grid-template-columns:1.15fr 0.85fr;gap:40px;}
+@media (max-width:860px){
+  .hka-cols{grid-template-columns:1fr;gap:28px;}
 }
-.hka-srow-main{flex:1;min-width:0;}
-.hka-srow-name{display:flex;align-items:center;gap:7px;font-size:13.5px;font-weight:700;color:var(--ink);}
-.hka-srow-wards{font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px;}
-.hka-active-chip{flex-shrink:0;font-size:11px;font-weight:600;color:var(--st-clean);}
-.hka-bar-wrap{flex-shrink:0;display:flex;align-items:center;gap:8px;width:120px;}
-.hka-bar-track{flex:1;height:5px;border-radius:99px;background:var(--panel-2);overflow:hidden;}
+
+.hka-section h3{
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-3);margin:0 0 4px;
+}
+.hka-count{font-weight:700;color:var(--ink-2);margin-left:2px;}
+.hka-section-note{font-size:12.5px;color:var(--ink-2);margin-bottom:12px;}
+.hka-section-note b{color:var(--ink);font-weight:700;}
+.hka-empty{font-size:12.5px;color:var(--ink-3);padding:6px 0;}
+
+/* Staff groups — three different shapes for three different questions */
+.hka-group+.hka-group{margin-top:18px;}
+.hka-group-head{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px;}
+.hka-group-head b{font-weight:700;color:var(--ink-3);margin-left:4px;}
+.hka-group.flag .hka-group-head{color:var(--st-o);}
+.hka-group.flag .hka-group-head b{color:var(--st-o);}
+
+.hka-namewrap{display:flex;flex-wrap:wrap;gap:6px 14px;}
+.hka-name-plain{font-size:13px;color:var(--ink);}
+
+.hka-line{display:flex;align-items:center;gap:9px;padding:6px 0;}
+.hka-line-name{font-size:13px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px;}
+.hka-line-meta{font-size:12px;color:var(--ink-3);margin-left:auto;padding-left:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+.hka-bar-wrap{margin-left:auto;flex-shrink:0;display:flex;align-items:center;gap:8px;width:110px;}
+.hka-bar-track{flex:1;height:4px;border-radius:99px;background:var(--panel-2);overflow:hidden;}
 .hka-bar-fill{height:100%;background:var(--primary);border-radius:99px;}
-.hka-bar-num{flex-shrink:0;width:22px;text-align:right;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);}
-@media (max-width:600px){
-  .hka-srow-wards{display:none;}
-  .hka-bar-wrap{width:80px;}
-}
+.hka-bar-num{flex-shrink:0;width:18px;text-align:right;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);}
 
-/* Wards — a real table: parallel numeric columns across a flat list */
-.hka-tbl-wrap{border:1px solid var(--line);border-radius:10px;overflow:hidden;overflow-x:auto;}
-.hka-tbl{width:100%;border-collapse:collapse;}
-.hka-tbl thead th{
-  text-align:right;padding:9px 14px;font-size:10.5px;font-weight:600;
-  color:var(--ink-3);text-transform:uppercase;letter-spacing:.03em;
-  background:var(--panel-2);border-bottom:1px solid var(--line);white-space:nowrap;
-}
-.hka-tbl thead th:first-child{text-align:left;}
-.hka-tbl tbody td{padding:10px 14px;border-bottom:1px solid var(--line);font-size:13px;color:var(--ink);}
-.hka-tbl tbody tr:last-child td{border-bottom:none;}
-.hka-tbl tbody tr.urgent{background:color-mix(in srgb,var(--red) 5%,var(--panel));}
-.hka-tbl-name{font-weight:700;}
-.hka-tbl .num{text-align:right;font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap;}
-.hka-tbl .num.zero{color:var(--ink-3);font-weight:500;}
-.hka-tbl .num.urgent{color:var(--red);}
-
-@media (max-width:640px){
-  .hka-completed{flex-direction:column;align-items:flex-start;gap:10px;}
-}
+/* Ward list — severity-ordered, clear wards recede instead of matching weight */
+.hka-wardlist{display:flex;flex-direction:column;}
+.hka-wrow{display:flex;align-items:baseline;gap:14px;padding:8px 0;border-bottom:1px solid var(--line);}
+.hka-wrow:last-child{border-bottom:none;}
+.hka-wrow-name{font-size:13.5px;font-weight:700;color:var(--ink);flex-shrink:0;}
+.hka-wrow-detail{font-size:12.5px;color:var(--ink-2);text-align:right;margin-left:auto;}
+.hka-wrow-detail b.urgent{color:var(--red);font-weight:700;}
+.hka-wrow-done{color:var(--ink-3);}
+.hka-wrow.clear{opacity:.55;}
+.hka-wrow.clear .hka-wrow-name{font-weight:600;}
 
 .hk-illo-in{opacity:0;transform:scale(.94);transform-box:view-box;transform-origin:220px 230px;animation:hk-pop .9s cubic-bezier(.22,1,.36,1) .05s forwards;}
 @keyframes hk-pop{to{opacity:1;transform:scale(1)}}

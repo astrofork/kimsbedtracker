@@ -414,13 +414,18 @@ function HousekeepingBoard({ isManager, onDrillChange }) {
 // tasks they personally completed. Backlog (pending/overdue) is reported per
 // ward, since a ward's queue is shared by everyone assigned to it.
 //
-// Layout follows the shape of the data, not a template: "active staff" and
-// the three live bed counts (pending/in progress/overdue) never move with the
-// range filter — they're facts about right now — so they sit in their own
-// strip, separate from "completed", which is the one number the filter
-// actually changes. Mixing the two into one undifferentiated row of five
-// numbers (the previous version) implied a range filter that silently did
-// nothing to 4 of the 5. ─────────────────────────────────────────────────
+// The composition follows the manager's actual order of concern rather than
+// a KPI-row-then-tables template:
+//   1. Is anything overdue right now? — a status line that changes character
+//      depending on the real answer (urgent vs calm), not a stat box.
+//   2. How is completion trending in the selected range? — one segmented bar
+//      built from the three real counts, no invented percentage.
+//   3. Who needs attention? — staff split into three real, mutually exclusive
+//      groups (no activity / working now / completed something), because
+//      "who hasn't done anything" is the one question a ranked list buries.
+//   4. Where is work piling up? — wards as a severity-ordered list, not a
+//      table, with fully-clear wards visually receding instead of taking the
+//      same weight as the ones that need eyes on them. ─────────────────────
 const RANGES = [
   { key: 1,  label: "Today" },
   { key: 7,  label: "7 days" },
@@ -461,37 +466,30 @@ function ManagerAnalytics() {
   if (!data) return null;
 
   const { summary, staff, wards } = data;
+
+  const overdueWardNames = wards.filter((w) => w.overdue > 0).map((w) => w.name);
+  const totalTracked = summary.completedInRange + summary.pendingNow + summary.inProgressNow;
   const maxCompleted = Math.max(1, ...staff.map((s) => s.completedInRange));
-  const topPerformer = staff.length && staff[0].completedInRange > 0 ? staff[0] : null;
-  const urgentWards = wards.filter((w) => w.overdue > 0).length;
+
+  const working = staff.filter((s) => s.activeNow > 0);
+  const idle = staff.filter((s) => s.activeNow === 0 && s.completedInRange === 0);
+  const finished = staff.filter((s) => s.activeNow === 0 && s.completedInRange > 0);
+
+  const worstWard = wards.length ? wards[0] : null;
+  const anyBacklog = wards.some((w) => w.pending > 0 || w.inProgress > 0 || w.overdue > 0);
 
   return (
     <div className="hka">
-      {/* Right now — live counts, unaffected by the range filter below */}
-      <div className="hka-live">
-        <div className="hka-live-item">
-          <div className="hka-live-val">{summary.totalStaff}</div>
-          <div className="hka-live-label">Active staff</div>
-        </div>
-        <div className="hka-live-item">
-          <div className="hka-live-val">{summary.inProgressNow}</div>
-          <div className="hka-live-label">In progress now</div>
-        </div>
-        <div className="hka-live-item">
-          <div className="hka-live-val">{summary.pendingNow}</div>
-          <div className="hka-live-label">Pending now</div>
-        </div>
-        <div className="hka-live-item">
-          <div className={"hka-live-val" + (summary.overdueNow > 0 ? " urgent" : "")}>{summary.overdueNow}</div>
-          <div className="hka-live-label">Overdue now</div>
-        </div>
-      </div>
-
-      {/* Completed — the one number the range filter changes */}
-      <div className="hka-completed">
-        <div>
-          <div className="hka-completed-val">{summary.completedInRange}</div>
-          <div className="hka-completed-label">Completed · {rangeLabel.toLowerCase()}</div>
+      <div className="hka-top">
+        <div className={"hka-status" + (summary.overdueNow > 0 ? " urgent" : "")}>
+          <div className="hka-status-headline">
+            {summary.overdueNow > 0
+              ? `${summary.overdueNow} bed${summary.overdueNow !== 1 ? "s" : ""} overdue`
+              : "No beds overdue"}
+          </div>
+          {summary.overdueNow > 0 && (
+            <div className="hka-status-sub">{overdueWardNames.join(" · ")}</div>
+          )}
         </div>
         <div className="hka-range" role="group" aria-label="Time range">
           {RANGES.map((r) => (
@@ -500,80 +498,107 @@ function ManagerAnalytics() {
         </div>
       </div>
 
-      {/* Staff performance */}
-      <section className="hka-section">
-        <div className="hka-section-head">
-          <h3>Staff performance</h3>
-          {topPerformer && (
-            <span className="hka-section-note">
-              {topPerformer.name} leads with {topPerformer.completedInRange} completed
-            </span>
-          )}
-        </div>
-        {staff.length === 0 ? (
-          <div className="hka-empty">No active housekeeping accounts.</div>
+      <div className="hka-progress">
+        {totalTracked > 0 ? (
+          <div className="hka-pbar">
+            {summary.completedInRange > 0 && <span className="seg done" style={{ flexGrow: summary.completedInRange }} />}
+            {summary.inProgressNow > 0 && <span className="seg doing" style={{ flexGrow: summary.inProgressNow }} />}
+            {summary.pendingNow > 0 && <span className="seg wait" style={{ flexGrow: summary.pendingNow }} />}
+          </div>
         ) : (
-          <div className="hka-list">
-            {staff.map((s) => (
-              <div className="hka-srow" key={s.id}>
-                <span className="hka-avatar" style={{ background: staffAvatarColor(s.id) }}>{staffInitials(s.name)}</span>
-                <div className="hka-srow-main">
-                  <div className="hka-srow-name">
+          <div className="hka-pbar empty" />
+        )}
+        <div className="hka-legend">
+          <span><i className="done" />Completed <b>{summary.completedInRange}</b> · {rangeLabel.toLowerCase()}</span>
+          <span><i className="doing" />In progress <b>{summary.inProgressNow}</b></span>
+          <span><i className="wait" />Pending <b>{summary.pendingNow}</b></span>
+        </div>
+      </div>
+
+      <div className="hka-cols">
+        {/* Who needs attention */}
+        <section className="hka-section">
+          <h3>Staff <span className="hka-count">{summary.totalStaff}</span></h3>
+
+          {idle.length > 0 && (
+            <div className="hka-group flag">
+              <div className="hka-group-head">No activity yet <b>{idle.length}</b></div>
+              <div className="hka-namewrap">
+                {idle.map((s) => <span className="hka-name-plain" key={s.id}>{s.name}</span>)}
+              </div>
+            </div>
+          )}
+
+          {working.length > 0 && (
+            <div className="hka-group">
+              <div className="hka-group-head">Working now <b>{working.length}</b></div>
+              {working.map((s) => (
+                <div className="hka-line" key={s.id}>
+                  <span className="hka-line-name">{s.name}</span>
+                  <span className="hka-line-meta">{s.wards.join(", ") || "—"}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {finished.length > 0 && (
+            <div className="hka-group">
+              <div className="hka-group-head">Completed <b>{finished.length}</b></div>
+              {finished.map((s) => (
+                <div className="hka-line" key={s.id}>
+                  <span className="hka-line-name">
                     {s.name}
                     {s.role === "HOUSEKEEPING_MANAGER" && <span className="role-badge">Manager</span>}
-                  </div>
-                  <div className="hka-srow-wards" title={s.wards.join(", ")}>
-                    {s.wards.length ? s.wards.join(", ") : "No wards assigned"}
+                  </span>
+                  <div className="hka-bar-wrap">
+                    <div className="hka-bar-track"><div className="hka-bar-fill" style={{ width: `${(s.completedInRange / maxCompleted) * 100}%` }} /></div>
+                    <span className="hka-bar-num">{s.completedInRange}</span>
                   </div>
                 </div>
-                {s.activeNow > 0 && <span className="hka-active-chip">{s.activeNow} active</span>}
-                <div className="hka-bar-wrap">
-                  <div className="hka-bar-track"><div className="hka-bar-fill" style={{ width: `${(s.completedInRange / maxCompleted) * 100}%` }} /></div>
-                  <span className="hka-bar-num">{s.completedInRange}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Ward backlog */}
-      <section className="hka-section">
-        <div className="hka-section-head">
-          <h3>Ward backlog</h3>
-          {urgentWards > 0 && (
-            <span className="hka-section-note urgent">{urgentWards} ward{urgentWards !== 1 ? "s" : ""} overdue</span>
+              ))}
+            </div>
           )}
-        </div>
-        {wards.length === 0 ? (
-          <div className="hka-empty">No wards with active or recent housekeeping work.</div>
-        ) : (
-          <div className="hka-tbl-wrap">
-            <table className="hka-tbl">
-              <thead>
-                <tr>
-                  <th>Ward</th>
-                  <th className="num">Pending</th>
-                  <th className="num">In progress</th>
-                  <th className="num">Overdue</th>
-                  <th className="num">Completed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {wards.map((w) => (
-                  <tr key={w.id} className={w.overdue > 0 ? "urgent" : undefined}>
-                    <td className="hka-tbl-name">{w.name}</td>
-                    <td className={"num" + (w.pending === 0 ? " zero" : "")}>{w.pending}</td>
-                    <td className={"num" + (w.inProgress === 0 ? " zero" : "")}>{w.inProgress}</td>
-                    <td className={"num" + (w.overdue > 0 ? " urgent" : " zero")}>{w.overdue}</td>
-                    <td className={"num" + (w.completedInRange === 0 ? " zero" : "")}>{w.completedInRange}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          {staff.length === 0 && <div className="hka-empty">No active housekeeping accounts.</div>}
+        </section>
+
+        {/* Where work is accumulating */}
+        <section className="hka-section">
+          <h3>Wards</h3>
+          <div className="hka-section-note">
+            {anyBacklog && worstWard && (worstWard.pending > 0 || worstWard.inProgress > 0 || worstWard.overdue > 0)
+              ? <>Most backlog: <b>{worstWard.name}</b></>
+              : "All wards clear"}
           </div>
-        )}
-      </section>
+
+          {wards.length === 0 ? (
+            <div className="hka-empty">No wards with active or recent housekeeping work.</div>
+          ) : (
+            <div className="hka-wardlist">
+              {wards.map((w) => {
+                const clear = w.pending === 0 && w.inProgress === 0 && w.overdue === 0;
+                return (
+                  <div className={"hka-wrow" + (clear ? " clear" : "")} key={w.id}>
+                    <span className="hka-wrow-name">{w.name}</span>
+                    <span className="hka-wrow-detail">
+                      {clear ? (
+                        "No pending work"
+                      ) : (
+                        <>
+                          {w.pending > 0 && <>{w.pending} pending</>}
+                          {w.inProgress > 0 && <>{w.pending > 0 ? " · " : ""}{w.inProgress} in progress</>}
+                          {w.overdue > 0 && <>{(w.pending > 0 || w.inProgress > 0) ? " · " : ""}<b className="urgent">{w.overdue} overdue</b></>}
+                        </>
+                      )}
+                      {w.completedInRange > 0 && <span className="hka-wrow-done"> · {w.completedInRange} completed</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
