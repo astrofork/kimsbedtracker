@@ -253,7 +253,9 @@ function BedsPage({ ward, tat, busyBed, onStart, onComplete, onBack, initialSear
   );
 }
 
-export default function HousekeepingApp({ user, onLogout }) {
+// ── Board tab — unchanged from the original: ward cards drilling into bed
+// cards. This is the existing product; it is not part of the redesign. ─────
+function HousekeepingBoard({ isManager, onDrillChange }) {
   const [board, setBoard] = useState(null);
   const [err, setErr] = useState("");
   const [busyBed, setBusyBed] = useState(null);
@@ -261,7 +263,6 @@ export default function HousekeepingApp({ user, onLogout }) {
   const [openWard, setOpenWard] = useState(null);
   const [search, setSearch] = useState("");
   const [wardFilter, setWardFilter] = useState("all");
-  const isManager = user.role === "HOUSEKEEPING_MANAGER";
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
 
@@ -318,6 +319,8 @@ export default function HousekeepingApp({ user, onLogout }) {
     return wards.find((w) => Number(w.id) === Number(openWard)) || null;
   }, [wards, openWard]);
 
+  useEffect(() => { onDrillChange?.(!!wardData); }, [wardData, onDrillChange]);
+
   const q = search.trim().toLowerCase();
   const searchedWards = wards.filter((w) => !q
     || w.name.toLowerCase().includes(q)
@@ -338,16 +341,7 @@ export default function HousekeepingApp({ user, onLogout }) {
   });
 
   return (
-    <AppShell
-      menu={[{ key: "board", icon: icons.bed, label: "Housekeeping" }]}
-      active="board"
-      onSelect={() => {}}
-      title="Housekeeping"
-      user={{ name: user.name || user.username || "Housekeeping",
-              role: isManager ? "HK MANAGER" : "HOUSEKEEPING" }}
-      onLogout={onLogout}
-      hideAppbar={!!wardData}
-    >
+    <>
       {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
 
       {board && wards.length === 0 && (
@@ -407,6 +401,171 @@ export default function HousekeepingApp({ user, onLogout }) {
       )}
 
       {toast && <div className="toast">{toast}</div>}
+    </>
+  );
+}
+
+// ── Manager analytics — a new, separate tab. Org-wide, not scoped to the
+// manager's own ward assignments — the manager oversees every housekeeping
+// ward, not just the ones they personally clean. Staff are ward-assigned, not
+// task-assigned (see housekeepingService.managerAnalytics on the backend for
+// why per-person "assigned/remaining" isn't a fact the schema supports), so
+// this reports what's actually true per person: currently-active tasks and
+// tasks they personally completed. Backlog (pending/overdue) is reported per
+// ward, since a ward's queue is shared by everyone assigned to it. ─────────
+const RANGES = [
+  { key: 1,  label: "Today" },
+  { key: 7,  label: "7 days" },
+  { key: 30, label: "30 days" },
+];
+
+function ManagerAnalytics() {
+  const [range, setRange] = useState(1);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    api.hkManagerAnalytics(range)
+      .then((d) => { if (live) { setData(d); setErr(""); } })
+      .catch((e) => { if (live) setErr(toastErr(e)); });
+    return () => { live = false; };
+  }, [range]);
+
+  const rangeLabel = RANGES.find((r) => r.key === range)?.label || "Today";
+
+  if (err) return <div style={{ color: "var(--red)", fontSize: 12 }}>{err}</div>;
+  if (!data) return null;
+
+  const { summary, staff, wards } = data;
+  const maxCompleted = Math.max(1, ...staff.map((s) => s.completedInRange));
+
+  return (
+    <div>
+      <div className="hk2-section-head" style={{ marginTop: 0 }}>
+        <h3>Overview</h3>
+        <div className="hk2-range">
+          {RANGES.map((r) => (
+            <button key={r.key} className={range === r.key ? "on" : undefined} onClick={() => setRange(r.key)}>{r.label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="hk2-stats">
+        <div className="hk2-stat"><div className="hk2-stat-val">{summary.totalStaff}</div><div className="hk2-stat-label">Active staff</div></div>
+        <div className="hk2-stat"><div className="hk2-stat-val">{summary.completedInRange}</div><div className="hk2-stat-label">Completed · {rangeLabel}</div></div>
+        <div className="hk2-stat"><div className="hk2-stat-val">{summary.pendingNow}</div><div className="hk2-stat-label">Pending now</div></div>
+        <div className="hk2-stat"><div className="hk2-stat-val">{summary.inProgressNow}</div><div className="hk2-stat-label">In progress now</div></div>
+        <div className="hk2-stat"><div className={"hk2-stat-val" + (summary.overdueNow > 0 ? " red" : "")}>{summary.overdueNow}</div><div className="hk2-stat-label">Overdue now</div></div>
+      </div>
+
+      <div className="hk2-section-head">
+        <h3>Staff performance</h3>
+      </div>
+      {staff.length === 0 ? (
+        <div className="dim" style={{ fontSize: 12.5, padding: "8px 2px 20px" }}>No active housekeeping accounts.</div>
+      ) : (
+        <div className="hk2-tbl-wrap" style={{ marginBottom: 20 }}>
+          <table className="hk2-tbl">
+            <thead>
+              <tr>
+                <th>Staff</th>
+                <th>Assigned wards</th>
+                <th style={{ textAlign: "center" }}>Active now</th>
+                <th style={{ textAlign: "center" }}>Completed · {rangeLabel}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staff.map((s) => (
+                <tr key={s.id}>
+                  <td>
+                    <div className="hk2-staff-name">
+                      {s.name}
+                      {s.role === "HOUSEKEEPING_MANAGER" && <span className="role-badge">Manager</span>}
+                    </div>
+                  </td>
+                  <td>
+                    <div className="hk2-wards-cell" title={s.wards.join(", ")}>
+                      {s.wards.length ? s.wards.join(", ") : "—"}
+                    </div>
+                  </td>
+                  <td className="num">{s.activeNow || "—"}</td>
+                  <td>
+                    <div className="hk2-bar-cell">
+                      <span className="num">{s.completedInRange}</span>
+                      <div className="hk2-bar-track">
+                        <div className="hk2-bar-fill" style={{ width: `${(s.completedInRange / maxCompleted) * 100}%` }} />
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="hk2-section-head">
+        <h3>Ward backlog</h3>
+      </div>
+      {wards.length === 0 ? (
+        <div className="dim" style={{ fontSize: 12.5, padding: "8px 2px" }}>No wards with active or recent housekeeping work.</div>
+      ) : (
+        <div className="hk2-tbl-wrap">
+          <table className="hk2-tbl">
+            <thead>
+              <tr>
+                <th>Ward</th>
+                <th style={{ textAlign: "center" }}>Pending</th>
+                <th style={{ textAlign: "center" }}>In progress</th>
+                <th style={{ textAlign: "center" }}>Overdue</th>
+                <th style={{ textAlign: "center" }}>Completed · {rangeLabel}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {wards.map((w) => (
+                <tr key={w.id}>
+                  <td style={{ fontWeight: 700 }}>{w.name}</td>
+                  <td className="num">{w.pending || "—"}</td>
+                  <td className="num">{w.inProgress || "—"}</td>
+                  <td className={"num" + (w.overdue > 0 ? " red" : "")}>{w.overdue || "—"}</td>
+                  <td className="num">{w.completedInRange || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function HousekeepingApp({ user, onLogout }) {
+  const isManager = user.role === "HOUSEKEEPING_MANAGER";
+  const [navTab, setNavTab] = useState("board");
+  const [drilled, setDrilled] = useState(false);
+
+  const menu = isManager
+    ? [
+        { key: "board", icon: icons.bed, label: "Housekeeping" },
+        { key: "analytics", icon: icons.chart, label: "Analytics" },
+      ]
+    : [{ key: "board", icon: icons.bed, label: "Housekeeping" }];
+
+  return (
+    <AppShell
+      menu={menu}
+      active={navTab}
+      onSelect={setNavTab}
+      title={navTab === "analytics" ? "Analytics" : "Housekeeping"}
+      user={{ name: user.name || user.username || "Housekeeping",
+              role: isManager ? "HK MANAGER" : "HOUSEKEEPING" }}
+      onLogout={onLogout}
+      hideAppbar={navTab === "board" && drilled}
+    >
+      {navTab === "analytics"
+        ? <ManagerAnalytics />
+        : <HousekeepingBoard isManager={isManager} onDrillChange={setDrilled} />}
     </AppShell>
   );
 }
