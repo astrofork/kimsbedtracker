@@ -445,6 +445,35 @@ function staffStatus(s) {
   return { tone: "o", label: "No activity" };
 }
 
+// Completed / in progress / pending are the only three states that are
+// mutually exclusive and additive to a real total — overdue is a subset of
+// pending+in-progress (a task past its TAT is still either pending or in
+// progress), not a fourth bucket, so it never gets a ring slice of its own.
+// Giving it one would double-count against whichever slice it actually
+// belongs to. Overdue stays visible as its own KPI card and in "Team status"
+// instead.
+function Donut({ segments, size, thickness }) {
+  const r = (size - thickness) / 2;
+  const c = 2 * Math.PI * r;
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  let offset = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--panel-2)" strokeWidth={thickness} />
+      {total > 0 && segments.filter((s) => s.value > 0).map((s) => {
+        const len = (s.value / total) * c;
+        const dashoffset = -offset;
+        offset += len;
+        return (
+          <circle key={s.key} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color}
+            strokeWidth={thickness} strokeDasharray={`${len} ${c - len}`} strokeDashoffset={dashoffset}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`} strokeLinecap="butt" />
+        );
+      })}
+    </svg>
+  );
+}
+
 function ManagerAnalytics() {
   const [range, setRange] = useState(1);
   const [search, setSearch] = useState("");
@@ -470,101 +499,199 @@ function ManagerAnalytics() {
     { key: "pending", label: "Pending", tone: "o",     icon: icons.clock, value: summary.pendingNow },
     { key: "doing",   label: "In Progress", tone: "clean", icon: icons.bed, value: summary.inProgressNow },
     { key: "overdue", label: "Overdue", tone: "red",   icon: icons.alert, value: summary.overdueNow },
-    { key: "done",    label: `Completed · ${rangeLabel}`, tone: "v", icon: icons.check, value: summary.completedInRange },
+    { key: "done",    label: "Completed", tag: rangeLabel, tone: "v", icon: icons.check, value: summary.completedInRange },
   ];
+
+  const ringTotal = summary.completedInRange + summary.inProgressNow + summary.pendingNow;
+  const pct = (n) => ringTotal > 0 ? Math.round((n / ringTotal) * 1000) / 10 : 0;
+  const ringLegend = [
+    { key: "done",    label: "Completed",   value: summary.completedInRange, pct: pct(summary.completedInRange), color: "var(--st-v)" },
+    { key: "doing",   label: "In Progress", value: summary.inProgressNow,    pct: pct(summary.inProgressNow),    color: "var(--st-clean)" },
+    { key: "pending", label: "Pending",     value: summary.pendingNow,       pct: pct(summary.pendingNow),       color: "var(--st-o)" },
+  ];
+
+  const working = staff.filter((s) => s.activeNow > 0);
+  const idle = staff.filter((s) => s.activeNow === 0 && s.completedInRange === 0);
+  const maxCompleted = Math.max(1, ...staff.map((s) => s.completedInRange));
 
   const q = search.trim().toLowerCase();
   const visibleStaff = staff.filter((s) => !q
     || s.name.toLowerCase().includes(q)
     || s.wards.some((w) => w.toLowerCase().includes(q)));
 
-  const attentionWards = wards.filter((w) => w.pending > 0 || w.inProgress > 0 || w.overdue > 0);
+  const urgentWards = wards.filter((w) => w.overdue > 0).length;
 
   return (
     <div className="hka">
+      <div className="hka-toolbar">
+        <div className="hka-rangewrap">
+          <Ic d={icons.clock} s={14} />
+          <select value={range} onChange={(e) => setRange(Number(e.target.value))} aria-label="Time range">
+            {RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+          </select>
+        </div>
+        <div className="pill-search hka-search-wrap">
+          <div className="field-search hka-search">
+            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+              <Ic d={icons.search} s={14} />
+            </span>
+            <input className="field" value={search} placeholder="Search staff or ward…"
+              style={{ paddingLeft: 36, paddingRight: search ? 34 : 14 }}
+              onChange={(e) => setSearch(e.target.value)} />
+            {search && (
+              <button onClick={() => setSearch("")} aria-label="Clear search"
+                style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}>
+                <Ic d={icons.x} s={13} />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
       <div className="hka-kpis">
         {kpis.map((k) => (
           <div className={"hka-kpi tone-" + k.tone} key={k.key}>
-            <span className="hka-kpi-ico"><Ic d={k.icon} s={13} /></span>
-            <div className="hka-kpi-label">{k.label}</div>
+            <span className="hka-kpi-ico"><Ic d={k.icon} s={16} /></span>
+            <div className="hka-kpi-label">{k.label}{k.tag && <span className="hka-kpi-tag">{k.tag}</span>}</div>
             <div className="hka-kpi-val">{k.value}</div>
+            <div className="hka-kpi-sub">Tasks</div>
+            <div className="hka-kpi-bar" />
           </div>
         ))}
       </div>
 
-      <div className="hka-body">
-        <div className="hka-main">
-          <div className="hka-toolbar pill-search">
-            <div className="field-search hka-search">
-              <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
-                <Ic d={icons.search} s={14} />
-              </span>
-              <input className="field" value={search} placeholder="Search staff or ward…"
-                style={{ paddingLeft: 36, paddingRight: search ? 34 : 14 }}
-                onChange={(e) => setSearch(e.target.value)} />
-              {search && (
-                <button onClick={() => setSearch("")} aria-label="Clear search"
-                  style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}>
-                  <Ic d={icons.x} s={13} />
-                </button>
-              )}
+      <div className="hka-row2">
+        <div className="hka-card">
+          <h3>Task completion overview</h3>
+          <div className="hka-ring-wrap">
+            <div className="hka-ring">
+              <Donut size={150} thickness={16} segments={ringLegend.map((s) => ({ key: s.key, value: s.value, color: s.color }))} />
+              <div className="hka-ring-center">
+                <div className="hka-ring-val">{ringTotal}</div>
+                <div className="hka-ring-label">Total tasks</div>
+              </div>
             </div>
-            <div className="hka-range" role="group" aria-label="Time range">
-              {RANGES.map((r) => (
-                <button key={r.key} className={range === r.key ? "on" : undefined} onClick={() => setRange(r.key)}>{r.label}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="hka-tblwrap">
-            <div className="hka-thead">
-              <span>Staff</span><span>Status</span><span>Wards</span><span>Active</span><span>Completed</span>
-            </div>
-            {visibleStaff.length === 0 ? (
-              <div className="hka-empty">{staff.length === 0 ? "No active housekeeping accounts." : "No staff match your search."}</div>
-            ) : visibleStaff.map((s) => {
-              const st = staffStatus(s);
-              return (
-                <div className="hka-trow" key={s.id}>
-                  <span className="hka-person">
-                    <span className="hka-avatar" style={{ background: hkaAvatarColor(s.id) }}>{hkaInitials(s.name)}</span>
-                    <span className="hka-person-name">
-                      {s.name}
-                      {s.role === "HOUSEKEEPING_MANAGER" && <span className="role-badge">Manager</span>}
-                    </span>
-                  </span>
-                  <span className={"hka-pill tone-" + st.tone}>{st.label}</span>
-                  <span className="hka-cell-muted" title={s.wards.join(", ")}>{s.wards.length ? s.wards.join(", ") : "—"}</span>
-                  <span className="hka-cell-num">{s.activeNow || "—"}</span>
-                  <span className="hka-cell-num strong">{s.completedInRange}</span>
+            <div className="hka-ring-legend">
+              {ringLegend.map((s) => (
+                <div className="hka-ring-row" key={s.key}>
+                  <i style={{ background: s.color }} />
+                  <span className="hka-ring-name">{s.label}</span>
+                  <span className="hka-ring-num">{s.value} <em>({s.pct}%)</em></span>
                 </div>
-              );
-            })}
+              ))}
+              <div className="hka-ring-row muted">
+                <i style={{ background: "var(--red)" }} />
+                <span className="hka-ring-name">Overdue</span>
+                <span className="hka-ring-num">{summary.overdueNow} <em>of the above</em></span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <aside className="hka-side">
-          <div className="hka-side-head">Wards needing attention <span className="hka-count">{attentionWards.length}</span></div>
-          {attentionWards.length === 0 ? (
-            <div className="hka-empty">All wards are clear.</div>
+        <div className="hka-card">
+          <h3>Team status</h3>
+          <div className="hka-teamrow">
+            <span className="hka-team-ico tone-clean"><Ic d={icons.users} s={16} /></span>
+            <div>
+              <div className="hka-team-val">{working.length}</div>
+              <div className="hka-team-label">Active staff · working now</div>
+            </div>
+          </div>
+          <div className="hka-teamrow">
+            <span className="hka-team-ico tone-v"><Ic d={icons.check} s={16} /></span>
+            <div>
+              <div className="hka-team-val">{summary.completedInRange}</div>
+              <div className="hka-team-label">Completed · {rangeLabel.toLowerCase()}</div>
+            </div>
+          </div>
+          <div className="hka-teamrow">
+            <span className="hka-team-ico tone-red"><Ic d={icons.alert} s={16} /></span>
+            <div>
+              <div className="hka-team-val">{summary.overdueNow}</div>
+              <div className="hka-team-label">Overdue — need attention</div>
+            </div>
+          </div>
+          {idle.length > 0 && (
+            <div className="hka-teamrow">
+              <span className="hka-team-ico tone-o"><Ic d={icons.clock} s={16} /></span>
+              <div>
+                <div className="hka-team-val">{idle.length}</div>
+                <div className="hka-team-label">No activity yet this range</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="hka-row2">
+        <div className="hka-card">
+          <h3>Staff performance</h3>
+          <div className="hka-cardsub">Performance of housekeeping staff</div>
+
+          {visibleStaff.length === 0 ? (
+            <div className="hka-empty">{staff.length === 0 ? "No active housekeeping accounts." : "No staff match your search."}</div>
           ) : (
-            <div className="hka-tasklist">
-              {attentionWards.map((w) => (
-                <div className={"hka-task" + (w.overdue > 0 ? " urgent" : "")} key={w.id}>
-                  <span className="hka-avatar sm" style={{ background: hkaAvatarColor(w.id) }}>{hkaInitials(w.name)}</span>
-                  <div className="hka-task-body">
-                    <span className="hka-task-name">{w.name}</span>
-                    <span className="hka-task-detail">
-                      {w.pending > 0 && <>{w.pending} pending</>}
-                      {w.inProgress > 0 && <>{w.pending > 0 ? " · " : ""}{w.inProgress} in progress</>}
-                      {w.overdue > 0 && <>{(w.pending > 0 || w.inProgress > 0) ? " · " : ""}<b>{w.overdue} overdue</b></>}
-                    </span>
+            <div className="hka-stafflist">
+              {visibleStaff.map((s) => {
+                const st = staffStatus(s);
+                return (
+                  <div className="hka-scard" key={s.id}>
+                    <span className="hka-avatar" style={{ background: hkaAvatarColor(s.id) }}>{hkaInitials(s.name)}</span>
+                    <div className="hka-scard-body">
+                      <div className="hka-scard-head">
+                        <span className="hka-scard-name">{s.name}</span>
+                        {s.role === "HOUSEKEEPING_MANAGER"
+                          ? <span className="hka-pill tone-clean">Manager</span>
+                          : <span className={"hka-pill tone-" + st.tone}>{st.label}</span>}
+                      </div>
+                      <div className="hka-scard-wards" title={s.wards.join(", ")}>{s.wards.length ? s.wards.join(", ") : "No wards assigned"}</div>
+                      <div className="hka-scard-stats">
+                        <div className="hka-scard-stat">
+                          <div className="hka-scard-num">{s.activeNow || 0}</div>
+                          <div className="hka-scard-statlabel">In progress</div>
+                        </div>
+                        <div className="hka-scard-progress">
+                          <div className="hka-scard-progresstop">
+                            <span className="hka-scard-num">{s.completedInRange}</span>
+                            <span className="hka-scard-statlabel">Completed</span>
+                            <span className="hka-scard-pct">{Math.round((s.completedInRange / maxCompleted) * 100)}%</span>
+                          </div>
+                          <div className="hka-bar-track"><div className="hka-bar-fill" style={{ width: `${(s.completedInRange / maxCompleted) * 100}%` }} /></div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="hka-card">
+          <div className="hka-cardhead">
+            <h3>Ward backlog</h3>
+            {urgentWards > 0 && <span className="hka-cardnote urgent">{urgentWards} ward{urgentWards !== 1 ? "s" : ""} overdue</span>}
+          </div>
+
+          {wards.length === 0 ? (
+            <div className="hka-empty">No wards with active or recent housekeeping work.</div>
+          ) : (
+            <div className="hka-wtbl-wrap">
+              <div className="hka-wtbl-head">
+                <span>Ward</span><span>Pending</span><span>In progress</span><span>Overdue</span><span>Completed</span>
+              </div>
+              {wards.map((w) => (
+                <div className={"hka-wtbl-row" + (w.overdue > 0 ? " urgent" : "")} key={w.id}>
+                  <span className="hka-wtbl-name">{w.name}</span>
+                  <span className="hka-cell-num">{w.pending}</span>
+                  <span className="hka-cell-num">{w.inProgress}</span>
+                  <span className={"hka-cell-num" + (w.overdue > 0 ? " urgent" : "")}>{w.overdue}</span>
+                  <span className="hka-cell-num">{w.completedInRange}</span>
                 </div>
               ))}
             </div>
           )}
-        </aside>
+        </div>
       </div>
     </div>
   );
