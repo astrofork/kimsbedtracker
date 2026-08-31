@@ -2872,82 +2872,99 @@ body.hero-gone .dash-toolbar{ flex-wrap:nowrap; align-items:center; }
 .hkc-foot span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* ── Housekeeping Manager Analytics ──────────────────────────────────────
-   Composition follows the manager's real order of concern, not a KPI-row-
-   then-tables template — see the comment above ManagerAnalytics() in
-   HousekeepingApp.jsx for the reasoning behind each zone. */
-.hka{max-width:980px;}
+   Colored status cards + a staff table + a "needs attention" side panel,
+   mapped from the same real fields as before: pending/in progress/overdue
+   are live counts, completed and the staff table are range-scoped. */
+.hka{max-width:1180px;}
 
-/* 1 — status: changes character depending on the real answer */
-.hka-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
-.hka-status-headline{font-size:26px;font-weight:800;letter-spacing:-.01em;color:var(--ink);}
-.hka-status.urgent .hka-status-headline{color:var(--red);}
-.hka-status-sub{font-size:12.5px;color:var(--ink-3);margin-top:4px;}
-.hka-status.urgent .hka-status-sub{color:color-mix(in srgb,var(--red) 75%,var(--ink-3));}
+.hka-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;}
+.hka-kpi{position:relative;border-radius:14px;padding:16px 18px;}
+.hka-kpi.tone-o{background:var(--st-o-bg);}
+.hka-kpi.tone-clean{background:var(--st-clean-bg);}
+.hka-kpi.tone-red{background:var(--red-bg);}
+.hka-kpi.tone-v{background:var(--st-v-bg);}
+.hka-kpi-ico{
+  position:absolute;top:14px;right:14px;width:24px;height:24px;border-radius:50%;
+  background:var(--panel);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+}
+.hka-kpi.tone-o .hka-kpi-ico{color:var(--st-o);}
+.hka-kpi.tone-clean .hka-kpi-ico{color:var(--st-clean);}
+.hka-kpi.tone-red .hka-kpi-ico{color:var(--red);}
+.hka-kpi.tone-v .hka-kpi-ico{color:var(--st-v);}
+.hka-kpi-label{font-size:11px;font-weight:700;letter-spacing:.02em;margin-bottom:8px;padding-right:30px;}
+.hka-kpi.tone-o .hka-kpi-label{color:var(--st-o);}
+.hka-kpi.tone-clean .hka-kpi-label{color:var(--st-clean);}
+.hka-kpi.tone-red .hka-kpi-label{color:var(--red);}
+.hka-kpi.tone-v .hka-kpi-label{color:var(--st-v);}
+.hka-kpi-val{font-size:28px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;color:var(--ink);}
+@media (max-width:640px){
+  .hka-kpis{grid-template-columns:repeat(2,1fr);}
+}
 
-.hka-range{display:flex;gap:4px;margin-top:2px;}
-.hka-range button{padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;border:1px solid transparent;background:none;color:var(--ink-3);cursor:pointer;}
+.hka-body{display:grid;grid-template-columns:1fr 300px;gap:24px;align-items:start;}
+.hka-main{min-width:0;}
+.hka-side{border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel);}
+@media (max-width:900px){
+  .hka-body{grid-template-columns:1fr;}
+}
+
+.hka-toolbar{display:flex;gap:10px;margin-bottom:14px;}
+.hka-search{position:relative;flex:1;min-width:0;}
+.hka-range{display:flex;gap:4px;flex-shrink:0;}
+.hka-range button{padding:0 12px;height:36px;border-radius:8px;font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--panel);color:var(--ink-3);cursor:pointer;}
 .hka-range button:hover{color:var(--ink);}
-.hka-range button.on{background:var(--panel-2);border-color:var(--line);color:var(--ink);}
+.hka-range button.on{background:var(--primary);border-color:var(--primary);color:#fff;}
 
-/* 2 — completion: one segmented bar built from real counts, no invented % */
-.hka-progress{margin:18px 0 26px;}
-.hka-pbar{display:flex;height:10px;border-radius:3px;overflow:hidden;background:var(--panel-2);}
-.hka-pbar.empty{background:var(--panel-2);}
-.hka-pbar .seg{display:block;}
-.hka-pbar .seg.done{background:var(--st-v);}
-.hka-pbar .seg.doing{background:var(--st-clean);}
-.hka-pbar .seg.wait{background:var(--st-o);}
-.hka-legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:9px;font-size:12px;color:var(--ink-2);}
-.hka-legend b{color:var(--ink);font-variant-numeric:tabular-nums;font-weight:700;}
-.hka-legend i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;}
-.hka-legend i.done{background:var(--st-v);}
-.hka-legend i.doing{background:var(--st-clean);}
-.hka-legend i.wait{background:var(--st-o);}
-
-/* 3 + 4 — two zones, side by side, deliberately unequal width */
-.hka-cols{display:grid;grid-template-columns:1.15fr 0.85fr;gap:40px;}
-@media (max-width:860px){
-  .hka-cols{grid-template-columns:1fr;gap:28px;}
+.hka-tblwrap{border:1px solid var(--line);border-radius:12px;overflow:hidden;}
+.hka-thead,.hka-trow{
+  display:grid;grid-template-columns:1.7fr .9fr 1.3fr .7fr .9fr;
+  align-items:center;gap:10px;padding:11px 16px;
+}
+.hka-thead{
+  font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--ink-3);background:var(--panel-2);border-bottom:1px solid var(--line);
+}
+.hka-trow+.hka-trow{border-top:1px solid var(--line);}
+.hka-trow:hover{background:color-mix(in srgb,var(--primary) 4%,var(--panel));}
+.hka-person{display:flex;align-items:center;gap:9px;min-width:0;}
+.hka-avatar{
+  flex-shrink:0;width:28px;height:28px;border-radius:50%;color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;letter-spacing:.02em;
+}
+.hka-avatar.sm{width:24px;height:24px;font-size:10px;}
+.hka-person-name{font-size:13px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px;}
+.hka-pill{
+  justify-self:start;display:inline-flex;align-items:center;padding:3px 10px;
+  border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap;
+}
+.hka-pill.tone-o{background:var(--st-o-bg);color:var(--st-o);}
+.hka-pill.tone-clean{background:var(--st-clean-bg);color:var(--st-clean);}
+.hka-pill.tone-v{background:var(--st-v-bg);color:var(--st-v);}
+.hka-cell-muted{font-size:12px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.hka-cell-num{font-size:13px;font-variant-numeric:tabular-nums;color:var(--ink-2);}
+.hka-cell-num.strong{font-weight:700;color:var(--ink);}
+.hka-empty{font-size:12.5px;color:var(--ink-3);padding:16px;}
+@media (max-width:700px){
+  .hka-thead{display:none;}
+  .hka-trow{grid-template-columns:1fr auto;grid-template-areas:"person status" "wards wards" "active completed";row-gap:6px;}
+  .hka-person{grid-area:person;}
+  .hka-pill{grid-area:status;justify-self:end;}
+  .hka-cell-muted{grid-area:wards;}
+  .hka-trow .hka-cell-num:nth-of-type(1){grid-area:active;}
+  .hka-trow .hka-cell-num:nth-of-type(2){grid-area:completed;justify-self:end;}
 }
 
-.hka-section h3{
-  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
-  color:var(--ink-3);margin:0 0 4px;
-}
-.hka-count{font-weight:700;color:var(--ink-2);margin-left:2px;}
-.hka-section-note{font-size:12.5px;color:var(--ink-2);margin-bottom:12px;}
-.hka-section-note b{color:var(--ink);font-weight:700;}
-.hka-empty{font-size:12.5px;color:var(--ink-3);padding:6px 0;}
-
-/* Staff groups — three different shapes for three different questions */
-.hka-group+.hka-group{margin-top:18px;}
-.hka-group-head{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px;}
-.hka-group-head b{font-weight:700;color:var(--ink-3);margin-left:4px;}
-.hka-group.flag .hka-group-head{color:var(--st-o);}
-.hka-group.flag .hka-group-head b{color:var(--st-o);}
-
-.hka-namewrap{display:flex;flex-wrap:wrap;gap:6px 14px;}
-.hka-name-plain{font-size:13px;color:var(--ink);}
-
-.hka-line{display:flex;align-items:center;gap:9px;padding:6px 0;}
-.hka-line-name{font-size:13px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:6px;}
-.hka-line-meta{font-size:12px;color:var(--ink-3);margin-left:auto;padding-left:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-
-.hka-bar-wrap{margin-left:auto;flex-shrink:0;display:flex;align-items:center;gap:8px;width:110px;}
-.hka-bar-track{flex:1;height:4px;border-radius:99px;background:var(--panel-2);overflow:hidden;}
-.hka-bar-fill{height:100%;background:var(--primary);border-radius:99px;}
-.hka-bar-num{flex-shrink:0;width:18px;text-align:right;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink);}
-
-/* Ward list — severity-ordered, clear wards recede instead of matching weight */
-.hka-wardlist{display:flex;flex-direction:column;}
-.hka-wrow{display:flex;align-items:baseline;gap:14px;padding:8px 0;border-bottom:1px solid var(--line);}
-.hka-wrow:last-child{border-bottom:none;}
-.hka-wrow-name{font-size:13.5px;font-weight:700;color:var(--ink);flex-shrink:0;}
-.hka-wrow-detail{font-size:12.5px;color:var(--ink-2);text-align:right;margin-left:auto;}
-.hka-wrow-detail b.urgent{color:var(--red);font-weight:700;}
-.hka-wrow-done{color:var(--ink-3);}
-.hka-wrow.clear{opacity:.55;}
-.hka-wrow.clear .hka-wrow-name{font-weight:600;}
+.hka-side-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-3);margin-bottom:12px;}
+.hka-count{color:var(--ink-2);}
+.hka-tasklist{display:flex;flex-direction:column;}
+.hka-task{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);}
+.hka-task:last-child{border-bottom:none;}
+.hka-task-body{min-width:0;}
+.hka-task-name{display:block;font-size:13px;font-weight:700;color:var(--ink);}
+.hka-task-detail{display:block;font-size:11.5px;color:var(--ink-3);margin-top:2px;}
+.hka-task.urgent .hka-task-detail b{color:var(--red);font-weight:700;}
 
 .hk-illo-in{opacity:0;transform:scale(.94);transform-box:view-box;transform-origin:220px 230px;animation:hk-pop .9s cubic-bezier(.22,1,.36,1) .05s forwards;}
 @keyframes hk-pop{to{opacity:1;transform:scale(1)}}

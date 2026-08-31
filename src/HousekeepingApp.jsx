@@ -410,22 +410,10 @@ function HousekeepingBoard({ isManager, onDrillChange }) {
 // ward, not just the ones they personally clean. Staff are ward-assigned, not
 // task-assigned (see housekeepingService.managerAnalytics on the backend for
 // why per-person "assigned/remaining" isn't a fact the schema supports), so
-// this reports what's actually true per person: currently-active tasks and
-// tasks they personally completed. Backlog (pending/overdue) is reported per
-// ward, since a ward's queue is shared by everyone assigned to it.
-//
-// The composition follows the manager's actual order of concern rather than
-// a KPI-row-then-tables template:
-//   1. Is anything overdue right now? — a status line that changes character
-//      depending on the real answer (urgent vs calm), not a stat box.
-//   2. How is completion trending in the selected range? — one segmented bar
-//      built from the three real counts, no invented percentage.
-//   3. Who needs attention? — staff split into three real, mutually exclusive
-//      groups (no activity / working now / completed something), because
-//      "who hasn't done anything" is the one question a ranked list buries.
-//   4. Where is work piling up? — wards as a severity-ordered list, not a
-//      table, with fully-clear wards visually receding instead of taking the
-//      same weight as the ones that need eyes on them. ─────────────────────
+// the table reports what's actually true per person: their current activity
+// state, which wards they cover, and what they've completed. Backlog
+// (pending/overdue) stays per ward, since a ward's queue is shared by
+// everyone assigned to it. ──────────────────────────────────────────────
 const RANGES = [
   { key: 1,  label: "Today" },
   { key: 7,  label: "7 days" },
@@ -434,21 +422,32 @@ const RANGES = [
 
 // Local to this page — mirrors ConsultantApp's ward-avatar hashing so staff
 // initials read as part of the same visual language as the rest of BedFlow,
-// without reaching into another page's private helpers.
+// without reaching into another page's private helpers. Used for both staff
+// and ward rows below.
 const HKA_AVATAR_COLORS = ["#0d9488", "#2563eb", "#7c3aed", "#d97706", "#dc2626", "#0891b2"];
-function staffAvatarColor(key) {
+function hkaAvatarColor(key) {
   const s = String(key);
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return HKA_AVATAR_COLORS[h % HKA_AVATAR_COLORS.length];
 }
-function staffInitials(name) {
+function hkaInitials(name) {
   const words = (name || "?").trim().split(/\s+/);
   return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : (name || "?").slice(0, 2).toUpperCase();
 }
 
+// A person's status is a real, honest read of two facts already on the row —
+// whether they hold an active task right now, and whether they've completed
+// anything in the selected range — not a fabricated field.
+function staffStatus(s) {
+  if (s.activeNow > 0) return { tone: "clean", label: "Working" };
+  if (s.completedInRange > 0) return { tone: "v", label: "Completed" };
+  return { tone: "o", label: "No activity" };
+}
+
 function ManagerAnalytics() {
   const [range, setRange] = useState(1);
+  const [search, setSearch] = useState("");
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
 
@@ -467,137 +466,105 @@ function ManagerAnalytics() {
 
   const { summary, staff, wards } = data;
 
-  const overdueWardNames = wards.filter((w) => w.overdue > 0).map((w) => w.name);
-  const totalTracked = summary.completedInRange + summary.pendingNow + summary.inProgressNow;
-  const maxCompleted = Math.max(1, ...staff.map((s) => s.completedInRange));
+  const kpis = [
+    { key: "pending", label: "Pending", tone: "o",     icon: icons.clock, value: summary.pendingNow },
+    { key: "doing",   label: "In Progress", tone: "clean", icon: icons.bed, value: summary.inProgressNow },
+    { key: "overdue", label: "Overdue", tone: "red",   icon: icons.alert, value: summary.overdueNow },
+    { key: "done",    label: `Completed · ${rangeLabel}`, tone: "v", icon: icons.check, value: summary.completedInRange },
+  ];
 
-  const working = staff.filter((s) => s.activeNow > 0);
-  const idle = staff.filter((s) => s.activeNow === 0 && s.completedInRange === 0);
-  const finished = staff.filter((s) => s.activeNow === 0 && s.completedInRange > 0);
+  const q = search.trim().toLowerCase();
+  const visibleStaff = staff.filter((s) => !q
+    || s.name.toLowerCase().includes(q)
+    || s.wards.some((w) => w.toLowerCase().includes(q)));
 
-  const worstWard = wards.length ? wards[0] : null;
-  const anyBacklog = wards.some((w) => w.pending > 0 || w.inProgress > 0 || w.overdue > 0);
+  const attentionWards = wards.filter((w) => w.pending > 0 || w.inProgress > 0 || w.overdue > 0);
 
   return (
     <div className="hka">
-      <div className="hka-top">
-        <div className={"hka-status" + (summary.overdueNow > 0 ? " urgent" : "")}>
-          <div className="hka-status-headline">
-            {summary.overdueNow > 0
-              ? `${summary.overdueNow} bed${summary.overdueNow !== 1 ? "s" : ""} overdue`
-              : "No beds overdue"}
+      <div className="hka-kpis">
+        {kpis.map((k) => (
+          <div className={"hka-kpi tone-" + k.tone} key={k.key}>
+            <span className="hka-kpi-ico"><Ic d={k.icon} s={13} /></span>
+            <div className="hka-kpi-label">{k.label}</div>
+            <div className="hka-kpi-val">{k.value}</div>
           </div>
-          {summary.overdueNow > 0 && (
-            <div className="hka-status-sub">{overdueWardNames.join(" · ")}</div>
-          )}
-        </div>
-        <div className="hka-range" role="group" aria-label="Time range">
-          {RANGES.map((r) => (
-            <button key={r.key} className={range === r.key ? "on" : undefined} onClick={() => setRange(r.key)}>{r.label}</button>
-          ))}
-        </div>
+        ))}
       </div>
 
-      <div className="hka-progress">
-        {totalTracked > 0 ? (
-          <div className="hka-pbar">
-            {summary.completedInRange > 0 && <span className="seg done" style={{ flexGrow: summary.completedInRange }} />}
-            {summary.inProgressNow > 0 && <span className="seg doing" style={{ flexGrow: summary.inProgressNow }} />}
-            {summary.pendingNow > 0 && <span className="seg wait" style={{ flexGrow: summary.pendingNow }} />}
-          </div>
-        ) : (
-          <div className="hka-pbar empty" />
-        )}
-        <div className="hka-legend">
-          <span><i className="done" />Completed <b>{summary.completedInRange}</b> · {rangeLabel.toLowerCase()}</span>
-          <span><i className="doing" />In progress <b>{summary.inProgressNow}</b></span>
-          <span><i className="wait" />Pending <b>{summary.pendingNow}</b></span>
-        </div>
-      </div>
-
-      <div className="hka-cols">
-        {/* Who needs attention */}
-        <section className="hka-section">
-          <h3>Staff <span className="hka-count">{summary.totalStaff}</span></h3>
-
-          {idle.length > 0 && (
-            <div className="hka-group flag">
-              <div className="hka-group-head">No activity yet <b>{idle.length}</b></div>
-              <div className="hka-namewrap">
-                {idle.map((s) => <span className="hka-name-plain" key={s.id}>{s.name}</span>)}
-              </div>
+      <div className="hka-body">
+        <div className="hka-main">
+          <div className="hka-toolbar pill-search">
+            <div className="field-search hka-search">
+              <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
+                <Ic d={icons.search} s={14} />
+              </span>
+              <input className="field" value={search} placeholder="Search staff or ward…"
+                style={{ paddingLeft: 36, paddingRight: search ? 34 : 14 }}
+                onChange={(e) => setSearch(e.target.value)} />
+              {search && (
+                <button onClick={() => setSearch("")} aria-label="Clear search"
+                  style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}>
+                  <Ic d={icons.x} s={13} />
+                </button>
+              )}
             </div>
-          )}
-
-          {working.length > 0 && (
-            <div className="hka-group">
-              <div className="hka-group-head">Working now <b>{working.length}</b></div>
-              {working.map((s) => (
-                <div className="hka-line" key={s.id}>
-                  <span className="hka-line-name">{s.name}</span>
-                  <span className="hka-line-meta">{s.wards.join(", ") || "—"}</span>
-                </div>
+            <div className="hka-range" role="group" aria-label="Time range">
+              {RANGES.map((r) => (
+                <button key={r.key} className={range === r.key ? "on" : undefined} onClick={() => setRange(r.key)}>{r.label}</button>
               ))}
             </div>
-          )}
+          </div>
 
-          {finished.length > 0 && (
-            <div className="hka-group">
-              <div className="hka-group-head">Completed <b>{finished.length}</b></div>
-              {finished.map((s) => (
-                <div className="hka-line" key={s.id}>
-                  <span className="hka-line-name">
-                    {s.name}
-                    {s.role === "HOUSEKEEPING_MANAGER" && <span className="role-badge">Manager</span>}
+          <div className="hka-tblwrap">
+            <div className="hka-thead">
+              <span>Staff</span><span>Status</span><span>Wards</span><span>Active</span><span>Completed</span>
+            </div>
+            {visibleStaff.length === 0 ? (
+              <div className="hka-empty">{staff.length === 0 ? "No active housekeeping accounts." : "No staff match your search."}</div>
+            ) : visibleStaff.map((s) => {
+              const st = staffStatus(s);
+              return (
+                <div className="hka-trow" key={s.id}>
+                  <span className="hka-person">
+                    <span className="hka-avatar" style={{ background: hkaAvatarColor(s.id) }}>{hkaInitials(s.name)}</span>
+                    <span className="hka-person-name">
+                      {s.name}
+                      {s.role === "HOUSEKEEPING_MANAGER" && <span className="role-badge">Manager</span>}
+                    </span>
                   </span>
-                  <div className="hka-bar-wrap">
-                    <div className="hka-bar-track"><div className="hka-bar-fill" style={{ width: `${(s.completedInRange / maxCompleted) * 100}%` }} /></div>
-                    <span className="hka-bar-num">{s.completedInRange}</span>
-                  </div>
+                  <span className={"hka-pill tone-" + st.tone}>{st.label}</span>
+                  <span className="hka-cell-muted" title={s.wards.join(", ")}>{s.wards.length ? s.wards.join(", ") : "—"}</span>
+                  <span className="hka-cell-num">{s.activeNow || "—"}</span>
+                  <span className="hka-cell-num strong">{s.completedInRange}</span>
                 </div>
-              ))}
-            </div>
-          )}
-
-          {staff.length === 0 && <div className="hka-empty">No active housekeeping accounts.</div>}
-        </section>
-
-        {/* Where work is accumulating */}
-        <section className="hka-section">
-          <h3>Wards</h3>
-          <div className="hka-section-note">
-            {anyBacklog && worstWard && (worstWard.pending > 0 || worstWard.inProgress > 0 || worstWard.overdue > 0)
-              ? <>Most backlog: <b>{worstWard.name}</b></>
-              : "All wards clear"}
+              );
+            })}
           </div>
+        </div>
 
-          {wards.length === 0 ? (
-            <div className="hka-empty">No wards with active or recent housekeeping work.</div>
+        <aside className="hka-side">
+          <div className="hka-side-head">Wards needing attention <span className="hka-count">{attentionWards.length}</span></div>
+          {attentionWards.length === 0 ? (
+            <div className="hka-empty">All wards are clear.</div>
           ) : (
-            <div className="hka-wardlist">
-              {wards.map((w) => {
-                const clear = w.pending === 0 && w.inProgress === 0 && w.overdue === 0;
-                return (
-                  <div className={"hka-wrow" + (clear ? " clear" : "")} key={w.id}>
-                    <span className="hka-wrow-name">{w.name}</span>
-                    <span className="hka-wrow-detail">
-                      {clear ? (
-                        "No pending work"
-                      ) : (
-                        <>
-                          {w.pending > 0 && <>{w.pending} pending</>}
-                          {w.inProgress > 0 && <>{w.pending > 0 ? " · " : ""}{w.inProgress} in progress</>}
-                          {w.overdue > 0 && <>{(w.pending > 0 || w.inProgress > 0) ? " · " : ""}<b className="urgent">{w.overdue} overdue</b></>}
-                        </>
-                      )}
-                      {w.completedInRange > 0 && <span className="hka-wrow-done"> · {w.completedInRange} completed</span>}
+            <div className="hka-tasklist">
+              {attentionWards.map((w) => (
+                <div className={"hka-task" + (w.overdue > 0 ? " urgent" : "")} key={w.id}>
+                  <span className="hka-avatar sm" style={{ background: hkaAvatarColor(w.id) }}>{hkaInitials(w.name)}</span>
+                  <div className="hka-task-body">
+                    <span className="hka-task-name">{w.name}</span>
+                    <span className="hka-task-detail">
+                      {w.pending > 0 && <>{w.pending} pending</>}
+                      {w.inProgress > 0 && <>{w.pending > 0 ? " · " : ""}{w.inProgress} in progress</>}
+                      {w.overdue > 0 && <>{(w.pending > 0 || w.inProgress > 0) ? " · " : ""}<b>{w.overdue} overdue</b></>}
                     </span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           )}
-        </section>
+        </aside>
       </div>
     </div>
   );
