@@ -514,14 +514,12 @@ export const api = {
 
   // ── Housekeeping ──────────────────────────────────────────────────────────
   hkBoard:    () => req("/housekeeping/board"),
-  hkZones:    () => req("/housekeeping/zones"),
   hkStart:    (bedId) => req(`/housekeeping/beds/${bedId}/start`, { method: "POST" }),
   hkComplete: (bedId) => req(`/housekeeping/beds/${bedId}/complete`, { method: "POST" }),
-  // Admin
-  hkAdminZones:  () => req("/manager/housekeeping/zones"),
-  hkSaveZone:    (id, body) => req(id ? `/manager/housekeeping/zones/${id}` : "/manager/housekeeping/zones",
-                                   { method: id ? "PUT" : "POST", body: JSON.stringify(body) }),
-  hkDeleteZone:  (id) => req(`/manager/housekeeping/zones/${id}`, { method: "DELETE" }),
+  hkManagerAnalytics: (rangeDays) => req(`/housekeeping/manager/analytics?range=${rangeDays}`),
+  hkAdminAssignments: () => req("/manager/housekeeping/assignments"),
+  hkSaveUserWards:    (userId, wardIds) => req(`/manager/housekeeping/assignments/${userId}`,
+                                   { method: "PUT", body: JSON.stringify({ wardIds }) }),
   mgrDischargePhases: () => req("/manager/discharge-phases"),
   mgrUpdateDischargePhase: (id, data) =>
     req(`/manager/discharge-phases/${id}`, { method: "PUT", body: JSON.stringify(data) }),

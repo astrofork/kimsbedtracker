@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { PieChart, Pie, Cell } from "recharts";
 import { api, toastErr, getSocket, onReconnect } from "./lib.js";
 import { AppShell } from "./shell.jsx";
 import { Ic, icons } from "./ui.jsx";
@@ -255,7 +256,7 @@ function BedsPage({ ward, tat, busyBed, onStart, onComplete, onBack, initialSear
 
 // ── Board tab — unchanged from the original: ward cards drilling into bed
 // cards. This is the existing product; it is not part of the redesign. ─────
-function HousekeepingBoard({ isManager, onDrillChange }) {
+function HousekeepingBoard({ isManager, onDrillChange, pendingWard, onWardOpened }) {
   const [board, setBoard] = useState(null);
   const [err, setErr] = useState("");
   const [busyBed, setBusyBed] = useState(null);
@@ -265,6 +266,28 @@ function HousekeepingBoard({ isManager, onDrillChange }) {
   const [wardFilter, setWardFilter] = useState("all");
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(() => setToast(""), 2200); }, []);
+
+  // A ward clicked from the Dashboard's Ward backlog table arrives here as
+  // pendingWard — a fresh { id, seq } object each time (seq guarantees the
+  // effect fires even for the same ward clicked twice in a row, since object
+  // identity, not just the id, changes). If the manager isn't personally
+  // assigned to that ward, it simply won't be found in their own board data
+  // and this quietly does nothing — there's no bed-level view to jump to for
+  // a ward outside their assignment.
+  //
+  // onWardOpened tells the parent to clear pendingWard once it's consumed.
+  // Without that, the parent's pendingWard stays set forever after the first
+  // ward click, and since this component unmounts/remounts every time the
+  // user leaves and returns to this tab (only one of Board/Dashboard is
+  // mounted at a time), the very next plain visit to Housekeeping would
+  // replay the same stale "jump to that ward" on mount instead of showing
+  // the ward grid.
+  useEffect(() => {
+    if (pendingWard) {
+      setOpenWard(pendingWard.id);
+      onWardOpened?.();
+    }
+  }, [pendingWard]);
 
   const load = useCallback(() => {
     api.hkBoard()
@@ -340,6 +363,14 @@ function HousekeepingBoard({ isManager, onDrillChange }) {
     return true;
   });
 
+  if (!board && !err) {
+    return (
+      <div className="hka-spinner-wrap">
+        <div className="hka-spinner" />
+      </div>
+    );
+  }
+
   return (
     <>
       {err && <div style={{ color: "var(--red)", fontSize: 12, marginBottom: 10 }}>{err}</div>}
@@ -391,7 +422,7 @@ function HousekeepingBoard({ isManager, onDrillChange }) {
                 ))}
               </div>
             </div>
-            <div className="card-grid">
+            <div className="card-grid hk-ward-grid hka-content-in">
               {visibleWards.map((w) => (
                 <WardCard key={w.id} ward={w} tat={tat} onClick={() => setOpenWard(w.id)} />
               ))}
@@ -415,15 +446,11 @@ function HousekeepingBoard({ isManager, onDrillChange }) {
 // (pending/overdue) stays per ward, since a ward's queue is shared by
 // everyone assigned to it. ──────────────────────────────────────────────
 const RANGES = [
-  { key: 1,  label: "Today" },
-  { key: 7,  label: "7 days" },
-  { key: 30, label: "30 days" },
+  { key: 1,  label: "Today (24h)", short: "Today" },
+  { key: 7,  label: "Last 7 Days", short: "7 Days" },
+  { key: 30, label: "Last 30 Days", short: "30 Days" },
 ];
 
-// Local to this page — mirrors ConsultantApp's ward-avatar hashing so staff
-// initials read as part of the same visual language as the rest of BedFlow,
-// without reaching into another page's private helpers. Used for both staff
-// and ward rows below.
 const HKA_AVATAR_COLORS = ["#0d9488", "#2563eb", "#7c3aed", "#d97706", "#dc2626", "#0891b2"];
 function hkaAvatarColor(key) {
   const s = String(key);
@@ -436,262 +463,617 @@ function hkaInitials(name) {
   return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : (name || "?").slice(0, 2).toUpperCase();
 }
 
-// A person's status is a real, honest read of two facts already on the row —
-// whether they hold an active task right now, and whether they've completed
-// anything in the selected range — not a fabricated field.
 function staffStatus(s) {
-  if (s.activeNow > 0) return { tone: "clean", label: "Working" };
-  if (s.completedInRange > 0) return { tone: "v", label: "Completed" };
-  return { tone: "o", label: "No activity" };
+  if (s.activeNow > 0) return { tone: "clean", label: "Working Now", sortOrder: 1 };
+  if (s.completedInRange > 0) return { tone: "v", label: "Completed", sortOrder: 2 };
+  return { tone: "o", label: "Available", sortOrder: 3 };
 }
 
-// Completed / in progress / pending are the only three states that are
-// mutually exclusive and additive to a real total — overdue is a subset of
-// pending+in-progress (a task past its TAT is still either pending or in
-// progress), not a fourth bucket, so it never gets a ring slice of its own.
-// Giving it one would double-count against whichever slice it actually
-// belongs to. Overdue stays visible as its own KPI card and in "Team status"
-// instead.
-function Donut({ segments, size, thickness }) {
-  const r = (size - thickness) / 2;
-  const c = 2 * Math.PI * r;
-  const total = segments.reduce((sum, s) => sum + s.value, 0);
-  let offset = 0;
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+// A plain vertical mouse wheel does nothing over a horizontally-scrolling
+// row unless something remaps it — trackpads and touch already scroll it
+// natively, but a normal mouse wheel needs this to reach it at all.
+function scrollHorizontally(e) {
+  if (e.deltaY === 0) return;
+  e.currentTarget.scrollLeft += e.deltaY;
+  e.preventDefault();
+}
+
+// Rendered with Recharts rather than hand-rolled SVG — real grow-in
+// animation, gapped rounded segments instead of one continuous band, and
+// anti-aliased arcs a plain stroke-dasharray circle can't match. Segments
+// always stay mounted, including ones at 0 (e.g. "Pending" on a day nothing
+// is waiting): that's what lets the ring animate smoothly to its new shape
+// when the range switches between Today / 7 days / 30 days instead of a
+// segment just popping in or vanishing.
+function EnhancedDonut({ segments, size = 150, thickness = 16, hoveredKey, onHover, centerTotal, completionPct }) {
+  const outerR = size / 2;
+  const innerR = outerR - thickness;
+  const total = segments.reduce((sum, s) => sum + (s.value || 0), 0);
+  const hoveredSeg = segments.find((s) => s.key === hoveredKey);
+  const chartData = segments.map((s) => ({ ...s, value: s.value || 0 }));
+
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--panel-2)" strokeWidth={thickness} />
-      {total > 0 && segments.filter((s) => s.value > 0).map((s) => {
-        const len = (s.value / total) * c;
-        const dashoffset = -offset;
-        offset += len;
-        return (
-          <circle key={s.key} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color}
-            strokeWidth={thickness} strokeDasharray={`${len} ${c - len}`} strokeDashoffset={dashoffset}
-            transform={`rotate(-90 ${size / 2} ${size / 2})`} strokeLinecap="butt" />
-        );
-      })}
-    </svg>
+    <div className="hka-ring" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="hka-ring-track">
+        <circle cx={size / 2} cy={size / 2} r={(outerR + innerR) / 2} fill="none" stroke="var(--panel-2)" strokeWidth={thickness} />
+      </svg>
+      <PieChart width={size} height={size} className="hka-ring-chart">
+        <Pie
+          data={chartData}
+          dataKey="value"
+          nameKey="label"
+          cx="50%"
+          cy="50%"
+          innerRadius={innerR}
+          outerRadius={outerR}
+          startAngle={90}
+          endAngle={-270}
+          paddingAngle={total > 0 ? 3 : 0}
+          cornerRadius={8}
+          stroke="none"
+          isAnimationActive
+          animationDuration={700}
+          animationEasing="ease-out"
+          onMouseEnter={(_entry, index) => onHover?.(chartData[index]?.key)}
+          onMouseLeave={() => onHover?.(null)}
+        >
+          {chartData.map((s) => (
+            <Cell
+              key={s.key}
+              fill={s.color}
+              className="hka-ring-cell"
+              style={{ opacity: hoveredKey && hoveredKey !== s.key ? 0.4 : 1, cursor: "pointer" }}
+            />
+          ))}
+        </Pie>
+      </PieChart>
+      <div className="hka-ring-center">
+        {hoveredSeg ? (
+          <>
+            <div className="hka-ring-val" style={{ color: hoveredSeg.color }}>{hoveredSeg.value}</div>
+            <div className="hka-ring-label">{hoveredSeg.label}</div>
+            <div className="hka-ring-subrate" style={{ color: hoveredSeg.color, background: `color-mix(in srgb, ${hoveredSeg.color} 15%, transparent)` }}>{hoveredSeg.pct}%</div>
+          </>
+        ) : (
+          <>
+            <div className="hka-ring-val">{centerTotal}</div>
+            <div className="hka-ring-label">Total Workload</div>
+            <div className="hka-ring-subrate">{completionPct}% Cleared</div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
-function ManagerAnalytics() {
+function ManagerAnalytics({ isManager = true, onOpenWard }) {
   const [range, setRange] = useState(1);
-  const [search, setSearch] = useState("");
   const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(Date.now());
+  const [refreshing, setRefreshing] = useState(false);
+  const [hoveredSeg, setHoveredSeg] = useState(null);
 
+  const [staffSearch, setStaffSearch] = useState("");
+  const [staffFilter, setStaffFilter] = useState("all"); // "all" | "working" | "completed" | "idle"
+  const [staffSort, setStaffSort] = useState("completed"); // "completed" | "active" | "name"
+  const [wardSearch, setWardSearch] = useState("");
+  const [wardFilter, setWardFilter] = useState("all"); // "all" | "overdue" | "active" | "clear"
+  const [wardSort, setWardSort] = useState("overdue"); // "overdue" | "pending" | "completed" | "name"
+
+  // The staff panel's height is set directly from the command card's real
+  // measured height — not from CSS grid/flex auto-sizing, which cannot be
+  // trusted to cap a variable-length list's contribution here (tried twice:
+  // it kept leaking the full unclipped row count into the row's intrinsic
+  // height before any cap applied, dragging the left card down with it).
+  // commandEl is state, not a plain ref, because this component returns
+  // early for loading/error before the ref'd element exists — a callback
+  // ref re-fires when it actually mounts, where a one-shot effect on a
+  // plain ref would miss it.
+  const [commandEl, setCommandEl] = useState(null);
+  const [matchedHeight, setMatchedHeight] = useState(null);
   useEffect(() => {
-    let live = true;
-    api.hkManagerAnalytics(range)
-      .then((d) => { if (live) { setData(d); setErr(""); } })
-      .catch((e) => { if (live) setErr(toastErr(e)); });
-    return () => { live = false; };
+    if (!commandEl || typeof ResizeObserver === "undefined") return;
+    const apply = () => setMatchedHeight(window.innerWidth > 1080 ? commandEl.getBoundingClientRect().height : null);
+    const ro = new ResizeObserver(apply);
+    ro.observe(commandEl);
+    window.addEventListener("resize", apply);
+    apply();
+    return () => { ro.disconnect(); window.removeEventListener("resize", apply); };
+  }, [commandEl]);
+
+  const loadData = useCallback((showSpinner = false) => {
+    if (showSpinner) setRefreshing(true);
+    return api.hkManagerAnalytics(range)
+      .then((d) => {
+        setData(d);
+        setErr("");
+        setLastUpdated(Date.now());
+      })
+      .catch((e) => {
+        setErr(toastErr(e));
+      })
+      .finally(() => {
+        setLoading(false);
+        setRefreshing(false);
+      });
   }, [range]);
 
-  const rangeLabel = RANGES.find((r) => r.key === range)?.label || "Today";
+  useEffect(() => {
+    setLoading(!data);
+    // Switching ranges after the first load already has data on screen, so
+    // there's nothing to skeleton over — reuse the same "Syncing…" spinner
+    // the manual refresh button shows instead of silently swapping numbers.
+    loadData(!!data);
+  }, [loadData, range]);
 
-  if (err) return <div style={{ color: "var(--red)", fontSize: 12 }}>{err}</div>;
-  if (!data) return null;
+  // Real-time live updates via socket
+  useEffect(() => {
+    const socket = getSocket();
+    let timer = null;
+    const onBedChange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { loadData(false); }, 600);
+    };
+    socket.on("hk:bed", onBedChange);
+    const offReconnect = onReconnect(socket, () => loadData(false));
+    return () => {
+      socket.off("hk:bed", onBedChange);
+      offReconnect();
+      clearTimeout(timer);
+    };
+  }, [loadData]);
 
-  const { summary, staff, wards } = data;
+  const rangeObj = RANGES.find((r) => r.key === range) || RANGES[0];
+  const rangeLabel = rangeObj.short;
 
-  const kpis = [
-    { key: "pending", label: "Pending", tone: "o",     icon: icons.clock, value: summary.pendingNow },
-    { key: "doing",   label: "In Progress", tone: "clean", icon: icons.bed, value: summary.inProgressNow },
-    { key: "overdue", label: "Overdue", tone: "red",   icon: icons.alert, value: summary.overdueNow },
-    { key: "done",    label: "Completed", tag: rangeLabel, tone: "v", icon: icons.check, value: summary.completedInRange },
-  ];
+  if (err && !data) {
+    return (
+      <div className="hka-empty-state card" style={{ padding: 40, borderColor: "var(--red)" }}>
+        <span style={{ color: "var(--red)" }}><Ic d={icons.alert} s={32} /></span>
+        <div className="hka-empty-title" style={{ color: "var(--red)" }}>Unable to load analytics</div>
+        <div className="hka-empty-desc">{err}</div>
+        <button className="btn btn-primary" onClick={() => loadData(true)} style={{ marginTop: 10 }}>
+          <Ic d={icons.refresh} s={14} /> Retry
+        </button>
+      </div>
+    );
+  }
 
-  const ringTotal = summary.completedInRange + summary.inProgressNow + summary.pendingNow;
-  const pct = (n) => ringTotal > 0 ? Math.round((n / ringTotal) * 1000) / 10 : 0;
+  if (loading && !data) {
+    return (
+      <div className="hka-spinner-wrap">
+        <div className="hka-spinner" />
+      </div>
+    );
+  }
+
+  const { summary, staff = [], wards = [] } = data || {
+    summary: { pendingNow: 0, inProgressNow: 0, overdueNow: 0, completedInRange: 0 },
+    staff: [],
+    wards: [],
+  };
+
+  const totalWorkload = summary.completedInRange + summary.inProgressNow + summary.pendingNow;
+  const completionPct = totalWorkload > 0 ? Math.round((summary.completedInRange / totalWorkload) * 1000) / 10 : 0;
+  const inProgressPct = totalWorkload > 0 ? Math.round((summary.inProgressNow / totalWorkload) * 1000) / 10 : 0;
+  const pendingPct    = totalWorkload > 0 ? Math.round((summary.pendingNow / totalWorkload) * 1000) / 10 : 0;
+
   const ringLegend = [
-    { key: "done",    label: "Completed",   value: summary.completedInRange, pct: pct(summary.completedInRange), color: "var(--st-v)" },
-    { key: "doing",   label: "In Progress", value: summary.inProgressNow,    pct: pct(summary.inProgressNow),    color: "var(--st-clean)" },
-    { key: "pending", label: "Pending",     value: summary.pendingNow,       pct: pct(summary.pendingNow),       color: "var(--st-o)" },
+    { key: "done",    label: "Completed",   value: summary.completedInRange, pct: completionPct, color: "var(--st-v)" },
+    { key: "doing",   label: "In Progress", value: summary.inProgressNow,    pct: inProgressPct,  color: "var(--st-clean)" },
+    { key: "pending", label: "Pending",     value: summary.pendingNow,       pct: pendingPct,     color: "var(--st-o)" },
   ];
 
-  const working = staff.filter((s) => s.activeNow > 0);
-  const idle = staff.filter((s) => s.activeNow === 0 && s.completedInRange === 0);
-  const maxCompleted = Math.max(1, ...staff.map((s) => s.completedInRange));
+  const workingStaff = staff.filter((s) => s.activeNow > 0);
+  const completedStaff = staff.filter((s) => s.activeNow === 0 && s.completedInRange > 0);
+  const idleStaff = staff.filter((s) => s.activeNow === 0 && s.completedInRange === 0);
+  const totalOpenNow = summary.pendingNow + summary.inProgressNow;
+  const completionState = summary.overdueNow > 0 ? "Needs attention" : totalOpenNow > 0 ? "In progress" : "All clear";
+  const statTiles = [
+    { key: "completed", label: "Completed", value: summary.completedInRange, note: rangeLabel, tone: "v" },
+    { key: "active", label: "In Progress", value: summary.inProgressNow, note: "Live work", tone: "clean" },
+    { key: "pending", label: "Pending", value: summary.pendingNow, note: "Awaiting start", tone: "o" },
+    { key: "overdue", label: "Overdue", value: summary.overdueNow, note: "Needs triage", tone: "red" },
+  ];
 
-  const q = search.trim().toLowerCase();
-  const visibleStaff = staff.filter((s) => !q
-    || s.name.toLowerCase().includes(q)
-    || s.wards.some((w) => w.toLowerCase().includes(q)));
+  // Filtered & Sorted Staff
+  const staffQuery = staffSearch.trim().toLowerCase();
+  const filteredStaff = staff.filter((s) => {
+    if (staffQuery) {
+      const nameHit = (s.name || "").toLowerCase().includes(staffQuery);
+      const wardHit = (s.wards || []).some((w) => w.toLowerCase().includes(staffQuery));
+      if (!nameHit && !wardHit) return false;
+    }
+    if (staffFilter === "working") return s.activeNow > 0;
+    if (staffFilter === "completed") return s.completedInRange > 0;
+    if (staffFilter === "idle") return s.activeNow === 0 && s.completedInRange === 0;
+    return true;
+  }).sort((a, b) => {
+    if (staffSort === "completed") return (b.completedInRange || 0) - (a.completedInRange || 0);
+    if (staffSort === "active") return (b.activeNow || 0) - (a.activeNow || 0);
+    if (staffSort === "name") return (a.name || "").localeCompare(b.name || "");
+    return 0;
+  });
 
-  const urgentWards = wards.filter((w) => w.overdue > 0).length;
-
+  // Filtered & Sorted Wards
+  const urgentWardsCount = wards.filter((w) => w.overdue > 0).length;
+  const wardQuery = wardSearch.trim().toLowerCase();
+  const filteredWards = wards.filter((w) => {
+    if (wardQuery && !(w.name || "").toLowerCase().includes(wardQuery)) return false;
+    if (wardFilter === "overdue") return w.overdue > 0;
+    if (wardFilter === "active") return (w.pending > 0 || w.inProgress > 0);
+    if (wardFilter === "clear") return (w.pending === 0 && w.inProgress === 0 && w.overdue === 0);
+    return true;
+  }).sort((a, b) => {
+    if (wardSort === "overdue") return (b.overdue || 0) - (a.overdue || 0) || (b.pending || 0) - (a.pending || 0);
+    if (wardSort === "pending") return (b.pending || 0) - (a.pending || 0);
+    if (wardSort === "completed") return (b.completedInRange || 0) - (a.completedInRange || 0);
+    if (wardSort === "name") return (a.name || "").localeCompare(b.name || "");
+    return 0;
+  });
   return (
-    <div className="hka">
-      <div className="hka-toolbar">
-        <div className="hka-rangewrap">
-          <Ic d={icons.clock} s={14} />
-          <select value={range} onChange={(e) => setRange(Number(e.target.value))} aria-label="Time range">
-            {RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
-          </select>
-        </div>
-        <div className="pill-search hka-search-wrap">
-          <div className="field-search hka-search">
-            <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex" }}>
-              <Ic d={icons.search} s={14} />
-            </span>
-            <input className="field" value={search} placeholder="Search staff or ward…"
-              style={{ paddingLeft: 36, paddingRight: search ? 34 : 14 }}
-              onChange={(e) => setSearch(e.target.value)} />
-            {search && (
-              <button onClick={() => setSearch("")} aria-label="Clear search"
-                style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", color: "var(--ink-3)", display: "flex", padding: 4, background: "none", border: "none", cursor: "pointer" }}>
-                <Ic d={icons.x} s={13} />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="hka-kpis">
-        {kpis.map((k) => (
-          <div className={"hka-kpi tone-" + k.tone} key={k.key}>
-            <span className="hka-kpi-ico"><Ic d={k.icon} s={16} /></span>
-            <div className="hka-kpi-label">{k.label}{k.tag && <span className="hka-kpi-tag">{k.tag}</span>}</div>
-            <div className="hka-kpi-val">{k.value}</div>
-            <div className="hka-kpi-sub">Tasks</div>
-            <div className="hka-kpi-bar" />
-          </div>
-        ))}
-      </div>
-
-      <div className="hka-row2">
-        <div className="hka-card">
-          <h3>Task completion overview</h3>
-          <div className="hka-ring-wrap">
-            <div className="hka-ring">
-              <Donut size={150} thickness={16} segments={ringLegend.map((s) => ({ key: s.key, value: s.value, color: s.color }))} />
-              <div className="hka-ring-center">
-                <div className="hka-ring-val">{ringTotal}</div>
-                <div className="hka-ring-label">Total tasks</div>
-              </div>
+    <div className="hka slide-up">
+      <div className={"hka-shell" + (refreshing ? " is-refreshing" : "")}>
+        <div className="hka-toolbar">
+          <div className="hka-title-wrap">
+            <div className="hka-title-row">
+              <span className="hka-title">Housekeeping Analytics</span>
             </div>
-            <div className="hka-ring-legend">
-              {ringLegend.map((s) => (
-                <div className="hka-ring-row" key={s.key}>
-                  <i style={{ background: s.color }} />
-                  <span className="hka-ring-name">{s.label}</span>
-                  <span className="hka-ring-num">{s.value} <em>({s.pct}%)</em></span>
-                </div>
+          </div>
+
+          <div className="hka-controls">
+            <div className="hka-range-pills" role="tablist" aria-label="Time range">
+              {RANGES.map((r) => (
+                <button
+                  key={r.key}
+                  type="button"
+                  className={"hka-range-btn" + (range === r.key ? " active" : "")}
+                  onClick={() => setRange(r.key)}
+                >
+                  {r.label}
+                </button>
               ))}
-              <div className="hka-ring-row muted">
-                <i style={{ background: "var(--red)" }} />
-                <span className="hka-ring-name">Overdue</span>
-                <span className="hka-ring-num">{summary.overdueNow} <em>of the above</em></span>
-              </div>
             </div>
+
+            <button
+              type="button"
+              className="hka-refresh-btn"
+              onClick={() => loadData(true)}
+              disabled={refreshing}
+              title={`Last updated at ${fmtTime(lastUpdated)}`}
+            >
+              <span className={refreshing ? "spin" : ""}>
+                <Ic d={icons.refresh} s={13} />
+              </span>
+              <span>{refreshing ? "Syncing…" : "Refresh"}</span>
+            </button>
           </div>
         </div>
 
-        <div className="hka-card">
-          <h3>Team status</h3>
-          <div className="hka-teamrow">
-            <span className="hka-team-ico tone-clean"><Ic d={icons.users} s={16} /></span>
-            <div>
-              <div className="hka-team-val">{working.length}</div>
-              <div className="hka-team-label">Active staff · working now</div>
-            </div>
-          </div>
-          <div className="hka-teamrow">
-            <span className="hka-team-ico tone-v"><Ic d={icons.check} s={16} /></span>
-            <div>
-              <div className="hka-team-val">{summary.completedInRange}</div>
-              <div className="hka-team-label">Completed · {rangeLabel.toLowerCase()}</div>
-            </div>
-          </div>
-          <div className="hka-teamrow">
-            <span className="hka-team-ico tone-red"><Ic d={icons.alert} s={16} /></span>
-            <div>
-              <div className="hka-team-val">{summary.overdueNow}</div>
-              <div className="hka-team-label">Overdue — need attention</div>
-            </div>
-          </div>
-          {idle.length > 0 && (
-            <div className="hka-teamrow">
-              <span className="hka-team-ico tone-o"><Ic d={icons.clock} s={16} /></span>
-              <div>
-                <div className="hka-team-val">{idle.length}</div>
-                <div className="hka-team-label">No activity yet this range</div>
+        <div className={"hka-top-split" + (isManager ? "" : " hka-top-split-solo")}>
+        <div className="hka-command" ref={setCommandEl}>
+          <div className="hka-stats-strip" onWheel={scrollHorizontally}>
+            {statTiles.map((tile) => (
+              <div key={tile.key} className={"hka-stat-tile tone-" + tile.tone}>
+                <div className="hka-stat-tile-label">{tile.label}</div>
+                <div className="hka-stat-tile-value mono">{tile.value}</div>
+                <div className="hka-stat-tile-note">{tile.note}</div>
               </div>
-            </div>
-          )}
-        </div>
-      </div>
+            ))}
+          </div>
 
-      <div className="hka-row2">
-        <div className="hka-card">
-          <h3>Staff performance</h3>
-          <div className="hka-cardsub">Performance of housekeeping staff</div>
+          <div className={"hka-attention-chip" + (urgentWardsCount > 0 ? " urgent" : "")}>
+            <Ic d={icons.alert} s={13} />
+            <span className="hka-attention-label">Wards needing attention</span>
+            <span className="hka-attention-value mono">{urgentWardsCount}</span>
+          </div>
 
-          {visibleStaff.length === 0 ? (
-            <div className="hka-empty">{staff.length === 0 ? "No active housekeeping accounts." : "No staff match your search."}</div>
-          ) : (
-            <div className="hka-stafflist">
-              {visibleStaff.map((s) => {
-                const st = staffStatus(s);
-                return (
-                  <div className="hka-scard" key={s.id}>
-                    <span className="hka-avatar" style={{ background: hkaAvatarColor(s.id) }}>{hkaInitials(s.name)}</span>
-                    <div className="hka-scard-body">
-                      <div className="hka-scard-head">
-                        <span className="hka-scard-name">{s.name}</span>
-                        {s.role === "HOUSEKEEPING_MANAGER"
-                          ? <span className="hka-pill tone-clean">Manager</span>
-                          : <span className={"hka-pill tone-" + st.tone}>{st.label}</span>}
-                      </div>
-                      <div className="hka-scard-wards" title={s.wards.join(", ")}>{s.wards.length ? s.wards.join(", ") : "No wards assigned"}</div>
-                      <div className="hka-scard-stats">
-                        <div className="hka-scard-stat">
-                          <div className="hka-scard-num">{s.activeNow || 0}</div>
-                          <div className="hka-scard-statlabel">In progress</div>
-                        </div>
-                        <div className="hka-scard-progress">
-                          <div className="hka-scard-progresstop">
-                            <span className="hka-scard-num">{s.completedInRange}</span>
-                            <span className="hka-scard-statlabel">Completed</span>
-                            <span className="hka-scard-pct">{Math.round((s.completedInRange / maxCompleted) * 100)}%</span>
-                          </div>
-                          <div className="hka-bar-track"><div className="hka-bar-fill" style={{ width: `${(s.completedInRange / maxCompleted) * 100}%` }} /></div>
-                        </div>
-                      </div>
+          <div className="hka-command-grid">
+            <section className="hka-command-main">
+              <div className="hka-command-heading">
+                <div>
+                  <div className="hka-eyebrow">Team status</div>
+                  <div className="hka-command-title">{completionState}</div>
+                </div>
+                <div className="hka-updated">Updated {fmtTime(lastUpdated)}</div>
+              </div>
+
+              <div className="hka-command-body">
+                <div className="hka-completion-hero">
+                  <EnhancedDonut
+                    size={176}
+                    thickness={18}
+                    segments={ringLegend}
+                    hoveredKey={hoveredSeg}
+                    onHover={setHoveredSeg}
+                    centerTotal={totalWorkload}
+                    completionPct={completionPct}
+                  />
+                  <div className="hka-completion-copy">
+                    <div className="hka-hero-metric">
+                      <span className="hka-hero-value">{summary.completedInRange}</span>
+                      <span className="hka-hero-unit">completed</span>
+                    </div>
+                    <div className="hka-hero-context">
+                      out of <span className="mono">{totalWorkload}</span> total requests in the selected window
+                    </div>
+                    <div className="hka-hero-ledger" onWheel={scrollHorizontally}>
+                      {ringLegend.map((s) => (
+                        <button
+                          key={s.key}
+                          type="button"
+                          className={"hka-hero-ledger-row" + (hoveredSeg === s.key ? " active" : "")}
+                          onMouseEnter={() => setHoveredSeg(s.key)}
+                          onMouseLeave={() => setHoveredSeg(null)}
+                        >
+                          <span className="hka-hero-ledger-label">
+                            <span className="hka-ring-dot" style={{ background: s.color }} />
+                            {s.label}
+                          </span>
+                          <span className="hka-hero-ledger-values">
+                            <span className="mono">{s.value}</span>
+                            <span>{s.pct}%</span>
+                          </span>
+                        </button>
+                      ))}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div className="hka-card">
-          <div className="hka-cardhead">
-            <h3>Ward backlog</h3>
-            {urgentWards > 0 && <span className="hka-cardnote urgent">{urgentWards} ward{urgentWards !== 1 ? "s" : ""} overdue</span>}
-          </div>
-
-          {wards.length === 0 ? (
-            <div className="hka-empty">No wards with active or recent housekeeping work.</div>
-          ) : (
-            <div className="hka-wtbl-wrap">
-              <div className="hka-wtbl-head">
-                <span>Ward</span><span>Pending</span><span>In progress</span><span>Overdue</span><span>Completed</span>
-              </div>
-              {wards.map((w) => (
-                <div className={"hka-wtbl-row" + (w.overdue > 0 ? " urgent" : "")} key={w.id}>
-                  <span className="hka-wtbl-name">{w.name}</span>
-                  <span className="hka-cell-num">{w.pending}</span>
-                  <span className="hka-cell-num">{w.inProgress}</span>
-                  <span className={"hka-cell-num" + (w.overdue > 0 ? " urgent" : "")}>{w.overdue}</span>
-                  <span className="hka-cell-num">{w.completedInRange}</span>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+
+              {summary.overdueNow > 0 && (
+                <div className="hka-alertline">
+                  <span className="hka-alertline-label">Attention</span>
+                  <span>{summary.overdueNow} task{summary.overdueNow !== 1 ? "s are" : " is"} past turnaround target and {urgentWardsCount} ward{urgentWardsCount !== 1 ? "s need" : " needs"} supervisor follow-up.</span>
+                </div>
+              )}
+            </section>
+          </div>
         </div>
+
+        {isManager && (
+        <section className="hka-panel" style={matchedHeight ? { height: matchedHeight, maxHeight: matchedHeight } : undefined}>
+            <div className="hka-panel-head">
+              <div className="hka-panel-head-title">
+                <h3 className="hka-panel-title">Live status and completion, per staff member</h3>
+              </div>
+              <div className="hka-panel-meta">{filteredStaff.length} shown</div>
+            </div>
+
+            <div className="hka-search-sort-row">
+              <div className="hka-panel-search-wrap">
+                <span className="hka-panel-search-ico"><Ic d={icons.search} s={14} /></span>
+                <input
+                  className="hka-panel-search-input"
+                  value={staffSearch}
+                  placeholder="Search by name or ward…"
+                  onChange={(e) => setStaffSearch(e.target.value)}
+                />
+                {staffSearch && (
+                  <button className="hka-panel-search-clear" onClick={() => setStaffSearch("")} aria-label="Clear search">
+                    <Ic d={icons.x} s={13} />
+                  </button>
+                )}
+              </div>
+
+              <select
+                className="hka-sort-select"
+                value={staffSort}
+                onChange={(e) => setStaffSort(e.target.value)}
+                aria-label="Sort staff"
+              >
+                <option value="completed">Sort: Most completed</option>
+                <option value="active">Sort: Active now</option>
+                <option value="name">Sort: Name (A-Z)</option>
+              </select>
+            </div>
+
+            <div className="hka-section-bar">
+              <div className="hka-filter-chips" onWheel={scrollHorizontally}>
+                {[
+                  { key: "all", label: "All staff", count: staff.length },
+                  { key: "working", label: "Working now", count: workingStaff.length },
+                  { key: "completed", label: "Completed", count: completedStaff.length + workingStaff.filter((s) => s.completedInRange > 0).length },
+                  { key: "idle", label: "No activity", count: idleStaff.length },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    className={"hka-chip-btn" + (staffFilter === f.key ? " active" : "")}
+                    onClick={() => setStaffFilter(f.key)}
+                  >
+                    <span>{f.label}</span>
+                    <span className="hka-chip-count">{f.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filteredStaff.length === 0 ? (
+              <div className="hka-empty-state hka-empty-state-fixed">
+                <div className="hka-empty-ico"><Ic d={icons.users} s={22} /></div>
+                <div className="hka-empty-title">No staff found</div>
+                <div className="hka-empty-desc">
+                  {staffQuery ? `No staff or wards match "${staffSearch.trim()}".` : "No staff match the selected filter."}
+                </div>
+              </div>
+            ) : (
+              <div className="hka-staffledger">
+                <div className="hka-ledger-head">
+                  <span>Staff member</span>
+                  <span>Status</span>
+                  <span className="ta-c">Completed</span>
+                </div>
+
+                {filteredStaff.map((s) => {
+                  const st = staffStatus(s);
+                  const isWorking = s.activeNow > 0;
+                  return (
+                    <div className={"hka-ledger-row" + (isWorking ? " is-working" : "")} key={s.id}>
+                      <div className="hka-ledger-person">
+                        <span className="hka-avatar" style={{ background: hkaAvatarColor(s.id) }}>
+                          {hkaInitials(s.name)}
+                        </span>
+                        <div className="hka-ledger-person-copy">
+                          <span className="hka-ledger-name" title={s.name}>{s.name}</span>
+                          <span className="hka-ledger-sub">
+                            {s.role === "HOUSEKEEPING_MANAGER" ? "Housekeeping manager" : "Housekeeping staff"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="hka-ledger-status">
+                        {s.role === "HOUSEKEEPING_MANAGER" ? (
+                          <span className="hka-pill tone-clean">Manager</span>
+                        ) : (
+                          <span className={"hka-pill tone-" + st.tone}>{st.label}</span>
+                        )}
+                      </div>
+
+                      <div className="hka-ledger-num ta-c mono">{s.completedInRange || 0}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+        </div>
+
+        <section className="hka-panel">
+            <div className="hka-panel-head">
+              <div className="hka-panel-head-title">
+                <div className="hka-eyebrow">Ward backlog</div>
+                <h3 className="hka-panel-title">Backlog by ward and operational state</h3>
+              </div>
+              <div className={"hka-panel-meta" + (urgentWardsCount > 0 ? " urgent" : "")}>
+                {urgentWardsCount > 0
+                  ? `${urgentWardsCount} ward${urgentWardsCount !== 1 ? "s" : ""} overdue`
+                  : "All wards within target"}
+              </div>
+            </div>
+            <div className="hka-search-sort-row">
+              <div className="hka-panel-search-wrap">
+                <span className="hka-panel-search-ico"><Ic d={icons.search} s={14} /></span>
+                <input
+                  className="hka-panel-search-input"
+                  value={wardSearch}
+                  placeholder="Search by ward name…"
+                  onChange={(e) => setWardSearch(e.target.value)}
+                />
+                {wardSearch && (
+                  <button className="hka-panel-search-clear" onClick={() => setWardSearch("")} aria-label="Clear search">
+                    <Ic d={icons.x} s={13} />
+                  </button>
+                )}
+              </div>
+
+              <select
+                className="hka-sort-select"
+                value={wardSort}
+                onChange={(e) => setWardSort(e.target.value)}
+                aria-label="Sort wards"
+              >
+                <option value="overdue">Sort: Most overdue</option>
+                <option value="pending">Sort: Most pending</option>
+                <option value="completed">Sort: Most completed</option>
+                <option value="name">Sort: Ward name (A-Z)</option>
+              </select>
+            </div>
+
+            <div className="hka-section-bar">
+              <div className="hka-filter-chips" onWheel={scrollHorizontally}>
+                {[
+                  { key: "all", label: "All wards", count: wards.length },
+                  { key: "overdue", label: "Overdue", count: urgentWardsCount },
+                  { key: "active", label: "Active queue", count: wards.filter((w) => w.pending > 0 || w.inProgress > 0).length },
+                  { key: "clear", label: "All clear", count: wards.filter((w) => w.pending === 0 && w.inProgress === 0 && w.overdue === 0).length },
+                ].map((f) => (
+                  <button
+                    key={f.key}
+                    type="button"
+                    className={"hka-chip-btn" + (wardFilter === f.key ? " active" : "")}
+                    onClick={() => setWardFilter(f.key)}
+                  >
+                    <span>{f.label}</span>
+                    <span className="hka-chip-count">{f.count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filteredWards.length === 0 ? (
+              <div className="hka-empty-state">
+                <div className="hka-empty-ico"><Ic d={icons.bed} s={22} /></div>
+                <div className="hka-empty-title">No wards found</div>
+                <div className="hka-empty-desc">
+                  {wardQuery ? `No wards match "${wardSearch.trim()}".` : "No wards found for the selected filter."}
+                </div>
+              </div>
+            ) : (
+              <div className="hka-wtbl-wrap">
+                <div className="hka-wtbl-head">
+                  <span>Ward</span>
+                  <span>Status</span>
+                  <span className="ta-c">Pending</span>
+                  <span className="ta-c">In progress</span>
+                  <span className="ta-c">Overdue</span>
+                  <span className="ta-c">Completed</span>
+                </div>
+
+                {filteredWards.map((w) => {
+                  const isOverdue = (w.overdue || 0) > 0;
+
+                  return (
+                    <div
+                      className={"hka-wtbl-row" + (isOverdue ? " urgent" : "")}
+                      key={w.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onOpenWard?.(w.id)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenWard?.(w.id); } }}
+                      title={`Open ${w.name}`}
+                    >
+                      <div className="hka-wtbl-name-col">
+                        <span className="hka-wtbl-name">{w.name}</span>
+                      </div>
+
+                      <div className="hka-wtbl-state-col">
+                        <span className={`hka-wtbl-status-tag ${isOverdue ? "urgent" : (w.inProgress > 0 || w.pending > 0) ? "active" : "clear"}`}>
+                          {isOverdue ? "Overdue" : (w.inProgress > 0 || w.pending > 0) ? "Active" : "Clear"}
+                        </span>
+                      </div>
+
+                      <div className="hka-cell-num ta-c">
+                        <span className="hka-cell-mlabel">Pending</span>
+                        <span className={"hka-cell-badge " + (w.pending > 0 ? "pending" : "zero")}>{w.pending || 0}</span>
+                      </div>
+                      <div className="hka-cell-num ta-c">
+                        <span className="hka-cell-mlabel">In Progress</span>
+                        <span className={"hka-cell-badge " + (w.inProgress > 0 ? "clean" : "zero")}>{w.inProgress || 0}</span>
+                      </div>
+                      <div className="hka-cell-num ta-c">
+                        <span className="hka-cell-mlabel">Overdue</span>
+                        <span className={"hka-cell-badge " + (isOverdue ? "urgent" : "zero")}>{w.overdue || 0}</span>
+                      </div>
+                      <div className="hka-cell-num ta-c">
+                        <span className="hka-cell-mlabel">Completed</span>
+                        <span className={"hka-cell-badge " + (w.completedInRange > 0 ? "done" : "zero")}>{w.completedInRange || 0}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
       </div>
     </div>
   );
@@ -699,30 +1081,48 @@ function ManagerAnalytics() {
 
 export default function HousekeepingApp({ user, onLogout }) {
   const isManager = user.role === "HOUSEKEEPING_MANAGER";
-  const [navTab, setNavTab] = useState("board");
+  // Managers land on the Dashboard first — it's the oversight view and the
+  // first item in their nav. Staff still land on Board, their working view,
+  // but now also get a Dashboard tab scoped to just their own wards (see
+  // ManagerAnalytics's isManager prop — it drops the staff ledger and the
+  // backend itself scopes the data, this isn't just a hidden UI panel).
+  const [navTab, setNavTab] = useState(isManager ? "analytics" : "board");
   const [drilled, setDrilled] = useState(false);
+  const [pendingWard, setPendingWard] = useState(null);
+
+  const openWardFromDashboard = (wardId) => {
+    setPendingWard({ id: wardId, seq: Date.now() });
+    setNavTab("board");
+  };
+  // One-shot: HousekeepingBoard calls this the moment it consumes
+  // pendingWard, so a later plain visit to the tab (no ward click involved)
+  // doesn't replay it — see the comment on that effect.
+  const clearPendingWard = useCallback(() => setPendingWard(null), []);
 
   const menu = isManager
     ? [
+        { key: "analytics", icon: icons.chart, label: "Dashboard" },
         { key: "board", icon: icons.bed, label: "Housekeeping" },
-        { key: "analytics", icon: icons.chart, label: "Analytics" },
       ]
-    : [{ key: "board", icon: icons.bed, label: "Housekeeping" }];
+    : [
+        { key: "analytics", icon: icons.chart, label: "Dashboard" },
+        { key: "board", icon: icons.bed, label: "Housekeeping" },
+      ];
 
   return (
     <AppShell
       menu={menu}
       active={navTab}
       onSelect={setNavTab}
-      title={navTab === "analytics" ? "Analytics" : "Housekeeping"}
+      title={navTab === "analytics" ? "Dashboard" : "Housekeeping"}
       user={{ name: user.name || user.username || "Housekeeping",
               role: isManager ? "HK MANAGER" : "HOUSEKEEPING" }}
       onLogout={onLogout}
       hideAppbar={navTab === "board" && drilled}
     >
       {navTab === "analytics"
-        ? <ManagerAnalytics />
-        : <HousekeepingBoard isManager={isManager} onDrillChange={setDrilled} />}
+        ? <ManagerAnalytics isManager={isManager} onOpenWard={openWardFromDashboard} />
+        : <HousekeepingBoard isManager={isManager} onDrillChange={setDrilled} pendingWard={pendingWard} onWardOpened={clearPendingWard} />}
     </AppShell>
   );
 }

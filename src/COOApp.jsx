@@ -13,7 +13,7 @@ import {
   StationManager, NurseManager, PayerTypeManager, DestinationManager,
   DoctorBlockManager, DoctorManager, ConsultantManager,
   DepartmentDoctorManager, DischargeLoungeManager, DischargePhaseManager, PayerTATManager,
-  SimpleLoginManager, PWO_LOGIN_TABS, HOUSEKEEPING_LOGIN_TABS, HousekeepingZoneManager,
+  SimpleLoginManager, PWO_LOGIN_TABS, HOUSEKEEPING_LOGIN_TABS, HousekeepingWardManager,
 } from "./ManagerApp.jsx";
 import {
   snapshotDownload, snapshotCopy, snapshotShare, snapshotCanShare,
@@ -279,7 +279,7 @@ export default function COOApp({ user, meta, onLogout }) {
         { key: "preblocks", icon: icons.grid, label: "PRE Blocks" },
         { key: "doctorblocks", icon: icons.stethoscope, label: "DMO Blocks" },
         { key: "stations", icon: icons.bed, label: "Stations" },
-        { key: "hkzones", icon: icons.grid, label: "Housekeeping Zones" },
+        { key: "hkwards", icon: icons.grid, label: "Housekeeping Wards" },
         { key: "payers", icon: icons.list, label: "Payer Types" },
         { key: "destinations", icon: icons.list, label: "Destinations" },
         { key: "deptdoctors", icon: icons.layers, label: "Departments & Groups" },
@@ -376,13 +376,13 @@ export default function COOApp({ user, meta, onLogout }) {
       {tab === "doctors" && <DoctorManager showToast={showToast} />}
       {tab === "consultants" && <ConsultantManager showToast={showToast} />}
       {tab === "fcpharmacy" && <SimpleLoginManager showToast={showToast} />}
-      {tab === "hkzones" && <HousekeepingZoneManager showToast={showToast} />}
+      {tab === "hkwards" && <HousekeepingWardManager showToast={showToast} />}
       {tab === "hkusers" && (
         <SimpleLoginManager
           showToast={showToast}
           tabs={HOUSEKEEPING_LOGIN_TABS}
           title="Housekeeping Users"
-          blurb="Manage housekeeping staff and manager logins. Give them wards on the Housekeeping Zones screen under Setup."
+          blurb="Manage housekeeping staff and manager logins. Give them wards on the Housekeeping Wards screen under Setup."
         />
       )}
       {tab === "welfare" && (

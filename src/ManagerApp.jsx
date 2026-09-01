@@ -7322,6 +7322,12 @@ function SimpleLoginEditor({ user, roleLabel, onClose, onSaved, showToast, activ
   );
 }
 
+function simpleLoginScrollChips(e) {
+  if (e.deltaY === 0) return;
+  e.currentTarget.scrollLeft += e.deltaY;
+  e.preventDefault();
+}
+
 export function SimpleLoginManager({
   showToast,
   tabs = SIMPLE_LOGIN_TABS,
@@ -7335,6 +7341,8 @@ export function SimpleLoginManager({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [confirm, confirmDialog] = useConfirm();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // "all" | "active" | "inactive"
 
   const load = async (role) => {
     try {
@@ -7393,6 +7401,19 @@ export function SimpleLoginManager({
 
   const tabLabel = tabs.find(t => t.role === activeRole)?.label || activeRole;
 
+  const statusCounts = {
+    all: logins.length,
+    active: logins.filter((u) => u.status !== "inactive").length,
+    inactive: logins.filter((u) => u.status === "inactive").length,
+  };
+  const query = search.trim().toLowerCase();
+  const filteredLogins = logins.filter((u) => {
+    if (statusFilter === "active" && u.status === "inactive") return false;
+    if (statusFilter === "inactive" && u.status !== "inactive") return false;
+    if (!query) return true;
+    return (u.name || "").toLowerCase().includes(query) || (u.username || "").toLowerCase().includes(query);
+  });
+
   // Enable/Disable — the backend has always supported it (PUT with {status}),
   // but the UI only ever *displayed* "· inactive" with no way to set it.
   const toggleStatus = async (u) => {
@@ -7434,7 +7455,42 @@ export function SimpleLoginManager({
         </div>
       )}
 
-      {logins.map((u) => (
+      <div className="hka-search-sort-row">
+        <div className="hka-panel-search-wrap">
+          <span className="hka-panel-search-ico"><Ic d={icons.search} s={14} /></span>
+          <input
+            className="hka-panel-search-input"
+            value={search}
+            placeholder="Search by name or username…"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          {search && (
+            <button className="hka-panel-search-clear" onClick={() => setSearch("")} aria-label="Clear search">
+              <Ic d={icons.x} s={13} />
+            </button>
+          )}
+        </div>
+
+        <div className="hka-filter-chips" onWheel={simpleLoginScrollChips}>
+          {[
+            { key: "all", label: "All", count: statusCounts.all },
+            { key: "active", label: "Active", count: statusCounts.active },
+            { key: "inactive", label: "Disabled", count: statusCounts.inactive },
+          ].map((f) => (
+            <button
+              key={f.key}
+              type="button"
+              className={"hka-chip-btn" + (statusFilter === f.key ? " active" : "")}
+              onClick={() => setStatusFilter(f.key)}
+            >
+              <span>{f.label}</span>
+              <span className="hka-chip-count">{f.count}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filteredLogins.map((u) => (
         <div className="card" key={u.id} style={{ padding: 14, marginBottom: 10 }}>
           <div className="row between">
             <div className="row" style={{ gap: 10 }}>
@@ -7460,10 +7516,14 @@ export function SimpleLoginManager({
         </div>
       ))}
 
-      {logins.length === 0 && (
+      {filteredLogins.length === 0 && (
         <div className="card empty" style={{ marginTop: 8 }}>
           <Ic d={icons.user} s={28} />
-          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">No {tabLabel} users yet.</div>
+          <div style={{ marginTop: 8, fontSize: 13 }} className="dim">
+            {logins.length === 0
+              ? `No ${tabLabel} users yet.`
+              : query ? `No user matches "${search.trim()}".` : "No user matches the selected filter."}
+          </div>
         </div>
       )}
 
@@ -7491,183 +7551,289 @@ export function SimpleLoginManager({
  *  staff share one roster — the role beside each name says which they are —
  *  because both act on the same beds; a manager simply tends to cover more
  *  zones and marks beds done on behalf of contracted staff who never sign in.
- *  The Discharge Lounge is not offered: its beds are virtual. */
-export function HousekeepingZoneManager({ showToast }) {
+ *  The Discharge Lounge is not offered: its beds are virtual.
+ *
+ *  Framed as a coverage board, not a user list: the operational unit here is
+ *  the WARD (does someone own it?), not the person, so wards are counted and
+ *  color-coded up top before any name appears. The tone language — amber for
+ *  a gap, red for an at-risk bed, green for covered — is the same one the
+ *  live housekeeping dashboard uses (.hka-pill / .hka-stat-tile), so this
+ *  admin screen reads as the setup side of the same board a manager watches
+ *  operationally, not an unrelated CRUD page. */
+const HKW_AVATAR_COLORS = ["#0d9488", "#2563eb", "#7c3aed", "#d97706", "#dc2626", "#0891b2"];
+function hkwAvatarColor(id) {
+  const s = String(id);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return HKW_AVATAR_COLORS[h % HKW_AVATAR_COLORS.length];
+}
+function hkwInitials(name) {
+  const words = (name || "?").trim().split(/\s+/);
+  return words.length > 1 ? (words[0][0] + words[1][0]).toUpperCase() : (name || "?").slice(0, 2).toUpperCase();
+}
+function hkwScrollHorizontally(e) {
+  if (e.deltaY === 0) return;
+  e.currentTarget.scrollLeft += e.deltaY;
+  e.preventDefault();
+}
+
+export function HousekeepingWardManager({ showToast }) {
   const [data, setData] = React.useState(null);
-  const [editing, setEditing] = React.useState(null); // zone | {} for new | null
+  const [editing, setEditing] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [roleFilter, setRoleFilter] = React.useState("all"); // "all" | "manager" | "staff" | "unassigned"
 
   const load = React.useCallback(() => {
-    api.hkAdminZones().then(setData).catch((e) => showToast(toastErr(e)));
+    api.hkAdminAssignments().then(setData).catch((e) => showToast(toastErr(e)));
   }, [showToast]);
   React.useEffect(() => { load(); }, [load]);
 
-  const save = async (draft) => {
-    if (!draft.name.trim()) { showToast("Zone name is required"); return; }
+  const save = async (userId, wardIds) => {
     setBusy(true);
     try {
-      await api.hkSaveZone(draft.id || null, {
-        name: draft.name.trim(),
-        wardIds: draft.wardIds,
-        userIds: draft.userIds,
-      });
-      showToast(draft.id ? "Zone updated" : "Zone created");
+      await api.hkSaveUserWards(userId, wardIds);
+      showToast("Wards updated");
       setEditing(null); load();
     } catch (e) { showToast(toastErr(e)); }
     finally { setBusy(false); }
   };
 
-  const remove = async (z) => {
-    setBusy(true);
-    try { await api.hkDeleteZone(z.id); showToast("Zone deleted"); load(); }
-    catch (e) { showToast(toastErr(e)); }
-    finally { setBusy(false); }
+  if (!data) return (
+    <div className="empty" style={{ paddingTop: 60 }}>
+      <span className="spin" style={{ display: "inline-block" }}><Ic d={icons.refresh} s={24} /></span>
+    </div>
+  );
+
+  const wards = data.wards || [];
+  const orphans = data.orphans || [];
+  const coveredWardIds = new Set(data.assignments.flatMap((u) => u.wards.map((w) => w.id)));
+  const coveredCount = wards.filter((w) => coveredWardIds.has(w.id)).length;
+  const uncoveredCount = wards.length - coveredCount;
+
+  const roleFilterCounts = {
+    all: data.assignments.length,
+    manager: data.assignments.filter((u) => u.role === "HOUSEKEEPING_MANAGER").length,
+    staff: data.assignments.filter((u) => u.role === "HOUSEKEEPING").length,
+    unassigned: data.assignments.filter((u) => u.wards.length === 0).length,
   };
 
-  if (!data) return <div className="dim" style={{ padding: 20 }}>Loading…</div>;
+  // Ward names aren't shown on the card anymore, but a ward is still how an
+  // admin often thinks to look someone up ("who covers ICU?") — search still
+  // matches against it even though it's not displayed.
+  const query = search.trim().toLowerCase();
+  const filteredAssignments = data.assignments.filter((u) => {
+    if (roleFilter === "manager" && u.role !== "HOUSEKEEPING_MANAGER") return false;
+    if (roleFilter === "staff" && u.role !== "HOUSEKEEPING") return false;
+    if (roleFilter === "unassigned" && u.wards.length > 0) return false;
+    if (!query) return true;
+    const nameHit = (u.name || "").toLowerCase().includes(query);
+    const usernameHit = (u.username || "").toLowerCase().includes(query);
+    const wardHit = u.wards.some((w) => w.name.toLowerCase().includes(query));
+    return nameHit || usernameHit || wardHit;
+  });
 
   return (
-    <div className="slide-up">
-      <div className="row between" style={{ marginBottom: 4, gap: 10, flexWrap: "wrap" }}>
-        <div>
-          <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Housekeeping Zones</div>
-          <div className="dim" style={{ fontSize: 13 }}>
-            Group wards into zones, then put housekeeping staff and managers in them.
-            The Discharge Lounge is excluded — its beds are virtual.
-          </div>
+    <div className="hkw">
+      <div className="hkw-head">
+        <div className="hkw-eyebrow">Housekeeping</div>
+        <div className="h1" style={{ fontSize: 18, marginBottom: 2 }}>Ward Coverage</div>
+        <div className="dim" style={{ fontSize: 13 }}>
+          Assign wards to housekeeping logins so every bed has someone responsible for it.
+          The Discharge Lounge is excluded — its beds are virtual.
         </div>
-        <button className="btn btn-primary" style={{ fontSize: 13 }}
-          onClick={() => setEditing({ name: "", wardIds: [], userIds: [] })}>
-          <Ic d={icons.plus} s={15} /> New Zone
-        </button>
       </div>
 
-      {/* A bed awaiting cleaning in a ward no zone covers cannot be seen or
-          cleared by anyone — it is simply unusable until someone spots it.
-          Surfaced here because the fix is to put its ward in a zone. */}
-      {(data.orphans || []).length > 0 && (
-        <div className="card" style={{ marginTop: 14, padding: 16, borderLeft: "4px solid var(--red)" }}>
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <Ic d={icons.alert} s={17} style={{ color: "var(--red)" }} />
-            <div style={{ fontWeight: 800, fontSize: 14 }}>
-              {data.orphans.length} bed{data.orphans.length === 1 ? "" : "s"} awaiting cleaning in no zone
+      <div className="hka-stats-strip">
+        <div className="hka-stat-tile">
+          <div className="hka-stat-tile-label">Wards</div>
+          <div className="hka-stat-tile-value mono">{wards.length}</div>
+          <div className="hka-stat-tile-note">Assignable</div>
+        </div>
+        <div className="hka-stat-tile tone-v">
+          <div className="hka-stat-tile-label">Covered</div>
+          <div className="hka-stat-tile-value mono">{coveredCount}</div>
+          <div className="hka-stat-tile-note">Have a caretaker</div>
+        </div>
+        <div className={"hka-stat-tile" + (uncoveredCount > 0 ? " tone-o" : "")}>
+          <div className="hka-stat-tile-label">Uncovered</div>
+          <div className="hka-stat-tile-value mono">{uncoveredCount}</div>
+          <div className="hka-stat-tile-note">Nobody assigned</div>
+        </div>
+        <div className={"hka-stat-tile" + (orphans.length > 0 ? " tone-red" : "")}>
+          <div className="hka-stat-tile-label">At risk</div>
+          <div className="hka-stat-tile-value mono">{orphans.length}</div>
+          <div className="hka-stat-tile-note">Dirty beds, uncovered</div>
+        </div>
+      </div>
+
+      {orphans.length > 0 && (
+        <div className="hkw-alert">
+          <span className="hka-alertline-label">Attention</span>
+          <div className="hkw-alert-body">
+            <div className="hkw-alert-title">
+              {orphans.length} bed{orphans.length === 1 ? "" : "s"} awaiting cleaning with no assigned user
             </div>
-          </div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-            No housekeeping user can see or clear {data.orphans.length === 1 ? "this bed" : "these beds"}, so
-            {data.orphans.length === 1 ? " it stays" : " they stay"} unusable. Add the ward to a zone below.
-          </div>
-          <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {data.orphans.map((o) => (
-              <span key={o.id} className="chip" style={{ borderColor: "var(--red)", color: "var(--red)" }}>
-                {o.bed_name} — {o.ward_name}
-              </span>
-            ))}
+            <div className="hkw-alert-desc">
+              No housekeeping login can see or clear {orphans.length === 1 ? "this bed" : "these beds"} — assign its ward to someone below.
+            </div>
+            <div className="hkw-alert-chips">
+              {orphans.map((o) => (
+                <span key={o.id} className="hka-pill tone-red">{o.bed_name} · {o.ward_name}</span>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {data.zones.length === 0 && (
+      {data.assignments.length === 0 ? (
         <div className="card empty" style={{ padding: 28, marginTop: 14 }}>
           <Ic d={icons.grid} s={26} />
-          <div style={{ marginTop: 8, fontWeight: 700 }}>No zones yet</div>
+          <div style={{ marginTop: 8, fontWeight: 700 }}>No housekeeping users</div>
           <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-            Housekeeping users see nothing until they are in a zone.
+            Create housekeeping logins under Users first.
           </div>
         </div>
+      ) : (
+        <>
+          <div className="hka-search-sort-row">
+            <div className="hka-panel-search-wrap">
+              <span className="hka-panel-search-ico"><Ic d={icons.search} s={14} /></span>
+              <input
+                className="hka-panel-search-input"
+                value={search}
+                placeholder="Search by name or ward…"
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button className="hka-panel-search-clear" onClick={() => setSearch("")} aria-label="Clear search">
+                  <Ic d={icons.x} s={13} />
+                </button>
+              )}
+            </div>
+
+            <div className="hka-filter-chips" onWheel={hkwScrollHorizontally}>
+              {[
+                { key: "all", label: "All users", count: roleFilterCounts.all },
+                { key: "manager", label: "Managers", count: roleFilterCounts.manager },
+                { key: "staff", label: "Staff", count: roleFilterCounts.staff },
+                { key: "unassigned", label: "Unassigned", count: roleFilterCounts.unassigned },
+              ].map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className={"hka-chip-btn" + (roleFilter === f.key ? " active" : "")}
+                  onClick={() => setRoleFilter(f.key)}
+                >
+                  <span>{f.label}</span>
+                  <span className="hka-chip-count">{f.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredAssignments.length === 0 ? (
+            <div className="card empty" style={{ padding: 28 }}>
+              <Ic d={icons.grid} s={26} />
+              <div style={{ marginTop: 8, fontWeight: 700 }}>No matches</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                {query ? `No user or ward matches "${search.trim()}".` : "No user matches the selected filter."}
+              </div>
+            </div>
+          ) : (
+            <div className="hkw-roster">
+              {filteredAssignments.map((u) => (
+                <div className="hkw-row" key={u.id}>
+                  <div className="hkw-row-top">
+                    <span className="hka-avatar" style={{ background: hkwAvatarColor(u.id) }}>
+                      {hkwInitials(u.name)}
+                    </span>
+                    <button className="btn btn-ghost hkw-edit-btn"
+                      onClick={() => setEditing({ userId: u.id, name: u.name, wardIds: u.wards.map((w) => w.id) })}>
+                      <Ic d={icons.pencil} s={13} /> Edit
+                    </button>
+                  </div>
+                  <div className="hkw-row-name" title={u.name}>{u.name}</div>
+                  <div className="hkw-row-meta">
+                    <span className={"hka-pill " + (u.role === "HOUSEKEEPING_MANAGER" ? "tone-clean" : "tone-o")}>
+                      {u.role === "HOUSEKEEPING_MANAGER" ? "Manager" : "Staff"}
+                    </span>
+                    <span className="hkw-row-username">@{u.username}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
-      <div className="card-grid" style={{ marginTop: 14 }}>
-        {data.zones.map((z) => (
-          <div key={z.id} className="card" style={{ padding: 16 }}>
-            <div className="row between" style={{ gap: 8 }}>
-              <div style={{ fontWeight: 800, fontSize: 15 }}>{z.name}</div>
-              <div className="row" style={{ gap: 6 }}>
-                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px" }}
-                  onClick={() => setEditing({ id: z.id, name: z.name,
-                    wardIds: z.wards.map((w) => w.id), userIds: z.users.map((u) => u.id) })}>Edit</button>
-                <button className="btn btn-ghost" style={{ fontSize: 12, padding: "6px 12px", color: "var(--red)" }}
-                  disabled={busy} onClick={() => remove(z)}>Delete</button>
-              </div>
-            </div>
-            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-              {z.wards.length} ward{z.wards.length === 1 ? "" : "s"}, {z.users.length} {z.users.length === 1 ? "person" : "people"}
-            </div>
-            {z.wards.length > 0 && (
-              <div style={{ fontSize: 12, marginTop: 8, color: "var(--ink-2)" }}>
-                {z.wards.map((w) => w.name).join(", ")}
-              </div>
-            )}
-            {z.users.length > 0 && (
-              <div style={{ fontSize: 12, marginTop: 8 }}>
-                {z.users.map((u) => (
-                  <span key={u.id} className="chip" style={{ marginRight: 6, marginBottom: 4 }}>
-                    {u.name}{u.role === "HOUSEKEEPING_MANAGER" ? " (Manager)" : ""}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
       {editing && (
-        <ZoneEditor draft={editing} wards={data.wards} users={data.users} busy={busy}
-          onChange={setEditing} onSave={save} onClose={() => setEditing(null)} />
+        <WardAssignEditor user={editing} wards={data.wards} busy={busy}
+          onSave={(wardIds) => save(editing.userId, wardIds)} onClose={() => setEditing(null)} />
       )}
     </div>
   );
 }
 
-function ZoneEditor({ draft, wards, users, busy, onChange, onSave, onClose }) {
+function WardAssignEditor({ user, wards, busy, onSave, onClose }) {
   useModal(onClose);
-  const toggle = (key, id) => onChange({
-    ...draft,
-    [key]: draft[key].includes(id) ? draft[key].filter((x) => x !== id) : [...draft[key], id],
-  });
+  const [selected, setSelected] = React.useState(user.wardIds);
+  const [q, setQ] = React.useState("");
+  const toggle = (id) => setSelected((s) => s.includes(id) ? s.filter((x) => x !== id) : [...s, id]);
+
+  const query = q.trim().toLowerCase();
+  const visible = query ? wards.filter((w) => w.name.toLowerCase().includes(query)) : wards;
+
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
-        <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 12 }}>
-          {draft.id ? "Edit Zone" : "New Zone"}
-        </div>
-        <label className="label">Zone name</label>
-        <input className="field" value={draft.name} maxLength={120} placeholder="e.g. Building A — Floors 1-3"
-          onChange={(e) => onChange({ ...draft, name: e.target.value })} style={{ marginBottom: 14 }} />
-
-        <label className="label">Wards ({draft.wardIds.length})</label>
-        <div className="hk-picker">
-          {wards.map((w) => (
-            <label key={w.id} className={"hk-pick" + (draft.wardIds.includes(w.id) ? " on" : "")}>
-              <input type="checkbox" checked={draft.wardIds.includes(w.id)}
-                onChange={() => toggle("wardIds", w.id)} />
-              <span>{w.name}</span>
-            </label>
-          ))}
-        </div>
-
-        <label className="label" style={{ marginTop: 14 }}>People ({draft.userIds.length})</label>
-        {users.length === 0 ? (
-          <div className="dim" style={{ fontSize: 12 }}>
-            No housekeeping logins yet — create them under Users first.
+      {/* overflowY:visible overrides .sheet's own scroll for this one modal —
+          the ward picker below already caps and scrolls itself internally
+          (max-height:304px, never more), so the sheet's total height is
+          always bounded regardless of how many wards exist. Leaving .sheet's
+          own overflow-y:auto on top of that gave two nested scrollbars the
+          moment total content landed within a few pixels of 86vh. */}
+      <div className="sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560, overflowY: "visible" }}>
+        <div className="pad">
+          <div style={{ fontWeight: 800, fontSize: 17, marginBottom: 2 }}>
+            Wards for {user.name}
           </div>
-        ) : (
-          <div className="hk-picker">
-            {users.map((u) => (
-              <label key={u.id} className={"hk-pick" + (draft.userIds.includes(u.id) ? " on" : "")}>
-                <input type="checkbox" checked={draft.userIds.includes(u.id)}
-                  onChange={() => toggle("userIds", u.id)} />
-                <span>{u.name} {u.role === "HOUSEKEEPING_MANAGER" && <b>(Manager)</b>}</span>
-              </label>
-            ))}
+          <div className="dim" style={{ fontSize: 12, marginBottom: 14 }}>
+            Every ward checked here is one this login can see and clear.
           </div>
-        )}
 
-        <div className="row" style={{ gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" disabled={busy} onClick={() => onSave(draft)}>
-            {busy ? "Saving…" : "Save Zone"}
-          </button>
+          <div className="hk-picker-meta">
+            <span>{selected.length} of {wards.length} wards covered</span>
+            {selected.length > 0 && (
+              <button type="button" className="hk-picker-clear" onClick={() => setSelected([])}>Clear all</button>
+            )}
+          </div>
+
+          <div className="hk-picker-search">
+            <Ic d={icons.search} s={13} style={{ color: "var(--ink-3)", flexShrink: 0 }} />
+            <input value={q} placeholder="Search wards…" onChange={(e) => setQ(e.target.value)} />
+          </div>
+
+          {visible.length === 0 ? (
+            <div className="hk-picker-empty">No wards match "{q.trim()}".</div>
+          ) : (
+            <div className="hk-picker">
+              {visible.map((w) => (
+                <label key={w.id} className={"hk-pick" + (selected.includes(w.id) ? " on" : "")} title={w.name}>
+                  <input type="checkbox" className="hk-pick-input" checked={selected.includes(w.id)}
+                    onChange={() => toggle(w.id)} />
+                  <span className="hk-pick-box"><Ic d={icons.check} s={11} /></span>
+                  <span className="hk-pick-label">{w.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div className="row" style={{ gap: 8, justifyContent: "flex-end", marginTop: 18 }}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn btn-primary" disabled={busy} onClick={() => onSave(selected)}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
